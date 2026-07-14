@@ -6,6 +6,8 @@
 /// `dryRun` to compute the plan without mutating.
 library;
 
+import 'dart:convert';
+
 import 'package:flutter_localisation_cli/src/management_client.dart';
 
 class OpResult {
@@ -63,6 +65,80 @@ class Operations {
         'key': key,
         'translated': r.successCount,
         'failed': r.failed.map((final ({String error, int id}) f) => <String, Object>{'id': f.id, 'error': f.error}).toList(),
+      },
+    );
+  }
+
+  /// Bulk-create keys by importing a whole ARB file in ONE request (instead of
+  /// N per-key adds). Resolves the flavor id + the language the file represents
+  /// (defaults to the base language). With [translate], batch-translates every
+  /// empty non-base locale afterwards. This is the right primitive for large
+  /// migrations — put all the strings in a file and import it once.
+  Future<OpResult> importArb(
+    final String arbContent, {
+    final String? languageCode,
+    final bool overwrite = false,
+    final bool translate = false,
+    final bool dryRun = false,
+  }) async {
+    int keyCount;
+    try {
+      final Object? parsed = jsonDecode(arbContent);
+      if (parsed is! Map<String, dynamic>) {
+        return OpResult(false, 'Invalid ARB: top-level value must be a JSON object.');
+      }
+      keyCount = parsed.keys.where((final String k) => !k.startsWith('@')).length;
+    } catch (_) {
+      return OpResult(false, 'Invalid ARB: not valid JSON.');
+    }
+
+    final ProjectData project = await client.getProject(projectId);
+    final FlavorData fl = project.flavor(flavor);
+    final String lang =
+        languageCode ?? project.baseLanguage(flavor)?.code ?? 'en';
+
+    if (dryRun) {
+      return OpResult(
+        true,
+        'DRY RUN: would import $keyCount key(s) into flavor "${fl.name}" '
+        '(language "$lang"${overwrite ? ', overwriting existing' : ''})'
+        '${translate ? ', then batch-translate the other locales' : ''}.',
+        <String, dynamic>{'keys': keyCount, 'flavor': fl.name, 'language': lang},
+      );
+    }
+
+    await client.importArb(projectId, fl.id, lang, arbContent,
+        overwriteExisting: overwrite);
+
+    if (!translate) {
+      return OpResult(true, 'Imported $keyCount key(s) into "${fl.name}".',
+          <String, dynamic>{'imported': keyCount, 'flavor': fl.name});
+    }
+
+    // Collect every empty non-base locale-string and translate them in batches.
+    final ProjectData after = await client.getProject(projectId);
+    final String? baseCode = after.baseLanguage(flavor)?.code;
+    final List<int> targets = <int>[];
+    for (final LanguageData l in after.flavor(flavor).languages) {
+      if (l.code == baseCode) continue;
+      for (final TranslationEntry t in l.translations) {
+        if (t.isEmpty) targets.add(t.id);
+      }
+    }
+    if (targets.isEmpty) {
+      return OpResult(true, 'Imported $keyCount key(s); nothing to translate.',
+          <String, dynamic>{'imported': keyCount});
+    }
+    final BatchTranslateResult r = await client.aiBatchTranslate(targets);
+    return OpResult(
+      r.failedCount == 0,
+      'Imported $keyCount key(s) and translated '
+      '${r.successCount}/${targets.length} locale-strings'
+      '${r.failedCount > 0 ? ' (${r.failedCount} failed)' : ''}.',
+      <String, dynamic>{
+        'imported': keyCount,
+        'translated': r.successCount,
+        'failed': r.failedCount,
       },
     );
   }

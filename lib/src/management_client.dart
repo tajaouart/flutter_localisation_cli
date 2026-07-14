@@ -68,12 +68,14 @@ class LanguageData {
 }
 
 class FlavorData {
-  FlavorData({required this.name, required this.languages});
+  FlavorData({required this.id, required this.name, required this.languages});
 
+  final int id;
   final String name;
   final List<LanguageData> languages;
 
   factory FlavorData.fromJson(final Map<String, dynamic> j) => FlavorData(
+        id: (j['id'] ?? 0) as int,
         name: (j['name'] ?? '') as String,
         languages: ((j['languages'] ?? const <dynamic>[]) as List)
             .map((final e) => LanguageData.fromJson(e as Map<String, dynamic>))
@@ -348,6 +350,59 @@ class ManagementClient {
       acceptStatuses: const <int>{200, 207},
     );
     return BatchTranslateResult.fromJson(_json(res));
+  }
+
+  /// Bulk-create keys by importing a whole ARB file in ONE request (instead of
+  /// N per-key adds). [arbContent] is the raw ARB JSON; [languageCode] is the
+  /// locale the file represents (usually the base language). By default the keys
+  /// are applied across all languages so translations can be batch-filled after.
+  Future<Map<String, dynamic>> importArb(
+    final int projectId,
+    final int flavorId,
+    final String languageCode,
+    final String arbContent, {
+    final bool overwriteExisting = false,
+    final bool applyToAllLanguages = true,
+  }) async {
+    final Uri uri = _uri('/api/project/$projectId/import-arb/');
+    const String path = '/api/project/.../import-arb/';
+
+    int attempt = 0;
+    while (true) {
+      attempt++;
+      http.Response res;
+      try {
+        final http.MultipartRequest req = http.MultipartRequest('POST', uri)
+          ..headers['Authorization'] = 'Bearer $token'
+          ..fields['selected_language_code'] = languageCode
+          ..fields['flavor_id'] = flavorId.toString()
+          ..fields['apply_to_all_languages'] = applyToAllLanguages.toString()
+          ..fields['apply_to_all_flavors'] = 'false'
+          ..fields['overwrite_existing'] = overwriteExisting.toString()
+          ..files.add(http.MultipartFile.fromString(
+            'arb_file',
+            arbContent,
+            filename: 'app_$languageCode.arb',
+          ));
+        final http.StreamedResponse streamed = await _http.send(req);
+        res = await http.Response.fromStream(streamed);
+      } catch (e) {
+        if (attempt <= maxRetries) {
+          await _backoff(attempt);
+          continue;
+        }
+        throw ManagementException('Network error calling POST $path: $e');
+      }
+
+      // 200 = imported+pushed; 207 = imported but git push failed (still OK).
+      if (res.statusCode == 200 || res.statusCode == 207) return _json(res);
+      if ((res.statusCode == 429 || res.statusCode >= 500) &&
+          attempt <= maxRetries) {
+        await _backoff(attempt, retryAfter: res.headers['retry-after']);
+        continue;
+      }
+      throw _errorFor('POST', path, res);
+    }
   }
 
   // ------------------------------------------------------------------------- //

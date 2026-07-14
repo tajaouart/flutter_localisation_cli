@@ -237,6 +237,49 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
           'required': <String>['key'],
         },
       },
+      <String, dynamic>{
+        'name': 'import_arb',
+        'description':
+            'Bulk-create keys by importing a whole ARB file in ONE request — the right '
+                'tool for adding MANY strings at once. Put all the strings in an ARB JSON '
+                '(a flat {"key":"value"} map, @-metadata allowed) and import it, instead of '
+                'many add_string calls. Provide `path` (an ARB file on disk) or `content` '
+                '(raw ARB JSON). translate=true batch-translates the other locales after '
+                'import (one batch call, not per key). Preview by default; apply=true writes.',
+        'inputSchema': <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'path': <String, dynamic>{
+              'type': 'string',
+              'description': 'Path to an ARB/JSON file to import.',
+            },
+            'content': <String, dynamic>{
+              'type': 'string',
+              'description': 'Raw ARB JSON, as an alternative to path.',
+            },
+            'language': <String, dynamic>{
+              'type': 'string',
+              'description': 'Locale the file represents (default: the base language).',
+            },
+            'overwrite': <String, dynamic>{
+              'type': 'boolean',
+              'description': 'Overwrite values of keys that already exist.',
+              'default': false,
+            },
+            'translate': <String, dynamic>{
+              'type': 'boolean',
+              'description': 'Batch-translate all empty non-base locales after import.',
+              'default': false,
+            },
+            'apply': <String, dynamic>{
+              'type': 'boolean',
+              'description': 'false = preview only (default); true = actually write.',
+              'default': false,
+            },
+            ..._projectProps,
+          },
+        },
+      },
     ];
 
 Future<void> _callTool(final Object? id, final Map<String, dynamic> params) async {
@@ -313,6 +356,38 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
           locales: (a['locales'] as List<dynamic>?)?.cast<String>(),
           dryRun: !apply,
         );
+      case 'import_arb':
+        {
+          final String? path = a['path'] as String?;
+          String? content = a['content'] as String?;
+          if (content == null && path != null) {
+            final File f = File(path);
+            if (!f.existsSync()) {
+              _toolResult(id,
+                  <String, dynamic>{'ok': false, 'error': 'File not found: $path'},
+                  isError: true);
+              return;
+            }
+            content = f.readAsStringSync();
+          }
+          if (content == null || content.trim().isEmpty) {
+            _toolResult(
+                id,
+                <String, dynamic>{
+                  'ok': false,
+                  'error': 'Provide `path` (a file) or `content` (raw ARB JSON).',
+                },
+                isError: true);
+            return;
+          }
+          r = await ops.importArb(
+            content,
+            languageCode: a['language'] as String?,
+            overwrite: (a['overwrite'] ?? false) as bool,
+            translate: (a['translate'] ?? false) as bool,
+            dryRun: !apply,
+          );
+        }
       default:
         _error(id, -32602, 'Unknown tool: $name');
         return;

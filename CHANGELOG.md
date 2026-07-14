@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.0] - 2026-07-14
+### Added
+- **`import_arb` MCP tool — bulk-create keys from one ARB file.** Instead of many
+  per-key `add_string` calls, put all strings in an ARB JSON and import it in a single
+  request (`path` to a file, or inline `content`). `translate=true` then batch-translates
+  the other locales in one pass. Preview by default; `apply=true` writes. Backed by a new
+  `ManagementClient.importArb()` (multipart to `/api/project/{id}/import-arb/`) and
+  `Operations.importArb()`. Requires a `strings:write` token.
+
 ## [1.0.1] - 2026-07-14
 ### Fixed
 - **`fl_mcp` now finds the token from `fl login`.** It previously read only
