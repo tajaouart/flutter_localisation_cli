@@ -99,13 +99,20 @@ class Credentials {
   final String token;
 
   /// Resolve a token from explicit arg → env var → credentials file.
-  static Credentials resolve({final String? explicit, final String? baseUrl}) {
+  ///
+  /// [credentialsFile] overrides the on-disk location (for tests); production
+  /// callers omit it and the default `~/.config/...` path is used.
+  static Credentials resolve({
+    final String? explicit,
+    final String? baseUrl,
+    final File? credentialsFile,
+  }) {
     if (explicit != null && explicit.isNotEmpty) return Credentials(explicit);
 
     final String? fromEnv = Platform.environment[kTokenEnvVar];
     if (fromEnv != null && fromEnv.isNotEmpty) return Credentials(fromEnv);
 
-    final File file = _credentialsFile();
+    final File file = credentialsFile ?? _credentialsFile();
     if (file.existsSync()) {
       try {
         final Map<String, dynamic> data =

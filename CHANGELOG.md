@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1] - 2026-07-14
+### Fixed
+- **`fl_mcp` now finds the token from `fl login`.** It previously read only
+  `$FL_API_TOKEN` and ignored `~/.config/flutterlocalisation/credentials.json`,
+  forcing users to duplicate the token into their MCP client config. It now uses
+  the same resolution as the `fl` CLI (explicit → `$FL_API_TOKEN` → credentials
+  file). `Credentials.resolve` gained an injectable `credentialsFile` for tests.
+
 ## [1.0.0] - 2026-07-07
 ### Added
 - Initial release. The `fl` CLI and `fl_mcp` MCP server, extracted from the

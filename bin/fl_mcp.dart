@@ -10,7 +10,9 @@
 /// `"apply": true`, so the human confirms the diff before anything is written.
 ///
 /// Configuration via environment (set in the MCP client config):
-///   FL_API_TOKEN   (required)  scoped flk_live_ token
+///   FL_API_TOKEN   scoped flk_live_ token. Optional if you've run `fl login`
+///                  (the token in ~/.config/flutterlocalisation/credentials.json
+///                  is used as a fallback, same resolution as the `fl` CLI).
 ///   FL_BASE_URL    (optional)  defaults to https://api.flutterlocalisation.com
 ///   FL_PROJECT     (optional)  default project name or id, if you don't want to pass it per call
 ///   FL_FLAVOR      (optional)  default flavor
@@ -55,12 +57,21 @@ Future<void> main(final List<String> args) async {
 
 void _bootstrap() {
   final Map<String, String> env = Platform.environment;
-  final String? token = env['FL_API_TOKEN'];
-  if (token == null || token.isEmpty) {
-    stderr.writeln('fl_mcp: FL_API_TOKEN is required.');
+  final String baseUrl = env['FL_BASE_URL'] ?? kDefaultBaseUrl;
+  final String token;
+  try {
+    // Resolve the token the same way the `fl` CLI does: $FL_API_TOKEN first,
+    // then ~/.config/flutterlocalisation/credentials.json (written by
+    // `fl login`). Previously fl_mcp only read $FL_API_TOKEN, forcing users to
+    // duplicate the token into their MCP config even after `fl login`.
+    token = Credentials.resolve(baseUrl: baseUrl).token;
+  } on AuthConfigException {
+    stderr.writeln(
+      'fl_mcp: no API token found. Set \$FL_API_TOKEN or run '
+      '`fl login --token flk_live_...`.',
+    );
     exit(64);
   }
-  final String baseUrl = env['FL_BASE_URL'] ?? kDefaultBaseUrl;
   _client = ManagementClient(baseUrl: baseUrl, token: token);
   _resolver = ProjectResolver(
     _client,
