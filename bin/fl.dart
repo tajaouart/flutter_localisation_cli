@@ -20,6 +20,7 @@ import 'package:args/command_runner.dart';
 
 import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
+import 'package:flutter_localisation_cli/src/guard.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:flutter_localisation_cli/src/project_resolver.dart';
@@ -42,11 +43,13 @@ Future<void> main(final List<String> args) async {
   runner.addCommand(LoginCommand());
   runner.addCommand(ProjectsCommand());
   runner.addCommand(AddCommand());
+  runner.addCommand(ImportCommand());
   runner.addCommand(EditCommand());
   runner.addCommand(DeleteCommand());
   runner.addCommand(TranslateCommand());
   runner.addCommand(StatusCommand());
   runner.addCommand(PullCommand());
+  runner.addCommand(GuardCommand());
 
   try {
     final int? code = await runner.run(args);
@@ -237,6 +240,58 @@ class AddCommand extends Command<int> with _ApiCommand {
   }
 }
 
+class ImportCommand extends Command<int> with _ApiCommand {
+  ImportCommand() {
+    argParser.addOption('language',
+        abbr: 'l',
+        help: 'Locale the ARB represents (default: the project base language).',);
+    argParser.addFlag('overwrite',
+        negatable: false,
+        help: 'Overwrite values of keys that already exist.',);
+    argParser.addFlag('translate',
+        abbr: 't',
+        negatable: false,
+        help: 'AI-translate the other locales after import (one batch pass).',);
+  }
+
+  @override
+  String get name => 'import';
+  @override
+  String get description =>
+      'Bulk-create keys from an ARB file in ONE request (vs many `add`s).';
+  @override
+  String get invocation =>
+      'fl import <file.arb> [--language <code>] [--overwrite] [--translate]';
+
+  @override
+  Future<int> run() async {
+    final List<String> rest = argResults!.rest;
+    if (rest.isEmpty) {
+      throw UsageException('Missing <file.arb> path argument.', usage);
+    }
+    final File file = File(rest.first);
+    if (!file.existsSync()) {
+      stderr.writeln('Error: file not found: ${rest.first}');
+      return 1;
+    }
+    final String content = await file.readAsString();
+    final ({ManagementClient client, Operations ops, String projectName}) built =
+        await build(loadProject());
+    try {
+      final OpResult r = await built.ops.importArb(
+        content,
+        languageCode: argResults!['language'] as String?,
+        overwrite: argResults!['overwrite'] as bool,
+        translate: argResults!['translate'] as bool,
+        dryRun: dryRun,
+      );
+      return emit(r);
+    } finally {
+      built.client.close();
+    }
+  }
+}
+
 class EditCommand extends Command<int> with _ApiCommand {
   EditCommand() {
     argParser.addOption('locale', mandatory: true, help: 'Locale code, e.g. fr.');
@@ -389,6 +444,67 @@ class PullCommand extends Command<int> with _ApiCommand {
       return res.exitCode;
     }
     stdout.writeln('✓ Pulled.');
+    return 0;
+  }
+}
+
+/// Install a Claude Code guard so AI agents cannot hand-edit the
+/// FlutterLocalisation-managed files (the ARB repo + generated Dart). Purely
+/// local — writes `.claude/settings.json` deny rules in the current project.
+class GuardCommand extends Command<int> {
+  bool get _jsonOut => (globalResults?['json'] as bool?) ?? false;
+  bool get _dryRun => (globalResults?['dry-run'] as bool?) ?? false;
+
+  @override
+  String get name => 'guard';
+  @override
+  String get description =>
+      'Protect ARBs + generated Dart from AI edits (writes .claude deny rules).';
+  @override
+  String get invocation => 'fl guard';
+
+  @override
+  Future<int> run() async {
+    final ProjectConfig cfg =
+        ProjectConfig.load(path: globalResults?['config'] as String?);
+    final Directory root = Directory.current;
+    final List<String> globs =
+        deriveGuardGlobs(root, arbDirFromConfig: cfg.arbDir);
+
+    if (_dryRun) {
+      final List<String> rules = <String>[
+        for (final String g in globs) ...<String>['Edit($g)', 'Write($g)'],
+      ];
+      if (_jsonOut) {
+        stdout.writeln(const JsonEncoder.withIndent('  ').convert(
+          <String, dynamic>{'dryRun': true, 'protected': globs, 'rules': rules},
+        ),);
+      } else {
+        stdout.writeln('DRY RUN: would deny AI edits to:');
+        for (final String g in globs) {
+          stdout.writeln('  · $g');
+        }
+        stdout.writeln('in ${root.path}/.claude/settings.json');
+      }
+      return 0;
+    }
+
+    final GuardResult r = installGuard(root, globs: globs);
+    if (_jsonOut) {
+      stdout.writeln(const JsonEncoder.withIndent('  ').convert(r.toJson()));
+      return 0;
+    }
+    stdout.writeln(r.created
+        ? '✓ Created ${r.settingsPath}'
+        : '✓ Updated ${r.settingsPath}');
+    if (r.added.isEmpty) {
+      stdout.writeln('  (already protected — no new rules)');
+    } else {
+      stdout.writeln('  Protected from AI Edit/Write:');
+      for (final String g in r.protected) {
+        stdout.writeln('    · $g');
+      }
+    }
     return 0;
   }
 }

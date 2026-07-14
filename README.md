@@ -36,10 +36,23 @@ fl projects                              # list your projects (name, flavors, lo
 fl status --project "Chat Bot"           # completion % per locale
 fl add greeting --value "Hello" -t       # add key + AI-translate every other locale
 fl edit greeting --locale fr --value "Bonjour"
+fl import strings.arb -t                 # bulk-create MANY keys from one ARB, then translate
 fl translate greeting --missing          # fill only empty locales
 fl delete greeting                       # whole key (or --locale fr for one locale)
 fl pull                                  # git pull the ARB repo (arb_dir in config)
+fl guard                                 # stop AI agents editing ARBs + generated Dart
 ```
+
+`fl import <file.arb>` bulk-creates every key in an ARB in **one** request (instead of many
+`fl add` calls) — the right tool for large migrations. `--overwrite` replaces existing values;
+`-t/--translate` batch-fills the other locales afterwards; `--language <code>` sets the locale
+the file represents (default: the base language). Preview with `--dry-run`.
+
+`fl guard` writes `permissions.deny` rules into `.claude/settings.json` so Claude Code refuses
+to `Edit`/`Write` the backend-managed files — the ARB directory (`arb_dir` + `l10n.yaml`
+`arb-dir`/`output-dir`) and `lib/generated_translation_methods.dart`. Those may only change via
+`fl` / `flutter_localisation` + `git pull`; a direct AI edit is silently overwritten on the next
+sync (or lost, for the gitignored ARB repo). Run it once per project (`--dry-run` to preview).
 
 A project-local `flutterlocalisation.json` is **optional** — set it to avoid `--project` each
 time:

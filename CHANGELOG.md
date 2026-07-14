@@ -2,12 +2,20 @@
 
 ## [1.1.0] - 2026-07-14
 ### Added
-- **`import_arb` MCP tool — bulk-create keys from one ARB file.** Instead of many
-  per-key `add_string` calls, put all strings in an ARB JSON and import it in a single
-  request (`path` to a file, or inline `content`). `translate=true` then batch-translates
-  the other locales in one pass. Preview by default; `apply=true` writes. Backed by a new
-  `ManagementClient.importArb()` (multipart to `/api/project/{id}/import-arb/`) and
+- **Bulk ARB import — `import_arb` MCP tool + `fl import` CLI command.** Instead of many
+  per-key `add_string` / `fl add` calls, put all strings in an ARB JSON and import it in a
+  single request (`path` to a file or inline `content` for the MCP tool; `fl import <file.arb>`
+  for the CLI). `translate=true` / `-t` then batch-translates the other locales in one pass;
+  `overwrite`/`--overwrite` replaces existing values; `--language <code>` sets the file's
+  locale (default: base). Preview by default (`apply=true` / no `--dry-run` to write). Backed
+  by `ManagementClient.importArb()` (multipart to `/api/project/{id}/import-arb/`) and
   `Operations.importArb()`. Requires a `strings:write` token.
+- **`fl guard` command — lock the backend-managed files against AI edits.** Writes
+  `permissions.deny` rules into the project's `.claude/settings.json` so Claude Code
+  refuses to `Edit`/`Write` the ARB directory (`arb_dir` + `l10n.yaml` `arb-dir`/`output-dir`)
+  and `lib/generated_translation_methods.dart` — files that only ever change via the SaaS
+  tooling + `git pull`, and whose hand-edits are otherwise silently overwritten on the next
+  sync. Idempotent; merges into existing settings; `--dry-run` previews.
 
 ## [1.0.1] - 2026-07-14
 ### Fixed
