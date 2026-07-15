@@ -115,14 +115,38 @@ class Operations {
           <String, dynamic>{'imported': keyCount, 'flavor': fl.name});
     }
 
-    // Collect every empty non-base locale-string and translate them in batches.
+    // Collect non-base locale-strings that still need translation: either empty,
+    // or still equal to the base value (untranslated). The import seeds every
+    // locale with the base text (apply_to_all_languages), so a fresh key's other
+    // locales are non-empty but identical to the base — those must be translated
+    // too, not just the literally-empty ones. Restrict to the keys we imported.
     final ProjectData after = await client.getProject(projectId);
     final String? baseCode = after.baseLanguage(flavor)?.code;
+    final Set<String> importedKeys = <String>{};
+    try {
+      final Object? p = jsonDecode(arbContent);
+      if (p is Map<String, dynamic>) {
+        importedKeys.addAll(p.keys.where((final String k) => !k.startsWith('@')));
+      }
+    } catch (_) {}
+    final Map<String, String> baseValues = <String, String>{};
+    for (final LanguageData l in after.flavor(flavor).languages) {
+      if (l.code != baseCode) continue;
+      for (final TranslationEntry t in l.translations) {
+        baseValues[t.key] = t.value;
+      }
+    }
     final List<int> targets = <int>[];
     for (final LanguageData l in after.flavor(flavor).languages) {
       if (l.code == baseCode) continue;
       for (final TranslationEntry t in l.translations) {
-        if (t.isEmpty) targets.add(t.id);
+        if (!importedKeys.contains(t.key)) continue;
+        final String? base = baseValues[t.key];
+        final bool untranslated = t.isEmpty ||
+            (base != null &&
+                base.trim().isNotEmpty &&
+                t.value.trim() == base.trim());
+        if (untranslated) targets.add(t.id);
       }
     }
     if (targets.isEmpty) {
