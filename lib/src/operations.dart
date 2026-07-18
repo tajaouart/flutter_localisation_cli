@@ -27,6 +27,64 @@ class Operations {
   final int projectId;
   final String? flavor;
 
+  /// Runs the batch translate for [ids], then RE-FETCHES the project and verifies
+  /// each target actually changed. Defends against a backend that reports
+  /// "translated" while writing the base text straight back (a silent false
+  /// success): any locale whose value still equals its key's non-empty base value
+  /// is counted as failed, not translated — so the CLI never over-reports.
+  Future<({int translated, List<({int id, String reason})> failed})>
+      _translateAndVerify(final List<int> ids) async {
+    final BatchTranslateResult r = await client.aiBatchTranslate(ids);
+    final Map<int, String> backendErrors = <int, String>{
+      for (final ({int id, String error}) f in r.failed) f.id: f.error,
+    };
+
+    final ProjectData after = await client.getProject(projectId);
+    final FlavorData fl = after.flavor(flavor);
+    final String? baseCode = after.baseLanguage(flavor)?.code;
+    final Map<String, String> baseByKey = <String, String>{
+      for (final LanguageData l in fl.languages)
+        if (l.code == baseCode)
+          for (final TranslationEntry t in l.translations) t.key: t.value,
+    };
+    final Map<int, TranslationEntry> byId = <int, TranslationEntry>{
+      for (final LanguageData l in fl.languages)
+        for (final TranslationEntry t in l.translations) t.id: t,
+    };
+
+    var translated = 0;
+    final List<({int id, String reason})> failed = <({int id, String reason})>[];
+    for (final int id in ids) {
+      if (backendErrors.containsKey(id)) {
+        final String e = backendErrors[id]!;
+        failed.add((id: id, reason: e.isEmpty ? 'translation failed' : e));
+        continue;
+      }
+      final TranslationEntry? t = byId[id];
+      final String? base = t == null ? null : baseByKey[t.key];
+      final bool unchanged = t != null &&
+          base != null &&
+          base.trim().isNotEmpty &&
+          t.value.trim() == base.trim();
+      if (unchanged) {
+        failed.add((
+          id: id,
+          reason: 'unchanged from source — base text written back, not translated',
+        ));
+      } else {
+        translated++;
+      }
+    }
+    return (translated: translated, failed: failed);
+  }
+
+  static List<Map<String, Object>> _failedJson(
+          final List<({int id, String reason})> failed) =>
+      failed
+          .map((final ({int id, String reason}) f) =>
+              <String, Object>{'id': f.id, 'error': f.reason})
+          .toList();
+
   /// Add a key with its base value, optionally AI-translating the other locales.
   Future<OpResult> add(
     final String key,
@@ -56,15 +114,16 @@ class Operations {
       return OpResult(true, 'Added "$key" (no other locales to translate).',
           <String, dynamic>{'key': key},);
     }
-    final BatchTranslateResult r = await client.aiBatchTranslate(targets);
+    final ({int translated, List<({int id, String reason})> failed}) result =
+        await _translateAndVerify(targets);
     return OpResult(
-      r.failedCount == 0,
-      'Added "$key" and translated ${r.successCount}/${targets.length} locales'
-      '${r.failedCount > 0 ? ' (${r.failedCount} failed)' : ''}.',
+      result.failed.isEmpty,
+      'Added "$key" and translated ${result.translated}/${targets.length} locales'
+      '${result.failed.isNotEmpty ? ' (${result.failed.length} failed)' : ''}.',
       <String, dynamic>{
         'key': key,
-        'translated': r.successCount,
-        'failed': r.failed.map((final ({String error, int id}) f) => <String, Object>{'id': f.id, 'error': f.error}).toList(),
+        'translated': result.translated,
+        'failed': _failedJson(result.failed),
       },
     );
   }
@@ -153,16 +212,17 @@ class Operations {
       return OpResult(true, 'Imported $keyCount key(s); nothing to translate.',
           <String, dynamic>{'imported': keyCount});
     }
-    final BatchTranslateResult r = await client.aiBatchTranslate(targets);
+    final ({int translated, List<({int id, String reason})> failed}) result =
+        await _translateAndVerify(targets);
     return OpResult(
-      r.failedCount == 0,
+      result.failed.isEmpty,
       'Imported $keyCount key(s) and translated '
-      '${r.successCount}/${targets.length} locale-strings'
-      '${r.failedCount > 0 ? ' (${r.failedCount} failed)' : ''}.',
+      '${result.translated}/${targets.length} locale-strings'
+      '${result.failed.isNotEmpty ? ' (${result.failed.length} failed)' : ''}.',
       <String, dynamic>{
         'imported': keyCount,
-        'translated': r.successCount,
-        'failed': r.failedCount,
+        'translated': result.translated,
+        'failed': _failedJson(result.failed),
       },
     );
   }
@@ -267,14 +327,15 @@ class Operations {
     if (dryRun) {
       return OpResult(true, 'DRY RUN: would translate ${ids.length} locale(s) for "$key".');
     }
-    final BatchTranslateResult r = await client.aiBatchTranslate(ids);
+    final ({int translated, List<({int id, String reason})> failed}) result =
+        await _translateAndVerify(ids);
     return OpResult(
-      r.failedCount == 0,
-      'Translated ${r.successCount}/${ids.length} locale(s) for "$key"'
-      '${r.failedCount > 0 ? ' (${r.failedCount} failed)' : ''}.',
+      result.failed.isEmpty,
+      'Translated ${result.translated}/${ids.length} locale(s) for "$key"'
+      '${result.failed.isNotEmpty ? ' (${result.failed.length} failed)' : ''}.',
       <String, dynamic>{
-        'translated': r.successCount,
-        'failed': r.failed.map((final ({String error, int id}) f) => <String, Object>{'id': f.id, 'error': f.error}).toList(),
+        'translated': result.translated,
+        'failed': _failedJson(result.failed),
       },
     );
   }
