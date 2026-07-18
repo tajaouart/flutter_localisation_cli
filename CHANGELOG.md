@@ -1,6 +1,14 @@
 # Changelog
 
 ## [1.1.0] - 2026-07-14
+### Fixed
+- **`--translate` no longer over-reports success.** `add` / `translate` /
+  `import --translate` trusted the backend's `success_count`, which counts
+  `source == output` as translated (a silent false success). The CLI now
+  re-fetches after translating and flags any locale whose value still equals its
+  key's non-empty base text as **failed**, so `translated N/N` never lies.
+  `import --translate`'s `failed` field is now a list (matching `add`/`translate`).
+
 ### Added
 - **Bulk ARB import — `import_arb` MCP tool + `fl import` CLI command.** Instead of many
   per-key `add_string` / `fl add` calls, put all strings in an ARB JSON and import it in a
