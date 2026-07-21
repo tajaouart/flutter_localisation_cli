@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.0] - 2026-07-21
+### Added
+- **ARB `@key` metadata now round-trips through the API.** `add` / `fl add` and
+  `add_string` (MCP) gained `--placeholder name:type[:format]` (repeatable) and
+  `--description`, so a key can be created with typed placeholders (e.g.
+  `count:int:decimalPattern`) and an ICU `@key.description`. `edit` / `fl edit`
+  and `edit_string` (MCP) gained `--description`. `TranslationEntry` now reads
+  `description` + `placeholders` back from the backend.
+
+### Fixed
+- **`edit_string` (MCP) no longer drops placeholders.** The edit dispatch
+  previously omitted placeholder metadata entirely; it now forwards
+  `placeholders` + `is_placeholders_enabled` alongside the new `description`.
+
 ## [1.1.0] - 2026-07-14
 ### Fixed
 - **`--translate` no longer over-reports success.** `add` / `translate` /
