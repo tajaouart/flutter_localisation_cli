@@ -10,6 +10,24 @@ import 'dart:convert';
 
 import 'package:flutter_localisation_cli/src/management_client.dart';
 
+/// Parse `--placeholder name:type[:format]` specs into the backend's placeholder
+/// map: `{name: {type, format?}}`. Returns null when [raw] is empty so callers
+/// don't send an empty map that would clobber backend auto-detected placeholders.
+Map<String, dynamic>? parsePlaceholderSpecs(final List<String> raw) {
+  if (raw.isEmpty) return null;
+  final Map<String, dynamic> out = <String, dynamic>{};
+  for (final String p in raw) {
+    final List<String> parts = p.split(':');
+    final String name = parts.first;
+    final String type =
+        parts.length > 1 && parts[1].isNotEmpty ? parts[1] : 'String';
+    final Map<String, String> meta = <String, String>{'type': type};
+    if (parts.length > 2 && parts[2].isNotEmpty) meta['format'] = parts[2];
+    out[name] = meta;
+  }
+  return out;
+}
+
 class OpResult {
   OpResult(this.ok, this.message, [this.data = const <String, dynamic>{}]);
 
@@ -90,13 +108,23 @@ class Operations {
     final String key,
     final String baseValue, {
     final bool translate = false,
+    final Map<String, dynamic>? placeholders,
+    final bool? isPlaceholdersEnabled,
+    final String? description,
     final bool dryRun = false,
   }) async {
     if (dryRun) {
       return OpResult(true, 'DRY RUN: would add "$key" = "$baseValue"'
           '${translate ? ' and AI-translate all other locales' : ''}.');
     }
-    await client.addKey(projectId, key, baseValue);
+    await client.addKey(
+      projectId,
+      key,
+      baseValue,
+      placeholders: placeholders,
+      isPlaceholdersEnabled: isPlaceholdersEnabled,
+      description: description,
+    );
 
     if (!translate) {
       return OpResult(true, 'Added "$key".', <String, dynamic>{'key': key});
@@ -239,6 +267,7 @@ class Operations {
     final String? pluralParam,
     final bool? isPlaceholdersEnabled,
     final Map<String, dynamic>? placeholders,
+    final String? description,
     final bool? isChecked,
     final bool dryRun = false,
   }) async {
@@ -257,6 +286,7 @@ class Operations {
       pluralParam: pluralParam,
       isPlaceholdersEnabled: isPlaceholdersEnabled,
       placeholders: placeholders,
+      description: description,
       isChecked: isChecked,
     );
     return OpResult(true, 'Updated "$key" [$locale].', <String, dynamic>{'key': key, 'locale': locale});

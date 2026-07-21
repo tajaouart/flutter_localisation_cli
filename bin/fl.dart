@@ -213,6 +213,11 @@ class AddCommand extends Command<int> with _ApiCommand {
     argParser.addOption('value', mandatory: true, help: 'Base-language value.');
     argParser.addFlag('translate',
         abbr: 't', negatable: false, help: 'AI-translate all other locales.',);
+    argParser.addOption('description',
+        help: 'Key description (ARB @key.description).',);
+    argParser.addMultiOption('placeholder',
+        help: 'Placeholder as name:type[:format] (repeatable), '
+            'e.g. --placeholder count:int:decimalPattern.',);
   }
 
   @override
@@ -220,17 +225,24 @@ class AddCommand extends Command<int> with _ApiCommand {
   @override
   String get description => 'Add a translation key with its base value.';
   @override
-  String get invocation => 'fl add <key> --value "<text>" [--translate]';
+  String get invocation =>
+      'fl add <key> --value "<text>" [--translate] [--description "..."] '
+      '[--placeholder name:type[:format]]';
 
   @override
   Future<int> run() async {
     final String key = _requireKey(this);
+    final Map<String, dynamic>? placeholders =
+        parsePlaceholderSpecs(argResults!['placeholder'] as List<String>);
     final ({ManagementClient client, Operations ops, String projectName}) built = await build(loadProject());
     try {
       final OpResult r = await built.ops.add(
         key,
         argResults!['value'] as String,
         translate: argResults!['translate'] as bool,
+        placeholders: placeholders,
+        isPlaceholdersEnabled: placeholders == null ? null : true,
+        description: argResults!['description'] as String?,
         dryRun: dryRun,
       );
       return emit(r);
@@ -297,8 +309,11 @@ class EditCommand extends Command<int> with _ApiCommand {
     argParser.addOption('locale', mandatory: true, help: 'Locale code, e.g. fr.');
     argParser.addOption('value', help: 'New value.');
     argParser.addFlag('checked', defaultsTo: null, help: 'Set is_checked true/false.',);
+    argParser.addOption('description',
+        help: 'Key description (ARB @key.description).',);
     argParser.addMultiOption('placeholder',
-        help: 'Placeholder as name:type (repeatable), e.g. --placeholder count:num.',);
+        help: 'Placeholder as name:type[:format] (repeatable), '
+            'e.g. --placeholder count:int:decimalPattern.',);
   }
 
   @override
@@ -311,14 +326,8 @@ class EditCommand extends Command<int> with _ApiCommand {
   @override
   Future<int> run() async {
     final String key = _requireKey(this);
-    final List<String> phs = argResults!['placeholder'] as List<String>;
-    Map<String, dynamic>? placeholders;
-    if (phs.isNotEmpty) {
-      placeholders = <String, dynamic>{
-        for (final String p in phs)
-          p.split(':').first: <String, String>{'type': p.contains(':') ? p.split(':').last : 'String'},
-      };
-    }
+    final Map<String, dynamic>? placeholders =
+        parsePlaceholderSpecs(argResults!['placeholder'] as List<String>);
     final ({ManagementClient client, Operations ops, String projectName}) built = await build(loadProject());
     try {
       final OpResult r = await built.ops.edit(
@@ -328,6 +337,7 @@ class EditCommand extends Command<int> with _ApiCommand {
         isChecked: argResults!['checked'] as bool?,
         isPlaceholdersEnabled: placeholders == null ? null : true,
         placeholders: placeholders,
+        description: argResults!['description'] as String?,
         dryRun: dryRun,
       );
       return emit(r);

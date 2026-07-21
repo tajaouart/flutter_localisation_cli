@@ -26,6 +26,8 @@ class TranslationEntry {
     required this.isChecked,
     required this.isPluralEnabled,
     required this.isAiTranslated,
+    this.description = '',
+    this.placeholders = const <String, dynamic>{},
   });
 
   final int id;
@@ -34,6 +36,12 @@ class TranslationEntry {
   final bool isChecked;
   final bool isPluralEnabled;
   final bool isAiTranslated;
+
+  /// Key description (`@key.description` in ARB). Round-tripped from the backend.
+  final String description;
+
+  /// Placeholder metadata (`@key.placeholders`): `{name: {type, format?}}`.
+  final Map<String, dynamic> placeholders;
 
   bool get isEmpty => value.trim().isEmpty && !isPluralEnabled;
 
@@ -44,6 +52,9 @@ class TranslationEntry {
         isChecked: (j['is_checked'] ?? false) as bool,
         isPluralEnabled: (j['is_plural_enabled'] ?? false) as bool,
         isAiTranslated: (j['is_ai_translated'] ?? false) as bool,
+        description: (j['description'] ?? '') as String,
+        placeholders:
+            (j['placeholders'] ?? const <String, dynamic>{}) as Map<String, dynamic>,
       );
 }
 
@@ -286,11 +297,32 @@ class ManagementClient {
   }
 
   /// Add a translation key with its base value. Idempotent server-side.
-  Future<void> addKey(final int projectId, final String key, final String baseValue) async {
+  ///
+  /// Optional [placeholders] (`{name: {type, format?}}`), [isPlaceholdersEnabled]
+  /// and [description] carry ARB `@key` metadata through to the backend. When the
+  /// caller omits [placeholders] the backend auto-detects `{name}` tokens, so the
+  /// fields are only sent when explicitly provided/non-empty (never clobber).
+  Future<void> addKey(
+    final int projectId,
+    final String key,
+    final String baseValue, {
+    final Map<String, dynamic>? placeholders,
+    final bool? isPlaceholdersEnabled,
+    final String? description,
+  }) async {
+    final Map<String, dynamic> body = <String, dynamic>{
+      'key': key,
+      'base_value': baseValue,
+      if (placeholders != null && placeholders.isNotEmpty)
+        'placeholders': placeholders,
+      if (isPlaceholdersEnabled != null)
+        'is_placeholders_enabled': isPlaceholdersEnabled,
+      if (description != null && description.isNotEmpty) 'description': description,
+    };
     await _send(
       'POST',
       '/api/projects/$projectId/translation_keys/',
-      body: <String, String>{'key': key, 'base_value': baseValue},
+      body: body,
     );
   }
 
@@ -305,6 +337,7 @@ class ManagementClient {
     final String? pluralParam,
     final bool? isPlaceholdersEnabled,
     final Map<String, dynamic>? placeholders,
+    final String? description,
     final bool? isChecked,
   }) async {
     final Map<String, dynamic> body = <String, dynamic>{
@@ -317,6 +350,7 @@ class ManagementClient {
       if (isPlaceholdersEnabled != null)
         'is_placeholders_enabled': isPlaceholdersEnabled,
       if (placeholders != null) 'placeholders': placeholders,
+      if (description != null && description.isNotEmpty) 'description': description,
       if (isChecked != null) 'is_checked': isChecked,
     };
     final http.Response res =

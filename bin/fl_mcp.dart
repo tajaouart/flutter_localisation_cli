@@ -172,6 +172,24 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
               'description': 'AI-translate all other locales after adding.',
               'default': false,
             },
+            'description': <String, dynamic>{
+              'type': 'string',
+              'description': 'Key description (ARB @key.description).',
+            },
+            'placeholders': <String, dynamic>{
+              'type': 'object',
+              'description':
+                  'Placeholder metadata: map of name → {type: "String|int|num|double|DateTime", '
+                      'format?: "<ICU format, e.g. decimalPattern>"}. Omit to let the backend '
+                      'auto-detect {name} tokens.',
+              'additionalProperties': <String, dynamic>{
+                'type': 'object',
+                'properties': <String, dynamic>{
+                  'type': <String, dynamic>{'type': 'string'},
+                  'format': <String, dynamic>{'type': 'string'},
+                },
+              },
+            },
             'apply': <String, dynamic>{
               'type': 'boolean',
               'description': 'false = preview only (default); true = actually write.',
@@ -192,6 +210,23 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             'key': <String, dynamic>{'type': 'string'},
             'locale': <String, dynamic>{'type': 'string', 'description': 'e.g. fr'},
             'value': <String, dynamic>{'type': 'string'},
+            'description': <String, dynamic>{
+              'type': 'string',
+              'description': 'Key description (ARB @key.description).',
+            },
+            'placeholders': <String, dynamic>{
+              'type': 'object',
+              'description':
+                  'Placeholder metadata: map of name → {type: "String|int|num|double|DateTime", '
+                      'format?: "<ICU format, e.g. decimalPattern>"}.',
+              'additionalProperties': <String, dynamic>{
+                'type': 'object',
+                'properties': <String, dynamic>{
+                  'type': <String, dynamic>{'type': 'string'},
+                  'format': <String, dynamic>{'type': 'string'},
+                },
+              },
+            },
             'apply': <String, dynamic>{'type': 'boolean', 'default': false},
             ..._projectProps,
           },
@@ -330,19 +365,37 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
       case 'list_status':
         r = await ops.status();
       case 'add_string':
-        r = await ops.add(
-          a['key'] as String,
-          a['value'] as String,
-          translate: (a['translate'] ?? false) as bool,
-          dryRun: !apply,
-        );
+        {
+          final Map<String, dynamic>? placeholders =
+              (a['placeholders'] as Map<String, dynamic>?)?.isEmpty ?? true
+                  ? null
+                  : a['placeholders'] as Map<String, dynamic>;
+          r = await ops.add(
+            a['key'] as String,
+            a['value'] as String,
+            translate: (a['translate'] ?? false) as bool,
+            placeholders: placeholders,
+            isPlaceholdersEnabled: placeholders == null ? null : true,
+            description: a['description'] as String?,
+            dryRun: !apply,
+          );
+        }
       case 'edit_string':
-        r = await ops.edit(
-          a['key'] as String,
-          a['locale'] as String,
-          value: a['value'] as String?,
-          dryRun: !apply,
-        );
+        {
+          final Map<String, dynamic>? placeholders =
+              (a['placeholders'] as Map<String, dynamic>?)?.isEmpty ?? true
+                  ? null
+                  : a['placeholders'] as Map<String, dynamic>;
+          r = await ops.edit(
+            a['key'] as String,
+            a['locale'] as String,
+            value: a['value'] as String?,
+            placeholders: placeholders,
+            isPlaceholdersEnabled: placeholders == null ? null : true,
+            description: a['description'] as String?,
+            dryRun: !apply,
+          );
+        }
       case 'delete_string':
         r = await ops.delete(
           a['key'] as String,
