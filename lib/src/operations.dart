@@ -194,8 +194,14 @@ class Operations {
       );
     }
 
+    // When a specific locale is targeted (`--language fr`), write ONLY that
+    // locale. `apply_to_all_languages` must stay true only for a base-language
+    // import, where seeding every locale with the base text is intended (so a
+    // fresh key is ready to translate). Passing a locale but applying to all
+    // would clobber every other language with this file's values.
     await client.importArb(projectId, fl.id, lang, arbContent,
-        overwriteExisting: overwrite);
+        overwriteExisting: overwrite,
+        applyToAllLanguages: languageCode == null);
 
     if (!translate) {
       return OpResult(true, 'Imported $keyCount key(s) into "${fl.name}".',

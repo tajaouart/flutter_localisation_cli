@@ -85,4 +85,55 @@ void main() {
     expect(r.message, contains('Invalid ARB'));
     expect(hits, isEmpty);
   });
+
+  test('importArb WITH --language scopes to that locale only', () async {
+    String? body;
+    final MockClient mock = MockClient((final http.Request req) async {
+      if (req.url.path == '/api/projects/7/') return _project(req);
+      if (req.url.path == '/api/project/7/import-arb/') {
+        body = req.body;
+        return http.Response(
+            jsonEncode(<String, dynamic>{'import_status': 'success'}), 200);
+      }
+      return http.Response('{}', 200);
+    });
+    final ManagementClient client =
+        ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
+
+    await Operations(client, 7, flavor: 'default')
+        .importArb(jsonEncode(<String, dynamic>{'k': 'v'}), languageCode: 'fr');
+
+    // A targeted locale import must NOT fan out across every language, else it
+    // clobbers the others with this file's values.
+    expect(_field(body!, 'apply_to_all_languages'), 'false');
+    expect(_field(body!, 'selected_language_code'), 'fr');
+  });
+
+  test('importArb WITHOUT --language still seeds every locale', () async {
+    String? body;
+    final MockClient mock = MockClient((final http.Request req) async {
+      if (req.url.path == '/api/projects/7/') return _project(req);
+      if (req.url.path == '/api/project/7/import-arb/') {
+        body = req.body;
+        return http.Response(
+            jsonEncode(<String, dynamic>{'import_status': 'success'}), 200);
+      }
+      return http.Response('{}', 200);
+    });
+    final ManagementClient client =
+        ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
+
+    await Operations(client, 7, flavor: 'default')
+        .importArb(jsonEncode(<String, dynamic>{'k': 'v'}));
+
+    // A base-language import seeds all locales so fresh keys are translatable.
+    expect(_field(body!, 'apply_to_all_languages'), 'true');
+  });
+}
+
+/// Extracts a multipart form field's value from a raw request body.
+String _field(final String body, final String name) {
+  final RegExpMatch? m =
+      RegExp('name="$name"\\r?\\n\\r?\\n([^\\r\\n]*)').firstMatch(body);
+  return m?.group(1)?.trim() ?? '';
 }

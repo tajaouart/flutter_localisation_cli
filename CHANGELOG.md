@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1] - 2026-07-21
+### Fixed
+- **`import --language <code>` now writes ONLY that locale.** It was sending
+  `apply_to_all_languages=true` regardless, so a targeted per-locale import
+  clobbered every other language with the file's values. A base-language import
+  (no `--language`) still seeds all locales so fresh keys stay translatable.
+
 ## [1.2.0] - 2026-07-21
 ### Added
 - **ARB `@key` metadata now round-trips through the API.** `add` / `fl add` and
