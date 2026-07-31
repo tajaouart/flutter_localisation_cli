@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.0] - 2026-07-31
+### Added
+- **`fl guard` now teaches, not just blocks.** Alongside the `.claude/settings.json`
+  deny rules, it writes an AI-guidance block into `AGENTS.md` and `CLAUDE.md` in the
+  consuming repo, stating that the FlutterLocalisation SaaS is the source of truth
+  and showing the correct `fl add` / `fl edit` / `fl pull` workflow. A bare write
+  refusal made agents route *around* the guard (writing the string elsewhere); the
+  docs turn the block into an instruction. The block is delimited by
+  `<!-- fl:guard:start/end -->` markers and refreshed idempotently, so a project's
+  own notes in those files are preserved.
+- **MCP server advertises `instructions` on `initialize`.** Any AI client connecting
+  to `fl_mcp` now receives top-level guidance (SaaS is authoritative, never hand-edit
+  ARBs, mutate via tools then `fl pull`, preview-before-apply) before it calls a tool.
+
 ## [1.2.1] - 2026-07-21
 ### Fixed
 - **`import --language <code>` now writes ONLY that locale.** It was sending

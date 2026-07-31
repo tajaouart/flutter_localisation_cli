@@ -33,6 +33,22 @@ const String _protocolVersion = '2024-11-05';
 const String _serverName = 'flutter-localisation';
 const String _serverVersion = '1.0.0';
 
+/// Top-level guidance handed to the AI client in the `initialize` reply (the MCP
+/// `instructions` field). Frames the whole tool set so a model understands the
+/// SaaS is the source of truth before it touches a single string.
+const String _serverInstructions =
+    'FlutterLocalisation is the SOURCE OF TRUTH for this project\'s UI strings. '
+    'The ARB files and generated localization Dart in the consuming repo are '
+    'produced by this backend + `fl` codegen and are write-protected there — '
+    'never tell the user to hand-edit them, and never edit them yourself. '
+    'To add or change a string, use these tools (add_string / edit_string / '
+    'import_arb) or the dashboard, then have the user run `fl pull` to sync the '
+    'ARBs into their repo. Mutating tools are preview-by-default: pass '
+    '"apply": true only after the user confirms the diff. If git sync is '
+    'disconnected (see the warning in list_projects), the change is saved '
+    'server-side but ARBs will not update until the user reconnects GitHub in '
+    'the dashboard — surface that rather than editing files directly.';
+
 late final ManagementClient _client;
 late final ProjectResolver _resolver;
 
@@ -95,6 +111,7 @@ Future<void> _handle(final Map<String, dynamic> msg) async {
           'name': _serverName,
           'version': _serverVersion,
         },
+        'instructions': _serverInstructions,
       });
       return;
     case 'ping':

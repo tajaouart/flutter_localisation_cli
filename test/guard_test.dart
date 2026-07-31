@@ -83,4 +83,53 @@ void main() {
     final List<dynamic> deny = perms['deny'] as List<dynamic>;
     expect(deny.where((final dynamic e) => e == 'Edit(arbs/**)').length, 1);
   });
+
+  test('installAgentDocs creates AGENTS.md + CLAUDE.md with the managed block',
+      () {
+    final AgentDocsResult r = installAgentDocs(
+      tmp,
+      projectLabel: 'Atelier',
+      globs: <String>['arbs/**', 'lib/generated_translation_methods.dart'],
+    );
+
+    expect(r.files, hasLength(2));
+    expect(r.created, hasLength(2));
+    for (final String name in <String>['AGENTS.md', 'CLAUDE.md']) {
+      final String body = File('${tmp.path}/$name').readAsStringSync();
+      expect(body, contains(kGuardDocStart));
+      expect(body, contains(kGuardDocEnd));
+      expect(body, contains('Source of truth'),
+          reason: 'states the SaaS is authoritative');
+      expect(body, contains('project "Atelier"'));
+      expect(body, contains('fl pull'));
+      expect(body, contains('`arbs/**`'));
+    }
+  });
+
+  test('installAgentDocs is idempotent — re-run leaves exactly one block', () {
+    installAgentDocs(tmp, projectLabel: 'Atelier', globs: <String>['arbs/**']);
+    installAgentDocs(tmp, projectLabel: 'Atelier', globs: <String>['arbs/**']);
+
+    final String body = File('${tmp.path}/CLAUDE.md').readAsStringSync();
+    expect(kGuardDocStart.allMatches(body).length, 1);
+    expect(kGuardDocEnd.allMatches(body).length, 1);
+  });
+
+  test('installAgentDocs preserves surrounding content and refreshes the block',
+      () {
+    final File claude = File('${tmp.path}/CLAUDE.md')
+      ..writeAsStringSync('# My project\n\nHand-written notes stay.\n');
+
+    installAgentDocs(tmp, projectLabel: 'OldName', globs: <String>['arbs/**']);
+    installAgentDocs(tmp, projectLabel: 'NewName', globs: <String>['arbs/**']);
+
+    final String body = claude.readAsStringSync();
+    // The project's own content is untouched.
+    expect(body, contains('# My project'));
+    expect(body, contains('Hand-written notes stay.'));
+    // The managed block is refreshed in place, not duplicated.
+    expect(kGuardDocStart.allMatches(body).length, 1);
+    expect(body, contains('project "NewName"'));
+    expect(body, isNot(contains('project "OldName"')));
+  });
 }

@@ -136,6 +136,122 @@ GuardResult installGuard(
   );
 }
 
+// --------------------------------------------------------------------------- //
+// Agent-facing docs
+//
+// The deny rules above stop an AI from writing the managed files, but a bare
+// refusal teaches nothing — an agent that hits it tends to route *around* the
+// guard (write the string elsewhere) instead of using the SaaS. These docs turn
+// the block into an instruction: they state that FlutterLocalisation is the
+// source of truth and show the correct `fl` workflow. Written to the two files
+// coding agents read by convention — `AGENTS.md` (cross-tool) and `CLAUDE.md`
+// (Claude Code, loaded automatically).
+// --------------------------------------------------------------------------- //
+
+/// Markers delimiting the `fl guard`-managed region inside AGENTS.md / CLAUDE.md.
+/// Re-running the guard rewrites only what's between them, so a project's own
+/// notes in those files survive.
+const String kGuardDocStart = '<!-- fl:guard:start -->';
+const String kGuardDocEnd = '<!-- fl:guard:end -->';
+
+/// Result of writing/merging the agent guidance docs.
+class AgentDocsResult {
+  AgentDocsResult({required this.files, required this.created});
+
+  /// Absolute paths of the doc files written (AGENTS.md, CLAUDE.md).
+  final List<String> files;
+
+  /// Subset of [files] that were created fresh (vs. merged into an existing file).
+  final List<String> created;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'docs': files,
+        'docsCreated': created,
+      };
+}
+
+/// Render the managed guidance block. [projectLabel] is a human name/id for the
+/// SaaS project; [globs] are the write-protected paths, listed for reference.
+String renderAgentDocBlock({
+  required final String projectLabel,
+  required final List<String> globs,
+}) {
+  final String protectedList =
+      globs.map((final String g) => '  - `$g`').join('\n');
+  return '''
+$kGuardDocStart
+## Localization is managed by FlutterLocalisation — do not hand-edit strings
+
+**Source of truth: the FlutterLocalisation SaaS (project "$projectLabel"), NOT this repo.**
+Dashboard: https://app.flutterlocalisation.com · CLI: `fl`
+
+The ARB files and the generated localization Dart are produced by the backend and
+`fl` codegen. They are write-protected in `.claude/settings.json` (Edit/Write are
+denied) because the next sync silently overwrites any manual change — or drops it
+entirely, for the git-ignored ARB repo. Protected paths:
+$protectedList
+
+**Never hand-edit, create, or regenerate those files, and never route around the
+write-guard** (e.g. by writing the string into some other file). If an edit is
+refused, that is the guard working as intended.
+
+To add or change a user-facing string:
+1. Author it in the SaaS — the dashboard, or the `fl` CLI:
+   - `fl add <key> --value "Hello" --translate`
+   - `fl edit <key> --value "Hi" --locale en`
+2. Pull the regenerated ARBs into the repo: `fl pull`.
+3. Reference the key through the generated accessor in code.
+
+If the SaaS project is not connected to this git repo, `fl pull` (or the dashboard
+Export) is how the ARBs land here — ask the maintainer to connect the repo in the
+dashboard so it syncs automatically. Do not fabricate the ARB by hand instead.
+
+<!-- Managed by `fl guard`; content between these markers is regenerated. -->
+$kGuardDocEnd''';
+}
+
+/// Write/merge the managed guidance block into `AGENTS.md` and `CLAUDE.md` at
+/// [projectRoot]. Idempotent: an existing managed block is replaced in place,
+/// surrounding project content is preserved, a file without the block gets it
+/// appended, and a missing file is created with just the block.
+AgentDocsResult installAgentDocs(
+  final Directory projectRoot, {
+  required final String projectLabel,
+  required final List<String> globs,
+}) {
+  final String block =
+      renderAgentDocBlock(projectLabel: projectLabel, globs: globs);
+  final List<String> written = <String>[];
+  final List<String> created = <String>[];
+  for (final String name in <String>['AGENTS.md', 'CLAUDE.md']) {
+    final File f = File('${projectRoot.path}/$name');
+    final bool existed = f.existsSync();
+    final String next =
+        _mergeManagedBlock(existed ? f.readAsStringSync() : null, block);
+    f.writeAsStringSync(next);
+    written.add(f.path);
+    if (!existed) created.add(f.path);
+  }
+  return AgentDocsResult(files: written, created: created);
+}
+
+/// Splice [block] into [existing]: replace a prior `kGuardDocStart..kGuardDocEnd`
+/// region if present, else append the block to non-empty content, else return
+/// just the block for a fresh file.
+String _mergeManagedBlock(final String? existing, final String block) {
+  if (existing == null || existing.trim().isEmpty) {
+    return '$block\n';
+  }
+  final int start = existing.indexOf(kGuardDocStart);
+  final int end = existing.indexOf(kGuardDocEnd);
+  if (start >= 0 && end > start) {
+    final String before = existing.substring(0, start);
+    final String after = existing.substring(end + kGuardDocEnd.length);
+    return '$before$block$after';
+  }
+  return '${existing.trimRight()}\n\n$block\n';
+}
+
 String _normalizeDir(final String raw) {
   String s = raw.trim();
   if (s.startsWith('./')) s = s.substring(2);

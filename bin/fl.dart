@@ -469,7 +469,8 @@ class GuardCommand extends Command<int> {
   String get name => 'guard';
   @override
   String get description =>
-      'Protect ARBs + generated Dart from AI edits (writes .claude deny rules).';
+      'Protect ARBs + generated Dart from AI edits: writes .claude deny rules '
+      'and AI-guidance docs (AGENTS.md / CLAUDE.md).';
   @override
   String get invocation => 'fl guard';
 
@@ -480,6 +481,8 @@ class GuardCommand extends Command<int> {
     final Directory root = Directory.current;
     final List<String> globs =
         deriveGuardGlobs(root, arbDirFromConfig: cfg.arbDir);
+    final String projectLabel = cfg.project ??
+        (cfg.projectId != null ? 'project ${cfg.projectId}' : 'this workspace');
 
     if (_dryRun) {
       final List<String> rules = <String>[
@@ -487,7 +490,12 @@ class GuardCommand extends Command<int> {
       ];
       if (_jsonOut) {
         stdout.writeln(const JsonEncoder.withIndent('  ').convert(
-          <String, dynamic>{'dryRun': true, 'protected': globs, 'rules': rules},
+          <String, dynamic>{
+            'dryRun': true,
+            'protected': globs,
+            'rules': rules,
+            'docs': <String>['AGENTS.md', 'CLAUDE.md'],
+          },
         ),);
       } else {
         stdout.writeln('DRY RUN: would deny AI edits to:');
@@ -495,13 +503,18 @@ class GuardCommand extends Command<int> {
           stdout.writeln('  · $g');
         }
         stdout.writeln('in ${root.path}/.claude/settings.json');
+        stdout.writeln('and write AI-guidance docs: AGENTS.md, CLAUDE.md');
       }
       return 0;
     }
 
     final GuardResult r = installGuard(root, globs: globs);
+    final AgentDocsResult docs =
+        installAgentDocs(root, projectLabel: projectLabel, globs: globs);
     if (_jsonOut) {
-      stdout.writeln(const JsonEncoder.withIndent('  ').convert(r.toJson()));
+      stdout.writeln(const JsonEncoder.withIndent('  ').convert(
+        <String, dynamic>{...r.toJson(), ...docs.toJson()},
+      ),);
       return 0;
     }
     stdout.writeln(r.created
@@ -514,6 +527,11 @@ class GuardCommand extends Command<int> {
       for (final String g in r.protected) {
         stdout.writeln('    · $g');
       }
+    }
+    for (final String path in docs.files) {
+      stdout.writeln(docs.created.contains(path)
+          ? '✓ Wrote AI guidance → $path'
+          : '✓ Updated AI guidance → $path');
     }
     return 0;
   }
