@@ -43,11 +43,41 @@ const String _serverInstructions =
     'never tell the user to hand-edit them, and never edit them yourself. '
     'To add or change a string, use these tools (add_string / edit_string / '
     'import_arb) or the dashboard, then have the user run `fl pull` to sync the '
-    'ARBs into their repo. Mutating tools are preview-by-default: pass '
+    'ARBs into their repo. '
+    'WORK IN BULK. Adding or translating N strings must cost O(1) requests, not '
+    'O(N): collect them into an .arb file and call import_arb ONCE with '
+    'translate=true — it creates every key across every locale and '
+    'batch-translates server-side. To populate a NEW locale, call add_language '
+    'with auto_translate=true — that back-fills every existing key in one '
+    'server-side pass; never walk the keys yourself. '
+    'add_string is for a SINGLE one-off key. A loop over add_string, edit_string '
+    'or translate_key is always the wrong shape, and it is enforced in two '
+    'places: this server refuses add_string after a handful of applied calls, '
+    'and the backend rate-limits single-key creation to 10/min and answers with '
+    'a 429 naming the bulk endpoint. Neither is a signal to sleep and retry — '
+    'backing off just runs the same wrong algorithm slower. Switch to the bulk '
+    'call. '
+    'If a bulk call reports that nothing was translated, FIX THE BULK CALL — its '
+    'message says how (usually: import against the base language so every locale '
+    'is seeded) — rather than falling back to per-key writes. A silent "nothing '
+    'to translate" used to be the trap that pushed callers into ~700-request '
+    'loops; it is now a hard error for exactly that reason. '
+    'Mutating tools are preview-by-default: pass '
     '"apply": true only after the user confirms the diff. If git sync is '
     'disconnected (see the warning in list_projects), the change is saved '
     'server-side but ARBs will not update until the user reconnects GitHub in '
     'the dashboard — surface that rather than editing files directly.';
+
+/// How many single-key `add_string` writes one session may make before the
+/// server stops it and points at `import_arb`.
+///
+/// Prose in a tool description does not survive a model that has decided to
+/// loop, so the limit is enforced rather than documented. Five is above any
+/// genuine one-off edit session and far below the hundreds that a bulk import
+/// should have been.
+const int _kAddStringLoopLimit = 5;
+
+int _appliedAddStrings = 0;
 
 late final ManagementClient _client;
 late final ProjectResolver _resolver;
@@ -166,6 +196,17 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
         },
       },
       <String, dynamic>{
+        'name': 'project_repo',
+        'description':
+            'Get the ARB git repo URL the backend pushes generated ARBs to (set in the '
+                'dashboard → Project → Git). Use this to find the repo to clone into '
+                'arb_dir before running codegen. Read-only.',
+        'inputSchema': <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{..._projectProps},
+        },
+      },
+      <String, dynamic>{
         'name': 'list_status',
         'description':
             'Show translation completion per locale for a project/flavor. Read-only.',
@@ -177,8 +218,12 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       <String, dynamic>{
         'name': 'add_string',
         'description':
-            'Add a new translation key with its base-language value. Set translate=true to '
-                'AI-fill all other locales. Preview by default; pass apply=true to write.',
+            'Add ONE new translation key with its base-language value. Set translate=true to '
+                'AI-fill all other locales. Preview by default; pass apply=true to write. '
+                'DO NOT CALL THIS IN A LOOP: it costs one request per key plus one per '
+                'locale, and the server refuses after '
+                '$_kAddStringLoopLimit applied calls in a session. Adding two or more keys '
+                'is always import_arb instead — one request for every key and locale.',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
@@ -210,6 +255,13 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             'apply': <String, dynamic>{
               'type': 'boolean',
               'description': 'false = preview only (default); true = actually write.',
+              'default': false,
+            },
+            'force': <String, dynamic>{
+              'type': 'boolean',
+              'description':
+                  'Bypass the anti-loop limit for a genuine one-off key. Never set this '
+                      'to work through a list of keys — use import_arb.',
               'default': false,
             },
             ..._projectProps,
@@ -287,6 +339,71 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             ..._projectProps,
           },
           'required': <String>['key'],
+        },
+      },
+      <String, dynamic>{
+        'name': 'add_language',
+        'description':
+            'Add a locale to the flavor. With auto_translate=true the backend AI-fills '
+                'EVERY existing key for that locale in this one request, and keeps '
+                'translating keys added later. This is the ONLY correct way to populate a '
+                'new language — never iterate keys with translate_key or add_string to do '
+                'it. Preview by default; apply=true writes.',
+        'inputSchema': <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'code': <String, dynamic>{
+              'type': 'string',
+              'description': 'Locale code to add, e.g. "id", "th", "hi".',
+            },
+            'auto_translate': <String, dynamic>{
+              'type': 'boolean',
+              'description':
+                  'AI-fill every existing key for the new locale, server-side, in this '
+                      'same request. Almost always what you want.',
+              'default': false,
+            },
+            'apply': <String, dynamic>{'type': 'boolean', 'default': false},
+            ..._projectProps,
+          },
+          'required': <String>['code'],
+        },
+      },
+      <String, dynamic>{
+        'name': 'retranslate',
+        'description':
+            'Bulk-fix locales that are filled but NOT translated. Finds every value that '
+                'is empty, or still byte-identical to the source and not yet marked '
+                'checked, and AI-translates it across whole locales in batched requests. '
+                'This is the repair path for the case list_languages cannot show you: a '
+                'locale reports 100% filled because its rows hold the untranslated source '
+                'text, so the app ships in the source language while completion looks '
+                'done. translate_key cannot fix it — those rows are not "missing", and it '
+                'is one key per call. Values that are correctly identical to the source '
+                '(loanwords, product names, notation) should be marked checked, which '
+                'excludes them from future runs. Preview by default; apply=true writes.',
+        'inputSchema': <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'locales': <String, dynamic>{
+              'type': 'array',
+              'items': <String, dynamic>{'type': 'string'},
+              'description':
+                  'Locale code(s) to repair. Omit for every non-base locale.',
+            },
+            'apply': <String, dynamic>{'type': 'boolean', 'default': false},
+            ..._projectProps,
+          },
+        },
+      },
+      <String, dynamic>{
+        'name': 'list_languages',
+        'description':
+            'List the locales on the flavor with how many keys each has filled. Use this '
+                'before adding a language, and to confirm a back-fill actually landed.',
+        'inputSchema': <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{..._projectProps},
         },
       },
       <String, dynamic>{
@@ -377,12 +494,52 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
     final Operations ops =
         Operations(_client, target.projectId, flavor: target.flavor);
 
+    // Read-only and not an OpResult — answer directly.
+    if (name == 'project_repo') {
+      final ProjectData p = await _client.getProject(target.projectId);
+      final GitRepository? repo = p.repository;
+      _toolResult(id, <String, dynamic>{
+        'ok': repo != null,
+        'project': p.name,
+        if (repo == null)
+          'message': 'No git provider linked. Link one in the dashboard '
+              '→ Project → Git.'
+        else ...<String, dynamic>{
+          'provider': repo.provider,
+          'url': repo.url,
+          'clone_into': 'your l10n.yaml arb-dir (clone once, then git pull)',
+          if (repo.needsReauth)
+            'warning': 'Git sync is disconnected — reconnect in the dashboard; '
+                'ARB files are not updating.',
+        },
+      });
+      return;
+    }
+
     final OpResult r;
     switch (name) {
       case 'list_status':
         r = await ops.status();
       case 'add_string':
         {
+          if (apply) {
+            _appliedAddStrings++;
+          }
+          if (apply &&
+              _appliedAddStrings > _kAddStringLoopLimit &&
+              (a['force'] ?? false) != true) {
+            _appliedAddStrings = _kAddStringLoopLimit; // don't run away
+            throw StateError(
+              'Refusing add_string: $_kAddStringLoopLimit keys have already been '
+              'added one at a time in this session. Adding keys in a loop costs '
+              'one request per key (plus one per locale to translate) and will '
+              'hit the API rate limit. Write the remaining keys to an .arb file '
+              'and call import_arb once — it creates every key across every '
+              'locale in a single request, and translate=true batch-translates '
+              'them server-side. Pass force=true only if you genuinely need '
+              'another single key.',
+            );
+          }
           final Map<String, dynamic>? placeholders =
               (a['placeholders'] as Map<String, dynamic>?)?.isEmpty ?? true
                   ? null
@@ -419,6 +576,19 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
           locale: a['locale'] as String?,
           dryRun: !apply,
         );
+      case 'add_language':
+        r = await ops.addLanguage(
+          a['code'] as String,
+          autoTranslate: (a['auto_translate'] ?? false) as bool,
+          dryRun: !apply,
+        );
+      case 'retranslate':
+        r = await ops.retranslate(
+          locales: (a['locales'] as List<dynamic>?)?.cast<String>(),
+          dryRun: !apply,
+        );
+      case 'list_languages':
+        r = await ops.listLanguages();
       case 'translate_key':
         r = await ops.translate(
           a['key'] as String,

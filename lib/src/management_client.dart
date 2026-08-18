@@ -9,6 +9,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show stderr;
 
 import 'package:http/http.dart' as http;
 
@@ -60,16 +61,21 @@ class TranslationEntry {
 
 class LanguageData {
   LanguageData({
+    required this.id,
     required this.code,
     required this.isBase,
     required this.translations,
   });
 
+  /// Server id of the flavor-language row — what `/api/delete-language/<id>/`
+  /// addresses. Defaults to 0 for payloads that omit it (older fixtures).
+  final int id;
   final String code;
   final bool isBase;
   final List<TranslationEntry> translations;
 
   factory LanguageData.fromJson(final Map<String, dynamic> j) => LanguageData(
+        id: (j['id'] ?? 0) as int,
         code: (j['code'] ?? '') as String,
         isBase: (j['is_base_language'] ?? false) as bool,
         translations: ((j['translations'] ?? const <dynamic>[]) as List)
@@ -94,16 +100,70 @@ class FlavorData {
       );
 }
 
+/// The git repo the backend pushes generated ARBs to, as configured in the
+/// dashboard (Project → Git).
+///
+/// This is the repo you clone into `arb_dir`; the backend is the only writer.
+/// Exactly one provider can be linked at a time, so [url] is the linked one.
+class GitRepository {
+  GitRepository({
+    required this.provider,
+    required this.url,
+    this.needsReauth = false,
+  });
+
+  /// `github`, `gitlab`, `bitbucket` or `bitbucket_server`.
+  final String provider;
+  final String url;
+
+  /// True when the backend's git token is dead and must be reconnected in the
+  /// dashboard — ARB pushes are failing, so a `pull` won't see new strings.
+  final bool needsReauth;
+
+  /// Reads the `is_<provider>_linked` / `<provider>_repository_url` pairs the
+  /// project detail endpoint returns, and picks the linked one. Returns null
+  /// when no provider is linked (nothing to clone yet).
+  static GitRepository? fromProjectJson(final Map<String, dynamic> j) {
+    const Map<String, String> providers = <String, String>{
+      'github': 'github',
+      'gitlab': 'gitlab',
+      'bitbucket': 'bitbucket',
+      'bitbucket_server': 'bitbucket_server',
+    };
+    for (final MapEntry<String, String> p in providers.entries) {
+      final bool linked = (j['is_${p.key}_linked'] ?? false) as bool;
+      final String? url = j['${p.key}_repository_url'] as String?;
+      if (linked && url != null && url.isNotEmpty) {
+        return GitRepository(
+          provider: p.value,
+          url: url,
+          needsReauth: (j['git_needs_reauth'] ?? false) as bool,
+        );
+      }
+    }
+    return null;
+  }
+}
+
 class ProjectData {
-  ProjectData({required this.id, required this.name, required this.flavors});
+  ProjectData({
+    required this.id,
+    required this.name,
+    required this.flavors,
+    this.repository,
+  });
 
   final int id;
   final String name;
   final List<FlavorData> flavors;
 
+  /// The linked ARB repo, or null when the dashboard has no git provider set up.
+  final GitRepository? repository;
+
   factory ProjectData.fromJson(final Map<String, dynamic> j) => ProjectData(
         id: j['id'] as int,
         name: (j['name'] ?? '') as String,
+        repository: GitRepository.fromProjectJson(j),
         flavors: ((j['flavors'] ?? const <dynamic>[]) as List)
             .map((final e) => FlavorData.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -373,6 +433,36 @@ class ManagementClient {
     );
   }
 
+  /// Add a language to a flavor.
+  ///
+  /// With [autoTranslate] the backend AI-fills every EXISTING key for the new
+  /// locale in one server-side pass, and keeps translating keys added later.
+  /// That single call is what replaces walking the key list client-side, so it
+  /// is the only sane way to populate a new locale.
+  Future<Map<String, dynamic>> addLanguage(
+    final int projectId,
+    final int flavorId,
+    final String languageCode, {
+    final bool autoTranslate = false,
+  }) async {
+    final http.Response res = await _send(
+      'POST',
+      '/api/add-language/',
+      body: <String, dynamic>{
+        'project': projectId,
+        'flavor': flavorId,
+        'languageCode': languageCode,
+        'autoTranslate': autoTranslate,
+      },
+    );
+    return _json(res);
+  }
+
+  /// Remove a language (and its translations) from a flavor.
+  Future<void> deleteLanguage(final int languageId) async {
+    await _send('DELETE', '/api/delete-language/$languageId/');
+  }
+
   /// AI-translate and persist a set of translations (uses the batch endpoint,
   /// which — unlike the single endpoint — saves).
   Future<BatchTranslateResult> aiBatchTranslate(final List<int> ids) async {
@@ -504,11 +594,34 @@ class ManagementClient {
     return <String, dynamic>{'data': decoded};
   }
 
+  /// The longest we will sit on a `Retry-After` before giving up and telling
+  /// the caller what is actually happening.
+  ///
+  /// DRF sends `Retry-After` with the *full* remaining throttle window, which
+  /// for a drained daily cap can be 45+ minutes. Honouring that verbatim — as
+  /// this used to — makes every command look like it hung: no output, no exit,
+  /// nothing to distinguish "rate-limited for 45 minutes" from "the server
+  /// stopped responding". A caller that knows it is throttled can retry later;
+  /// a caller staring at a dead terminal cannot.
+  static const Duration _maxRetryAfterWait = Duration(seconds: 90);
+
   Future<void> _backoff(final int attempt, {final String? retryAfter}) async {
     if (retryAfter != null) {
       final int? secs = int.tryParse(retryAfter);
       if (secs != null) {
-        await Future<void>.delayed(Duration(seconds: secs));
+        final Duration wait = Duration(seconds: secs);
+        if (wait > _maxRetryAfterWait) {
+          throw ManagementException(
+            'Rate limited for another ${secs}s (${(secs / 60).ceil()} min) — '
+            'not waiting it out.\n'
+            'The daily request cap is spent. Re-run this command after that '
+            'window, and prefer one bulk call (`fl import`, '
+            '`fl languages add --auto-translate`) over looping single-key '
+            'commands, which is what exhausts the cap.',
+          );
+        }
+        stderr.writeln('Rate limited; retrying in ${secs}s…');
+        await Future<void>.delayed(wait);
         return;
       }
     }

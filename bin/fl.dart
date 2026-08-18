@@ -47,7 +47,11 @@ Future<void> main(final List<String> args) async {
   runner.addCommand(EditCommand());
   runner.addCommand(DeleteCommand());
   runner.addCommand(TranslateCommand());
+  runner.addCommand(LanguagesCommand());
   runner.addCommand(StatusCommand());
+  runner.addCommand(RetranslateCommand());
+  runner.addCommand(RepoCommand());
+  runner.addCommand(CloneCommand());
   runner.addCommand(PullCommand());
   runner.addCommand(GuardCommand());
 
@@ -223,7 +227,9 @@ class AddCommand extends Command<int> with _ApiCommand {
   @override
   String get name => 'add';
   @override
-  String get description => 'Add a translation key with its base value.';
+  String get description =>
+      'Add ONE translation key with its base value. For 2+ keys use `fl import` '
+      '(one request for every key and locale) — never loop this.';
   @override
   String get invocation =>
       'fl add <key> --value "<text>" [--translate] [--description "..."] '
@@ -409,6 +415,54 @@ class TranslateCommand extends Command<int> with _ApiCommand {
   }
 }
 
+/// Bulk counterpart to [TranslateCommand], which is per-key.
+///
+/// Exists because there was no way to repair a locale whose rows were filled
+/// with the source text: `translate` defaults to only-missing and those rows
+/// are not missing, and `--all` still covers one key per call.
+class RetranslateCommand extends Command<int> with _ApiCommand {
+  RetranslateCommand() {
+    argParser.addMultiOption('locale',
+        help: 'Locale(s) to repair. Omit for every non-base locale.');
+    argParser.addOption('chunk-size',
+        defaultsTo: '100', help: 'Translation ids per batch request.');
+  }
+
+  @override
+  String get name => 'retranslate';
+  @override
+  String get description =>
+      'AI-translate every empty value, and every unchecked value still identical '
+      'to the source.';
+  @override
+  String get invocation => 'fl retranslate [--locale ar --locale ru]';
+
+  @override
+  Future<int> run() async {
+    final ({ManagementClient client, Operations ops, String projectName}) built =
+        await build(loadProject());
+    try {
+      final OpResult r = await built.ops.retranslate(
+        locales: argResults!['locale'] as List<String>,
+        dryRun: dryRun,
+        chunkSize: int.parse(argResults!['chunk-size'] as String),
+      );
+      if (jsonOut) return emit(r);
+      stdout.writeln(r.message);
+      final Map<String, dynamic>? per =
+          (r.data['per_locale'] as Map<String, dynamic>?);
+      if (per != null) {
+        for (final MapEntry<String, dynamic> e in per.entries) {
+          stdout.writeln('  ${e.key}: ${e.value} value(s)');
+        }
+      }
+      return r.ok ? 0 : 1;
+    } finally {
+      built.client.close();
+    }
+  }
+}
+
 class StatusCommand extends Command<int> with _ApiCommand {
   @override
   String get name => 'status';
@@ -425,13 +479,245 @@ class StatusCommand extends Command<int> with _ApiCommand {
       for (final row in (r.data['locales'] as List)) {
         final Map<String, dynamic> m = row as Map<String, dynamic>;
         final String tag = (m['base'] as bool) ? ' (base)' : '';
+        // Show the translated count, not the filled one: a row still holding
+        // the source text is otherwise indistinguishable from a finished 100%.
+        final int untranslated = (m['untranslated'] as int?) ?? 0;
+        final String gap = untranslated > 0
+            ? '  ⚠ $untranslated same as source — `fl retranslate`'
+            : '';
         stdout.writeln(
-            '  ${m['locale']}$tag: ${m['filled']}/${m['total']} (${m['percent']}%)',);
+            '  ${m['locale']}$tag: ${m['translated'] ?? m['filled']}/${m['total']} '
+            '(${m['translated_percent'] ?? m['percent']}%)$gap',);
       }
       return 0;
     } finally {
       built.client.close();
     }
+  }
+}
+
+/// Manage the locales on a flavor.
+///
+/// `add --auto-translate` is the bulk primitive for a new language: ONE request,
+/// after which the backend AI-fills every existing key. Without it, callers
+/// reach for a per-key loop — which is how a 115-key project once cost 230
+/// requests and a rate-limit ban.
+class LanguagesCommand extends Command<int> with _ApiCommand {
+  LanguagesCommand() {
+    // `list` has to be a real subcommand: CommandRunner requires one whenever a
+    // command has any, so a bare `fl languages` never reaches run() below.
+    addSubcommand(LanguagesListCommand());
+    addSubcommand(LanguagesAddCommand());
+    addSubcommand(LanguagesRemoveCommand());
+  }
+
+  @override
+  String get name => 'languages';
+  @override
+  String get description =>
+      'List the project locales, or add/remove one (`languages add <code> '
+      '--auto-translate` back-fills every existing key in one request).';
+
+}
+
+class LanguagesListCommand extends Command<int> with _ApiCommand {
+  @override
+  String get name => 'list';
+  @override
+  String get description => 'List the locales and how many keys each has filled.';
+
+  @override
+  Future<int> run() async {
+    final ({ManagementClient client, Operations ops, String projectName}) built =
+        await build(loadProject());
+    try {
+      final OpResult r = await built.ops.listLanguages();
+      if (jsonOut) return emit(r);
+      stdout.writeln(r.message);
+      for (final row in (r.data['locales'] as List)) {
+        final Map<String, dynamic> m = row as Map<String, dynamic>;
+        final String tag = (m['base'] as bool) ? ' (base)' : '';
+        stdout.writeln('  ${m['locale']}$tag: ${m['filled']}/${m['keys']} filled');
+      }
+      return 0;
+    } finally {
+      built.client.close();
+    }
+  }
+}
+
+class LanguagesAddCommand extends Command<int> with _ApiCommand {
+  LanguagesAddCommand() {
+    argParser.addFlag('auto-translate',
+        abbr: 't',
+        negatable: false,
+        help: 'AI-fill every existing key for the new locale, server-side, in '
+            'this same request — and keep translating keys added later.',);
+  }
+
+  @override
+  String get name => 'add';
+  @override
+  String get description =>
+      'Add a locale. With --auto-translate the backend fills every existing key '
+      'in one pass — never loop `fl add`/`fl translate` to populate a locale.';
+  @override
+  String get invocation => 'fl languages add <code> [--auto-translate]';
+
+  @override
+  Future<int> run() async {
+    final List<String> rest = argResults!.rest;
+    if (rest.isEmpty) {
+      throw UsageException('Missing <code> argument, e.g. `fl languages add id`.', usage);
+    }
+    final ({ManagementClient client, Operations ops, String projectName}) built =
+        await build(loadProject());
+    try {
+      return emit(await built.ops.addLanguage(
+        rest.first,
+        autoTranslate: argResults!['auto-translate'] as bool,
+        dryRun: dryRun,
+      ));
+    } finally {
+      built.client.close();
+    }
+  }
+}
+
+class LanguagesRemoveCommand extends Command<int> with _ApiCommand {
+  @override
+  String get name => 'remove';
+  @override
+  String get description => 'Remove a locale and every translation it holds.';
+  @override
+  String get invocation => 'fl languages remove <code>';
+
+  @override
+  Future<int> run() async {
+    final List<String> rest = argResults!.rest;
+    if (rest.isEmpty) {
+      throw UsageException('Missing <code> argument.', usage);
+    }
+    final ({ManagementClient client, Operations ops, String projectName}) built =
+        await build(loadProject());
+    try {
+      return emit(await built.ops.removeLanguage(rest.first, dryRun: dryRun));
+    } finally {
+      built.client.close();
+    }
+  }
+}
+
+/// Print the ARB git repo the backend pushes to, as configured in the dashboard.
+///
+/// The project *detail* endpoint carries it (`<provider>_repository_url`); the
+/// list endpoint does not, so this always costs one extra GET.
+class RepoCommand extends Command<int> with _ApiCommand {
+  @override
+  String get name => 'repo';
+  @override
+  String get description =>
+      'Print the ARB git repo URL the backend pushes to (from the dashboard).';
+
+  @override
+  Future<int> run() async {
+    final ProjectConfig cfg = loadProject();
+    final ({ManagementClient client, Operations ops, String projectName}) built =
+        await build(cfg);
+    try {
+      final ProjectData p = await built.client.getProject(built.ops.projectId);
+      final GitRepository? repo = p.repository;
+      if (jsonOut) {
+        stdout.writeln(const JsonEncoder.withIndent('  ').convert(
+          <String, dynamic>{
+            'project': p.name,
+            'repository': repo == null
+                ? null
+                : <String, dynamic>{
+                    'provider': repo.provider,
+                    'url': repo.url,
+                    'needs_reauth': repo.needsReauth,
+                  },
+          },
+        ),);
+        return repo == null ? 1 : 0;
+      }
+      if (repo == null) {
+        stderr.writeln(
+            'No git provider linked for "${p.name}". Link one in the dashboard '
+            '→ Project → Git, then re-run.',);
+        return 1;
+      }
+      stdout.writeln('${repo.url}  (${repo.provider})');
+      if (repo.needsReauth) {
+        stderr.writeln(
+            'Warning: the git token needs reconnecting in the dashboard — '
+            'ARB pushes are currently failing.',);
+      }
+      return 0;
+    } finally {
+      built.client.close();
+    }
+  }
+}
+
+/// Clone the linked ARB repo into `arb_dir` — the first-run counterpart to
+/// `pull`, which only works once the repo is already on disk.
+class CloneCommand extends Command<int> with _ApiCommand {
+  @override
+  String get name => 'clone';
+  @override
+  String get description =>
+      'Clone the ARB repo into arb_dir (first-time setup; then use `pull`).';
+  @override
+  String get invocation => 'fl clone [<dir>]';
+
+  @override
+  Future<int> run() async {
+    final ProjectConfig cfg = loadProject();
+    final List<String> rest = argResults!.rest;
+    final String dir = rest.isNotEmpty ? rest.first : (cfg.arbDir ?? 'arbs');
+
+    final ({ManagementClient client, Operations ops, String projectName}) built =
+        await build(cfg);
+    final ProjectData p;
+    try {
+      p = await built.client.getProject(built.ops.projectId);
+    } finally {
+      built.client.close();
+    }
+
+    final GitRepository? repo = p.repository;
+    if (repo == null) {
+      stderr.writeln(
+          'No git provider linked for "${p.name}". Link one in the dashboard '
+          '→ Project → Git, then re-run.',);
+      return 1;
+    }
+    if (Directory(dir).existsSync() &&
+        Directory(dir).listSync().isNotEmpty) {
+      stderr.writeln(
+          'Error: "$dir" already exists and is not empty. Use `fl pull` to '
+          'update it, or pass a different <dir>.',);
+      return 1;
+    }
+    if (dryRun) {
+      stdout.writeln('DRY RUN: would clone ${repo.url} into "$dir".');
+      return 0;
+    }
+
+    stdout.writeln('Cloning ${repo.url} into "$dir" …');
+    final ProcessResult res = await Process.run(
+      'git',
+      <String>['clone', repo.url, dir],
+    );
+    stdout.write(res.stdout);
+    if (res.exitCode != 0) {
+      stderr.write(res.stderr);
+      return res.exitCode;
+    }
+    stdout.writeln('✓ Cloned. Add "/$dir/" to .gitignore — the backend owns it.');
+    return 0;
   }
 }
 

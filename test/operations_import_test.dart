@@ -129,6 +129,83 @@ void main() {
     // A base-language import seeds all locales so fresh keys are translatable.
     expect(_field(body!, 'apply_to_all_languages'), 'true');
   });
+
+  test('importArb naming the BASE language explicitly still seeds every locale',
+      () async {
+    String? body;
+    final MockClient mock = MockClient((final http.Request req) async {
+      if (req.url.path == '/api/projects/7/') return _project(req);
+      if (req.url.path == '/api/project/7/import-arb/') {
+        body = req.body;
+        return http.Response(
+            jsonEncode(<String, dynamic>{'import_status': 'success'}), 200);
+      }
+      return http.Response('{}', 200);
+    });
+    final ManagementClient client =
+        ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
+
+    await Operations(client, 7, flavor: 'default')
+        .importArb(jsonEncode(<String, dynamic>{'k': 'v'}), languageCode: 'en');
+
+    // `--language en` on an en-base project must behave exactly like omitting
+    // the flag. It used to scope the import to `en` alone, leaving the other
+    // locales without rows; `--translate` then found nothing, reported success,
+    // and the caller's only working fallback was one add+translate PER KEY.
+    expect(_field(body!, 'apply_to_all_languages'), 'true');
+  });
+
+  test('importArb --translate FAILS loudly when locales were left unseeded',
+      () async {
+    // en has the imported key, fr does not — the exact state the old code
+    // reported as "imported; nothing to translate", i.e. success with zero
+    // translations.
+    http.Response projectWithUnseededFr(final http.Request req) => http.Response(
+          jsonEncode(<String, dynamic>{
+            'id': 7,
+            'name': 'P',
+            'flavors': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'id': 3,
+                'name': 'default',
+                'languages': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'code': 'en',
+                    'is_base_language': true,
+                    'translations': <Map<String, dynamic>>[
+                      <String, dynamic>{'id': 1, 'key': 'k', 'value': 'v'},
+                    ],
+                  },
+                  <String, dynamic>{
+                    'code': 'fr',
+                    'is_base_language': false,
+                    'translations': <Map<String, dynamic>>[],
+                  },
+                ],
+              },
+            ],
+          }),
+          200,
+        );
+
+    final MockClient mock = MockClient((final http.Request req) async {
+      if (req.url.path == '/api/projects/7/') return projectWithUnseededFr(req);
+      return http.Response(
+          jsonEncode(<String, dynamic>{'import_status': 'success'}), 200);
+    });
+    final ManagementClient client =
+        ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
+
+    final OpResult r = await Operations(client, 7, flavor: 'default').importArb(
+      jsonEncode(<String, dynamic>{'k': 'v'}),
+      translate: true,
+    );
+
+    expect(r.ok, isFalse, reason: 'translating nothing is not success');
+    expect(r.message, contains('fr'));
+    expect(r.data['unseeded_locales'], <String>['fr']);
+    expect(r.data['translated'], 0);
+  });
 }
 
 /// Extracts a multipart form field's value from a raw request body.

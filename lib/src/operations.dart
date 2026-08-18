@@ -56,7 +56,18 @@ class Operations {
     final Map<int, String> backendErrors = <int, String>{
       for (final ({int id, String error}) f in r.failed) f.id: f.error,
     };
+    return _verify(ids, backendErrors);
+  }
 
+  /// Re-fetches the project and checks that each of [ids] actually changed.
+  ///
+  /// Split out of [_translateAndVerify] so a chunked bulk run can issue many
+  /// batch calls and pay for the (whole-project) re-fetch once at the end
+  /// instead of once per chunk.
+  Future<({int translated, List<({int id, String reason})> failed})> _verify(
+    final List<int> ids,
+    final Map<int, String> backendErrors,
+  ) async {
     final ProjectData after = await client.getProject(projectId);
     final FlavorData fl = after.flavor(flavor);
     final String? baseCode = after.baseLanguage(flavor)?.code;
@@ -194,14 +205,24 @@ class Operations {
       );
     }
 
-    // When a specific locale is targeted (`--language fr`), write ONLY that
-    // locale. `apply_to_all_languages` must stay true only for a base-language
-    // import, where seeding every locale with the base text is intended (so a
-    // fresh key is ready to translate). Passing a locale but applying to all
-    // would clobber every other language with this file's values.
+    // When a specific NON-BASE locale is targeted (`--language fr`), write ONLY
+    // that locale: applying a translated file to all languages would clobber
+    // every other language with French text.
+    //
+    // A base-language import seeds every locale, so a fresh key exists in all of
+    // them and is ready to translate. Naming the base language explicitly
+    // (`--language en` on an en-base project) MUST behave exactly like omitting
+    // it. It did not: `languageCode == null` was false, only `en` got rows, and
+    // `--translate` then found nothing to translate and reported success. The
+    // caller's only working fallback was add-then-translate per key — thousands
+    // of round trips instead of one import. Compare against the base code, not
+    // against null.
+    final String? baseCodeBefore = project.baseLanguage(flavor)?.code;
+    final bool targetsBaseLanguage =
+        languageCode == null || languageCode == baseCodeBefore;
     await client.importArb(projectId, fl.id, lang, arbContent,
         overwriteExisting: overwrite,
-        applyToAllLanguages: languageCode == null);
+        applyToAllLanguages: targetsBaseLanguage);
 
     if (!translate) {
       return OpResult(true, 'Imported $keyCount key(s) into "${fl.name}".',
@@ -243,8 +264,47 @@ class Operations {
       }
     }
     if (targets.isEmpty) {
-      return OpResult(true, 'Imported $keyCount key(s); nothing to translate.',
-          <String, dynamic>{'imported': keyCount});
+      // "Nothing to translate" has two very different causes and reporting both
+      // as success is what cost a caller thousands of redundant requests:
+      //
+      //  a) every locale already holds a real translation — genuinely nothing
+      //     to do, success;
+      //  b) the non-base locales have NO ROW for these keys at all, so there was
+      //     nothing to hand the batch translator. Success here is a lie: the
+      //     user asked for translation and got none.
+      //
+      // Case (b) must fail loudly and say how to fix it, because the symptom a
+      // caller sees ("✓ imported; nothing to translate" then 0% in `status`) is
+      // otherwise indistinguishable from (a).
+      final List<String> unseeded = <String>[];
+      for (final LanguageData l in after.flavor(flavor).languages) {
+        if (l.code == baseCode) continue;
+        final Set<String> present = <String>{
+          for (final TranslationEntry t in l.translations) t.key,
+        };
+        if (importedKeys.any((final String k) => !present.contains(k))) {
+          unseeded.add(l.code);
+        }
+      }
+      if (unseeded.isNotEmpty) {
+        return OpResult(
+          false,
+          'Imported $keyCount key(s), but ${unseeded.join(", ")} have no rows for '
+          'them, so --translate had nothing to work on. Re-run the import against '
+          'the base language (omit --language) so every locale is seeded, then '
+          'translate. Do NOT fall back to per-key add/translate.',
+          <String, dynamic>{
+            'imported': keyCount,
+            'translated': 0,
+            'unseeded_locales': unseeded,
+          },
+        );
+      }
+      return OpResult(
+        true,
+        'Imported $keyCount key(s); every locale already translated.',
+        <String, dynamic>{'imported': keyCount, 'translated': 0},
+      );
     }
     final ({int translated, List<({int id, String reason})> failed}) result =
         await _translateAndVerify(targets);
@@ -358,6 +418,25 @@ class Operations {
     }
     final List<int> ids = selected.map((final ({bool empty, int id, String locale}) e) => e.id).toList();
     if (ids.isEmpty) {
+      // A locale with no row for this key is invisible to `entriesForKey`, so it
+      // silently drops out of the selection and the command claims there is
+      // nothing to translate — even under `--all`, where the caller explicitly
+      // asked for every locale. Name the gap instead of swallowing it.
+      final Set<String> covered = <String>{
+        for (final ({bool empty, int id, String locale}) e in entries) e.locale,
+      };
+      final List<String> missing = <String>[
+        for (final LanguageData l in project.flavor(flavor).languages)
+          if (l.code != baseCode && !covered.contains(l.code)) l.code,
+      ];
+      if (missing.isNotEmpty) {
+        return OpResult(
+          false,
+          'Cannot translate "$key": ${missing.join(", ")} have no row for it. '
+          'Re-import the key against the base language so every locale is seeded.',
+          <String, dynamic>{'key': key, 'unseeded_locales': missing},
+        );
+      }
       return OpResult(true, 'Nothing to translate for "$key".');
     }
     if (dryRun) {
@@ -376,20 +455,292 @@ class Operations {
     );
   }
 
+  /// AI-translate, across whole locales, every value that still needs work.
+  ///
+  /// [translate] is per-key, so filling a locale through it costs one request
+  /// per key. This walks the key list once and hands the batch endpoint every
+  /// id that needs work, in chunks of [chunkSize].
+  ///
+  /// A value needs work when it is empty, or when it is byte-identical to the
+  /// base value and not yet [TranslationEntry.isChecked]. The second case is
+  /// the one no other command can reach: a locale whose rows hold the base
+  /// text is *filled* but not *translated*, so completion reporting counts it
+  /// as done while the app ships in the source language. [translate] cannot
+  /// repair it — those rows are not missing — and `--all` is still one key per
+  /// call.
+  ///
+  /// Two exclusions keep repeat runs from re-translating the same rows for
+  /// ever:
+  ///
+  /// - A row equal to its source but marked checked is treated as deliberate.
+  ///   Some strings are correctly identical in a given language — loanwords,
+  ///   product names, notation, values that are only placeholders — and
+  ///   marking one checked is how a reviewer records that decision. No
+  ///   heuristic here tries to guess which strings those are; that judgement
+  ///   belongs to whoever reviews the locale.
+  /// - A key whose base value is itself empty has nothing to translate from.
+  Future<OpResult> retranslate({
+    final List<String>? locales,
+    final bool dryRun = false,
+    final int chunkSize = 100,
+  }) async {
+    final ProjectData project = await client.getProject(projectId);
+    final FlavorData f = project.flavor(flavor);
+    final String? baseCode = project.baseLanguage(flavor)?.code;
+    if (baseCode == null) {
+      return OpResult(false, 'No base language on flavor "${f.name}".');
+    }
+    final Map<String, String> baseByKey = <String, String>{
+      for (final LanguageData l in f.languages)
+        if (l.code == baseCode)
+          for (final TranslationEntry t in l.translations) t.key: t.value,
+    };
+
+    if (locales != null && locales.isNotEmpty) {
+      final Set<String> known = <String>{
+        for (final LanguageData l in f.languages) l.code,
+      };
+      final List<String> unknown =
+          locales.where((final String c) => !known.contains(c)).toList();
+      if (unknown.isNotEmpty) {
+        return OpResult(
+          false,
+          'Not a locale on "${f.name}": ${unknown.join(", ")}.',
+          <String, dynamic>{'unknown_locales': unknown},
+        );
+      }
+    }
+
+    final List<int> ids = <int>[];
+    final Map<String, int> perLocale = <String, int>{};
+    for (final LanguageData l in f.languages) {
+      if (l.code == baseCode) continue;
+      if (locales != null && locales.isNotEmpty && !locales.contains(l.code)) {
+        continue;
+      }
+      var n = 0;
+      for (final TranslationEntry t in l.translations) {
+        final String? base = baseByKey[t.key];
+        if (base == null || base.trim().isEmpty) continue;
+        final bool needsWork = t.value.trim().isEmpty ||
+            (t.value.trim() == base.trim() && !t.isChecked);
+        if (needsWork) {
+          ids.add(t.id);
+          n++;
+        }
+      }
+      if (n > 0) perLocale[l.code] = n;
+    }
+
+    if (ids.isEmpty) {
+      return OpResult(true, 'Nothing to translate — every locale differs from the base.');
+    }
+    if (dryRun) {
+      return OpResult(
+        true,
+        'DRY RUN: would translate ${ids.length} value(s) across '
+        '${perLocale.length} locale(s).',
+        <String, dynamic>{'pending': ids.length, 'per_locale': perLocale},
+      );
+    }
+
+    final Map<int, String> backendErrors = <int, String>{};
+    for (var i = 0; i < ids.length; i += chunkSize) {
+      final List<int> chunk =
+          ids.sublist(i, i + chunkSize > ids.length ? ids.length : i + chunkSize);
+      final BatchTranslateResult r = await client.aiBatchTranslate(chunk);
+      for (final ({int id, String error}) fail in r.failed) {
+        backendErrors[fail.id] = fail.error;
+      }
+    }
+
+    final ({int translated, List<({int id, String reason})> failed}) result =
+        await _verify(ids, backendErrors);
+    return OpResult(
+      result.failed.isEmpty,
+      'Translated ${result.translated}/${ids.length} value(s) across '
+      '${perLocale.length} locale(s)'
+      '${result.failed.isNotEmpty ? ' (${result.failed.length} failed)' : ''}.',
+      <String, dynamic>{
+        'translated': result.translated,
+        'attempted': ids.length,
+        'per_locale': perLocale,
+        'failed': _failedJson(result.failed),
+      },
+    );
+  }
+
+  /// List the locales on the selected flavor.
+  Future<OpResult> listLanguages() async {
+    final ProjectData project = await client.getProject(projectId);
+    final FlavorData f = project.flavor(flavor);
+    return OpResult(
+      true,
+      'Languages on "${project.name}" / flavor "${f.name}".',
+      <String, dynamic>{
+        'flavor': f.name,
+        'locales': <Map<String, dynamic>>[
+          for (final LanguageData l in f.languages)
+            <String, dynamic>{
+              'locale': l.code,
+              'base': l.isBase,
+              'keys': l.translations.length,
+              'filled':
+                  l.translations.where((final TranslationEntry t) => !t.isEmpty).length,
+            },
+        ],
+      },
+    );
+  }
+
+  /// Add a locale to the flavor, optionally AI-filling every existing key.
+  ///
+  /// This is the bulk primitive for a new language: one request, and the backend
+  /// back-fills all existing keys. Callers must never iterate keys themselves.
+  Future<OpResult> addLanguage(
+    final String languageCode, {
+    final bool autoTranslate = false,
+    final bool dryRun = false,
+  }) async {
+    final ProjectData project = await client.getProject(projectId);
+    final FlavorData f = project.flavor(flavor);
+
+    final LanguageData? existing = f.languages
+        .where((final LanguageData l) => l.code == languageCode)
+        .firstOrNull;
+    if (existing != null) {
+      return OpResult(
+        false,
+        'Locale "$languageCode" is already on flavor "${f.name}".',
+        <String, dynamic>{'locale': languageCode},
+      );
+    }
+
+    final int keyCount = f.languages.isEmpty ? 0 : f.languages.first.translations.length;
+    if (dryRun) {
+      return OpResult(
+        true,
+        'DRY RUN: would add "$languageCode" to "${f.name}"'
+        '${autoTranslate ? ', AI-filling $keyCount existing key(s)' : ''}.',
+        <String, dynamic>{'locale': languageCode, 'keys': keyCount},
+      );
+    }
+
+    await client.addLanguage(projectId, f.id, languageCode,
+        autoTranslate: autoTranslate);
+
+    // Verify rather than trust. Reporting a success the backend did not deliver
+    // is exactly what sends callers back to per-key loops, so re-read the
+    // project and say what actually landed.
+    final ProjectData after = await client.getProject(projectId);
+    final LanguageData? added = after
+        .flavor(flavor)
+        .languages
+        .where((final LanguageData l) => l.code == languageCode)
+        .firstOrNull;
+    if (added == null) {
+      return OpResult(
+        false,
+        'Backend accepted the request but "$languageCode" is not on the project. '
+        'It may not be in the supported language list.',
+        <String, dynamic>{'locale': languageCode},
+      );
+    }
+    final int filled =
+        added.translations.where((final TranslationEntry t) => !t.isEmpty).length;
+    if (autoTranslate && keyCount > 0 && filled == 0) {
+      return OpResult(
+        false,
+        'Added "$languageCode", but auto-translate filled 0 of $keyCount key(s). '
+        'Re-run `fl translate` for the affected keys, or check the AI translation '
+        'quota — do NOT fall back to per-key adds.',
+        <String, dynamic>{'locale': languageCode, 'keys': keyCount, 'filled': 0},
+      );
+    }
+    return OpResult(
+      true,
+      'Added "$languageCode" to "${f.name}"'
+      '${autoTranslate ? ' and filled $filled/${added.translations.length} key(s)' : ''}.',
+      <String, dynamic>{
+        'locale': languageCode,
+        'keys': added.translations.length,
+        'filled': filled,
+      },
+    );
+  }
+
+  /// Remove a locale and every translation it holds.
+  Future<OpResult> removeLanguage(
+    final String languageCode, {
+    final bool dryRun = false,
+  }) async {
+    final ProjectData project = await client.getProject(projectId);
+    final FlavorData f = project.flavor(flavor);
+    final LanguageData? target = f.languages
+        .where((final LanguageData l) => l.code == languageCode)
+        .firstOrNull;
+    if (target == null) {
+      return OpResult(false, 'Locale "$languageCode" is not on flavor "${f.name}".');
+    }
+    if (target.isBase) {
+      return OpResult(false, 'Refusing to remove "$languageCode": it is the base language.');
+    }
+    if (dryRun) {
+      return OpResult(
+        true,
+        'DRY RUN: would remove "$languageCode" and its '
+        '${target.translations.length} translation(s).',
+      );
+    }
+    await client.deleteLanguage(target.id);
+    return OpResult(true, 'Removed "$languageCode" from "${f.name}".',
+        <String, dynamic>{'locale': languageCode});
+  }
+
   /// Completion status per locale for the selected flavor.
   Future<OpResult> status() async {
     final ProjectData project = await client.getProject(projectId);
     final FlavorData f = project.flavor(flavor);
+    // `filled` counts non-empty rows, which treats a row still holding the
+    // base text as done — so a locale can report 100% while the app ships in
+    // the source language.
+    //
+    // `filled` and `percent` keep their original meaning: they are part of the
+    // published response and existing callers parse them. The distinction is
+    // added alongside as `translated` / `untranslated` / `translated_percent`
+    // rather than folded into the old fields.
+    final String? baseCode = project.baseLanguage(flavor)?.code;
+    final Map<String, String> baseByKey = <String, String>{
+      for (final LanguageData l in f.languages)
+        if (l.code == baseCode)
+          for (final TranslationEntry t in l.translations) t.key: t.value,
+    };
     final List<Map<String, dynamic>> rows = <Map<String, dynamic>>[];
     for (final LanguageData l in f.languages) {
       final int total = l.translations.length;
       final int filled = l.translations.where((final TranslationEntry t) => !t.isEmpty).length;
+      // Rows a reviewer has marked checked are counted as translated even when
+      // they equal the source: that is how a deliberate match is recorded.
+      final int sameAsBase = l.isBase
+          ? 0
+          : l.translations.where((final TranslationEntry t) {
+              final String? base = baseByKey[t.key];
+              return base != null &&
+                  base.trim().isNotEmpty &&
+                  t.value.trim() == base.trim() &&
+                  !t.isChecked;
+            }).length;
+      final int translated = l.isBase ? total : filled - sameAsBase;
       rows.add(<String, dynamic>{
         'locale': l.code,
         'base': l.isBase,
         'filled': filled,
+        'untranslated': sameAsBase,
+        'translated': translated,
         'total': total,
         'percent': total == 0 ? 100 : ((filled / total) * 100).round(),
+        'translated_percent':
+            total == 0 ? 100 : ((translated / total) * 100).round(),
       });
     }
     return OpResult(true, 'Status for "${project.name}" / flavor "${f.name}".',
