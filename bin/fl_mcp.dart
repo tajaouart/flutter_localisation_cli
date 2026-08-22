@@ -391,6 +391,16 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
               'description':
                   'Locale code(s) to repair. Omit for every non-base locale.',
             },
+            'accept_unchanged': <String, dynamic>{
+              'type': 'boolean',
+              'default': false,
+              'description':
+                  'Mark every value that came back identical to the source as '
+                      'checked, excluding it from future runs. Without this, a '
+                      'correctly-identical row (a loanword, a product name) is '
+                      're-translated and re-reported on every run for ever. '
+                      'Review the "unchanged" list from a previous run first.',
+            },
             'apply': <String, dynamic>{'type': 'boolean', 'default': false},
             ..._projectProps,
           },
@@ -437,7 +447,9 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             },
             'translate': <String, dynamic>{
               'type': 'boolean',
-              'description': 'Batch-translate all empty non-base locales after import.',
+              'description': 'Create the keys AND translate them into every other '
+                  'locale in the same request. The backend does the filling, so '
+                  'there is no separate discovery-and-translate round trip.',
               'default': false,
             },
             'apply': <String, dynamic>{
@@ -586,6 +598,7 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
         r = await ops.retranslate(
           locales: (a['locales'] as List<dynamic>?)?.cast<String>(),
           dryRun: !apply,
+          acceptUnchanged: (a['accept_unchanged'] ?? false) as bool,
         );
       case 'list_languages':
         r = await ops.listLanguages();

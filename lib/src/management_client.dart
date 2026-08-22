@@ -14,6 +14,7 @@ import 'dart:io' show stderr;
 import 'package:http/http.dart' as http;
 
 import 'package:flutter_localisation_cli/src/exceptions.dart';
+import 'package:flutter_localisation_cli/src/locales.dart';
 
 // --------------------------------------------------------------------------- //
 // Data models
@@ -229,6 +230,30 @@ class ProjectData {
   }
 }
 
+/// The per-row failures carried on a batch response body, if it has any.
+///
+/// The batch endpoint answers 400 — not 207 — when *every* row in the chunk
+/// failed, and the interesting detail is still in `results.failed`. A caller
+/// that only sees the thrown top-level message ("All translations failed.")
+/// cannot tell a dead service from a chunk that happened to be all loanwords.
+///
+/// `translation_id` is null on some of these rows, so an entry is not always
+/// attributable to a specific translation; callers must handle a null id
+/// rather than assume one.
+List<({int? id, String error})> batchRowErrorsFrom(
+  final Map<String, dynamic>? body,
+) {
+  final Object? results = body?['results'];
+  if (results is! Map<String, dynamic>) return const <({int? id, String error})>[];
+  final Object? failed = results['failed'];
+  if (failed is! List) return const <({int? id, String error})>[];
+  return <({int? id, String error})>[
+    for (final Object? row in failed)
+      if (row is Map<String, dynamic>)
+        (id: row['translation_id'] as int?, error: (row['error'] ?? '') as String),
+  ];
+}
+
 class BatchTranslateResult {
   BatchTranslateResult({
     required this.status,
@@ -387,12 +412,22 @@ class ManagementClient {
   }
 
   /// Update a single translation. Only non-null fields are sent (partial update).
+  ///
+  /// Note that "partial" applies to what is *sent*, not to what is *validated*:
+  /// the backend re-validates the whole row, so a row missing a plural case its
+  /// locale requires rejects even an update that touches nothing but
+  /// `is_checked`. That is why every CLDR category is settable here — without
+  /// `many`, a French or Polish plural row cannot be completed, and therefore
+  /// cannot be edited at all.
   Future<Map<String, dynamic>> updateTranslation(
     final int translationId, {
     final String? value,
     final bool? isPluralEnabled,
     final String? zeroCase,
     final String? singularCase,
+    final String? twoCase,
+    final String? fewCase,
+    final String? manyCase,
     final String? pluralCase,
     final String? pluralParam,
     final bool? isPlaceholdersEnabled,
@@ -405,6 +440,13 @@ class ManagementClient {
       if (isPluralEnabled != null) 'is_plural_enabled': isPluralEnabled,
       if (zeroCase != null) 'zero_case': zeroCase,
       if (singularCase != null) 'singular_case': singularCase,
+      // `singular_case` is CLDR `one` and `plural_case` is CLDR `other`; the
+      // three below keep their CLDR names because there is no older alias to
+      // stay compatible with. `many_case` is confirmed by the backend's own
+      // validation message; `few_case` and `two_case` follow its naming.
+      if (twoCase != null) 'two_case': twoCase,
+      if (fewCase != null) 'few_case': fewCase,
+      if (manyCase != null) 'many_case': manyCase,
       if (pluralCase != null) 'plural_case': pluralCase,
       if (pluralParam != null) 'plural_param': pluralParam,
       if (isPlaceholdersEnabled != null)
@@ -487,6 +529,7 @@ class ManagementClient {
     final String arbContent, {
     final bool overwriteExisting = false,
     final bool applyToAllLanguages = true,
+    final bool autoTranslate = false,
   }) async {
     final Uri uri = _uri('/api/project/$projectId/import-arb/');
     const String path = '/api/project/.../import-arb/';
@@ -503,10 +546,13 @@ class ManagementClient {
           ..fields['apply_to_all_languages'] = applyToAllLanguages.toString()
           ..fields['apply_to_all_flavors'] = 'false'
           ..fields['overwrite_existing'] = overwriteExisting.toString()
+          // Server-side fill, so importing and translating are ONE round trip
+          // and the client never has to rediscover which rows it just made.
+          ..fields['auto_translate'] = autoTranslate.toString()
           ..files.add(http.MultipartFile.fromString(
             'arb_file',
             arbContent,
-            filename: 'app_$languageCode.arb',
+            filename: 'app_${arbSuffix(languageCode)}.arb',
           ));
         final http.StreamedResponse streamed = await _http.send(req);
         res = await http.Response.fromStream(streamed);
@@ -578,7 +624,14 @@ class ManagementClient {
     String message;
     try {
       parsed = jsonDecode(res.body) as Map<String, dynamic>;
-      message = (parsed['message'] ?? parsed['detail'] ?? res.reasonPhrase ?? '')
+      // `error` is in the list because some endpoints use it and dropping it
+      // left the caller with "POST /api/... failed" while the server had said
+      // exactly what was wrong.
+      message = (parsed['message'] ??
+              parsed['detail'] ??
+              parsed['error'] ??
+              res.reasonPhrase ??
+              '')
           .toString();
     } catch (_) {
       message = res.reasonPhrase ?? 'Request failed';

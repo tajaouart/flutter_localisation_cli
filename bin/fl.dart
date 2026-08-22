@@ -21,6 +21,7 @@ import 'package:args/command_runner.dart';
 import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/guard.dart';
+import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:flutter_localisation_cli/src/project_resolver.dart';
@@ -63,6 +64,7 @@ Future<void> main(final List<String> args) async {
     exit(64);
   } on ManagementException catch (e) {
     stderr.writeln('Error: ${e.message}');
+    if (e is ApiException) _writeRowErrors(e);
     final String msg = e.message.toLowerCase();
     if (msg.contains('re-auth') || msg.contains('token expired')) {
       stderr.writeln('Hint: the backend\'s GitHub connection is disconnected. The change '
@@ -75,6 +77,42 @@ Future<void> main(final List<String> args) async {
       stderr.writeln('Hint: run `fl login --token flk_live_...` or set \$FL_API_TOKEN.');
     }
     exit(1);
+  }
+}
+
+/// Canonicalise a locale typed on the command line.
+///
+/// `--locale pt_br` and `--locale PT-BR` mean `pt-BR`, which is the spelling
+/// the project holds; without this they are three different strings and every
+/// comparison against the project's locales misses. Junk is passed through
+/// untouched so the API's own error names the field.
+String? _locale(final String? code) =>
+    code == null ? null : canonicalizeOrKeep(code);
+
+List<String> _locales(final List<String> codes) =>
+    codes.map(canonicalizeOrKeep).toList();
+
+/// Print the per-row errors carried on a failed batch response.
+///
+/// When the whole batch is rejected, the top-level message is a summary —
+/// "All translations failed." — and the useful part is in `results.failed`,
+/// one entry per row with the backend's own reason. That detail was already
+/// being parsed into [ApiException.body] and then dropped on the floor, so a
+/// malformed plural row and a dead service printed the same sentence. One of
+/// those is a five-second fix and the other is an outage; the reader could not
+/// tell which they had.
+void _writeRowErrors(final ApiException e) {
+  final Object? results = e.body?['results'];
+  if (results is! Map<String, dynamic>) return;
+  final Object? failed = results['failed'];
+  if (failed is! List || failed.isEmpty) return;
+  stderr.writeln('The backend rejected these rows:');
+  for (final Object? row in failed.take(20)) {
+    if (row is! Map<String, dynamic>) continue;
+    stderr.writeln('  id ${row['id']}: ${row['error'] ?? 'no reason given'}');
+  }
+  if (failed.length > 20) {
+    stderr.writeln('  … and ${failed.length - 20} more.');
   }
 }
 
@@ -298,7 +336,7 @@ class ImportCommand extends Command<int> with _ApiCommand {
     try {
       final OpResult r = await built.ops.importArb(
         content,
-        languageCode: argResults!['language'] as String?,
+        languageCode: _locale(argResults!['language'] as String?),
         overwrite: argResults!['overwrite'] as bool,
         translate: argResults!['translate'] as bool,
         dryRun: dryRun,
@@ -320,6 +358,28 @@ class EditCommand extends Command<int> with _ApiCommand {
     argParser.addMultiOption('placeholder',
         help: 'Placeholder as name:type[:format] (repeatable), '
             'e.g. --placeholder count:int:decimalPattern.',);
+    // A plural row cannot be repaired through --value: the backend stores the
+    // cases separately and assembles the ICU itself, so it rejects a value
+    // carrying `{count}` with "unexpected ['count']". Without these flags the
+    // only way to fix a bad plural translation was the web dashboard.
+    argParser.addFlag('plural',
+        defaultsTo: null, help: 'Set is_plural_enabled true/false.');
+    argParser.addOption('singular-case',
+        help: 'Plural "one" case. Give the bare text — the placeholder is '
+            'added by --plural-param, so pass "image", not "{count} image".');
+    argParser.addOption('plural-case',
+        help: 'Plural "other" case, e.g. "images".');
+    argParser.addOption('zero-case', help: 'Plural "zero" case.');
+    // French, Spanish, Polish, Czech and others require CLDR's "many"; the
+    // Slavic locales require "few"; Arabic requires "two". A row missing a
+    // category its locale requires cannot be saved AT ALL — the backend
+    // re-validates the whole row, so even setting is_checked on it fails.
+    argParser.addOption('two-case', help: 'Plural "two" case (e.g. Arabic).');
+    argParser.addOption('few-case', help: 'Plural "few" case (e.g. Polish).');
+    argParser.addOption('many-case',
+        help: 'Plural "many" case (required by fr, es, it, pt, pl, cs …).');
+    argParser.addOption('plural-param',
+        help: 'Name of the count placeholder, e.g. count.');
   }
 
   @override
@@ -327,7 +387,9 @@ class EditCommand extends Command<int> with _ApiCommand {
   @override
   String get description => 'Edit a locale\'s value / flags of an existing key.';
   @override
-  String get invocation => 'fl edit <key> --locale <code> [--value "..."]';
+  String get invocation =>
+      'fl edit <key> --locale <code> [--value "..."] [--singular-case "..." '
+      '--plural-case "..."]';
 
   @override
   Future<int> run() async {
@@ -338,12 +400,20 @@ class EditCommand extends Command<int> with _ApiCommand {
     try {
       final OpResult r = await built.ops.edit(
         key,
-        argResults!['locale'] as String,
+        _locale(argResults!['locale'] as String)!,
         value: argResults!['value'] as String?,
         isChecked: argResults!['checked'] as bool?,
         isPlaceholdersEnabled: placeholders == null ? null : true,
         placeholders: placeholders,
         description: argResults!['description'] as String?,
+        isPluralEnabled: argResults!['plural'] as bool?,
+        singularCase: argResults!['singular-case'] as String?,
+        pluralCase: argResults!['plural-case'] as String?,
+        zeroCase: argResults!['zero-case'] as String?,
+        twoCase: argResults!['two-case'] as String?,
+        fewCase: argResults!['few-case'] as String?,
+        manyCase: argResults!['many-case'] as String?,
+        pluralParam: argResults!['plural-param'] as String?,
         dryRun: dryRun,
       );
       return emit(r);
@@ -373,7 +443,7 @@ class DeleteCommand extends Command<int> with _ApiCommand {
     try {
       final OpResult r = await built.ops.delete(
         key,
-        locale: argResults!['locale'] as String?,
+        locale: _locale(argResults!['locale'] as String?),
         dryRun: dryRun,
       );
       return emit(r);
@@ -405,10 +475,14 @@ class TranslateCommand extends Command<int> with _ApiCommand {
       final OpResult r = await built.ops.translate(
         key,
         all: argResults!['all'] as bool,
-        locales: argResults!['locale'] as List<String>,
+        locales: _locales(argResults!['locale'] as List<String>),
         dryRun: dryRun,
       );
-      return emit(r);
+      if (jsonOut) return emit(r);
+      final int code = emit(r);
+      _reportUnchanged(r);
+      _reportFailures(r);
+      return code;
     } finally {
       built.client.close();
     }
@@ -425,7 +499,15 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
     argParser.addMultiOption('locale',
         help: 'Locale(s) to repair. Omit for every non-base locale.');
     argParser.addOption('chunk-size',
-        defaultsTo: '100', help: 'Translation ids per batch request.');
+        defaultsTo: '1600',
+        help: 'Rows — (key, locale) pairs — per batch request. The default is '
+            'one full parallel round on the server (4 workers × up to 400 items '
+            'per Gemini call); lower it only if a request times out.');
+    argParser.addFlag('accept-unchanged',
+        negatable: false,
+        help: 'Mark every value that came back identical to the source as '
+            'checked, so it stops being re-translated on every run. Use after '
+            'reviewing the list this command prints.');
   }
 
   @override
@@ -435,7 +517,8 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
       'AI-translate every empty value, and every unchecked value still identical '
       'to the source.';
   @override
-  String get invocation => 'fl retranslate [--locale ar --locale ru]';
+  String get invocation =>
+      'fl retranslate [--locale ar --locale ru] [--accept-unchanged]';
 
   @override
   Future<int> run() async {
@@ -443,9 +526,10 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
         await build(loadProject());
     try {
       final OpResult r = await built.ops.retranslate(
-        locales: argResults!['locale'] as List<String>,
+        locales: _locales(argResults!['locale'] as List<String>),
         dryRun: dryRun,
         chunkSize: int.parse(argResults!['chunk-size'] as String),
+        acceptUnchanged: argResults!['accept-unchanged'] as bool,
       );
       if (jsonOut) return emit(r);
       stdout.writeln(r.message);
@@ -456,10 +540,89 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
           stdout.writeln('  ${e.key}: ${e.value} value(s)');
         }
       }
+      _reportUnchanged(r);
+      _reportFailures(r);
+      _reportAcceptFailures(r);
       return r.ok ? 0 : 1;
     } finally {
       built.client.close();
     }
+  }
+}
+
+/// Print the rows that refused the checked flag, with the backend's reason.
+///
+/// A row missing a plural case its locale requires cannot be saved at all —
+/// the backend re-validates the whole row, so even an update touching nothing
+/// but `is_checked` is rejected. The message names the missing case, which is
+/// the difference between a two-minute `fl edit --many-case` and a warning
+/// nobody can explain.
+void _reportAcceptFailures(final OpResult r) {
+  final List<dynamic> rows =
+      (r.data['accept_failed'] as List<dynamic>?) ?? const <dynamic>[];
+  if (rows.isEmpty) return;
+  stderr.writeln('\n${rows.length} value(s) could not be marked checked:');
+  for (final dynamic row in rows.take(20)) {
+    final Map<String, dynamic> m = row as Map<String, dynamic>;
+    stderr.writeln('  ${m['error']}');
+  }
+  if (rows.length > 20) {
+    stderr.writeln('  … and ${rows.length - 20} more (use --json for all).');
+  }
+}
+
+/// Print the rows that came back identical to their source, and name the
+/// remedy.
+///
+/// These are not failures — most are loanwords that are genuinely the same
+/// word in the target language — so they are reported apart from real errors
+/// and never change the exit code. What they need is a decision, and the
+/// listing is what makes that decision possible: nobody can confirm "Nature is
+/// correct in French" from a bare count.
+void _reportUnchanged(final OpResult r) {
+  final List<dynamic> rows =
+      (r.data['unchanged'] as List<dynamic>?) ?? const <dynamic>[];
+  if (rows.isEmpty) return;
+  final int accepted = (r.data['accepted'] as int?) ?? 0;
+  stdout.writeln('\n${rows.length} value(s) came back identical to the source.');
+  stdout.writeln(
+      'That is usually correct — loanwords and product names ("OK", "Premium", '
+      '"Normal") are the same word in many languages.');
+  const int limit = 20;
+  for (final dynamic row in rows.take(limit)) {
+    final Map<String, dynamic> m = row as Map<String, dynamic>;
+    stdout.writeln('  ${m['locale']}  ${m['key']}');
+  }
+  if (rows.length > limit) {
+    stdout.writeln('  … and ${rows.length - limit} more (use --json for all).');
+  }
+  if (accepted > 0) {
+    stdout.writeln(
+        'Marked $accepted as checked; they will not be re-translated again.');
+  } else {
+    stdout.writeln(
+        'Review them, then re-run with --accept-unchanged to mark them checked '
+        'and stop re-translating them on every run.');
+  }
+}
+
+/// Print the real per-row backend errors.
+///
+/// The reason string is the backend's own — e.g. "When plural is enabled,
+/// 'singular_case' must be provided for locale 'hi'" — and it is the whole
+/// value of the bucket. A count alone sends people looking for a translator
+/// when what is wrong is a malformed plural row.
+void _reportFailures(final OpResult r) {
+  final List<dynamic> rows =
+      (r.data['failed'] as List<dynamic>?) ?? const <dynamic>[];
+  if (rows.isEmpty) return;
+  stderr.writeln('\n${rows.length} value(s) failed:');
+  for (final dynamic row in rows.take(20)) {
+    final Map<String, dynamic> m = row as Map<String, dynamic>;
+    stderr.writeln('  id ${m['id']}: ${m['error']}');
+  }
+  if (rows.length > 20) {
+    stderr.writeln('  … and ${rows.length - 20} more (use --json for all).');
   }
 }
 
@@ -476,18 +639,34 @@ class StatusCommand extends Command<int> with _ApiCommand {
       final OpResult r = await built.ops.status();
       if (jsonOut) return emit(r);
       stdout.writeln(r.message);
+      var totalUntranslated = 0;
       for (final row in (r.data['locales'] as List)) {
         final Map<String, dynamic> m = row as Map<String, dynamic>;
         final String tag = (m['base'] as bool) ? ' (base)' : '';
         // Show the translated count, not the filled one: a row still holding
         // the source text is otherwise indistinguishable from a finished 100%.
         final int untranslated = (m['untranslated'] as int?) ?? 0;
+        totalUntranslated += untranslated;
         final String gap = untranslated > 0
             ? '  ⚠ $untranslated same as source — `fl retranslate`'
             : '';
         stdout.writeln(
             '  ${m['locale']}$tag: ${m['translated'] ?? m['filled']}/${m['total']} '
             '(${m['translated_percent'] ?? m['percent']}%)$gap',);
+      }
+      // Without this, a project whose remaining gap is entirely loanwords shows
+      // a warning on most of its locales that `fl retranslate` can never clear
+      // — the translator keeps returning the same correct answer. A warning
+      // nobody can act on is one everybody learns to ignore, so name the second
+      // half of the remedy here.
+      if (totalUntranslated > 0) {
+        stdout.writeln(
+            '\nSome of those are probably correct: a loanword is the same word '
+            'in both languages.');
+        stdout.writeln(
+            'Run `fl retranslate` to fill the real gaps, then '
+            '`fl retranslate --accept-unchanged` to mark the deliberate matches '
+            'checked and clear these warnings for good.');
       }
       return 0;
     } finally {

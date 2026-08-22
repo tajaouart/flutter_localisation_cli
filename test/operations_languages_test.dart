@@ -137,6 +137,96 @@ void main() {
     expect(hits.any((final String h) => h.contains('add-language')), isFalse);
   });
 
+  test('addLanguage canonicalises the code before comparing and sending',
+      () async {
+    final List<String> hits = <String>[];
+    String? body;
+    var call = 0;
+    final MockClient mock = MockClient((final http.Request req) async {
+      hits.add('${req.method} ${req.url.path}');
+      if (req.url.path == '/api/projects/7/') {
+        call++;
+        return http.Response(
+          call == 1
+              ? _project(keys: 1)
+              : _project(keys: 1, extra: <String, List<String>>{
+                  'pt-BR': <String>['olá'],
+                }),
+          200,
+        );
+      }
+      body = req.body;
+      return http.Response('{}', 200);
+    });
+    final ManagementClient client =
+        ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
+
+    final OpResult r =
+        await Operations(client, 7, flavor: 'default').addLanguage('pt_br');
+
+    expect(r.ok, isTrue);
+    // The backend stores `pt-BR`. Sending `pt_br` made a second row for one
+    // locale, and the verify-after-write read below never found what it added.
+    expect((jsonDecode(body!) as Map<String, dynamic>)['languageCode'], 'pt-BR');
+    expect(r.data['locale'], 'pt-BR');
+  });
+
+  test('addLanguage refuses a variant the flavor already has, however spelled',
+      () async {
+    final List<String> hits = <String>[];
+    final MockClient mock = MockClient((final http.Request req) async {
+      hits.add('${req.method} ${req.url.path}');
+      return http.Response(
+        _project(keys: 1, extra: <String, List<String>>{'pt-BR': <String>['x']}),
+        200,
+      );
+    });
+    final ManagementClient client =
+        ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
+
+    final OpResult r =
+        await Operations(client, 7, flavor: 'default').addLanguage('PT-br');
+
+    expect(r.ok, isFalse);
+    expect(r.message, contains('already'));
+    expect(hits.any((final String h) => h.contains('add-language')), isFalse);
+  });
+
+
+  test('addLanguage treats a retry\'s "already exists" as the success it is',
+      () async {
+    var call = 0;
+    final MockClient mock = MockClient((final http.Request req) async {
+      if (req.url.path == '/api/projects/7/') {
+        call++;
+        return http.Response(
+          call == 1
+              ? _project(keys: 2)
+              : _project(keys: 2, extra: <String, List<String>>{
+                  'pt-BR': <String>['oi0', 'oi1'],
+                }),
+          200,
+        );
+      }
+      // What the server says when the first attempt already created the row
+      // and the client, having timed out waiting for the AI fill, retried.
+      return http.Response(
+        jsonEncode(<String, dynamic>{
+          'error': "Language 'pt-BR' already exists for this flavor.",
+        }),
+        400,
+      );
+    });
+    final ManagementClient client =
+        ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
+
+    final OpResult r = await Operations(client, 7, flavor: 'default')
+        .addLanguage('pt-BR', autoTranslate: true);
+
+    expect(r.ok, isTrue);
+    expect(r.data['filled'], 2);
+  });
+
   test('addLanguage dry run resolves but writes nothing', () async {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {

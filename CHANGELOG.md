@@ -1,5 +1,79 @@
 # Changelog
 
+## [1.5.0] - 2026-08-22
+### Fixed
+- **Regional and script locales are handled as one identity.** Locale codes
+  arrived as whatever was typed, so `fl languages add pt_br` compared `pt_br`
+  against the project's `pt-BR`, found no match, and asked the API to create a
+  locale that already existed. Every locale argument is now canonicalised to
+  BCP-47 (`pt_br` / `PT-BR` → `pt-BR`, `zh_hant` → `zh-Hant`, `es_419`
+  unchanged) before it is compared or sent. Junk is passed through untouched so
+  the API's own error still names the field.
+- **The ARB uploaded by `import` carries the filename gen_l10n reads.** A
+  variant produced `app_pt-BR.arb`, which Flutter's generator does not pick up
+  at all; it is now `app_pt_BR.arb`.
+- **`add --auto-translate` no longer reports a success as a failure.** The
+  server-side fill of a large project can outlive the socket, and the retry then
+  reached a locale the first attempt had already created. That 400 is now
+  followed by the same verify-and-report read as the happy path.
+- **A rejected request shows the server's own reason.** Errors carrying `error`
+  rather than `message`/`detail` printed "POST /api/... failed" while the
+  server had said exactly what was wrong.
+
+## [1.4.0] - 2026-08-20
+### Changed
+- **A value that comes back identical to its source is no longer reported as a
+  failure.** It is almost always the correct answer — "OK", "Premium", "Normal",
+  "Start", French *Nature*, German *Name* — and calling it a failure cost more
+  than tidiness. It trained readers to skip the number; it hid the genuine
+  errors sitting in the same count; and because identical-to-source is
+  `retranslate`'s *selection* criterion, it left those rows queued to be
+  re-translated and re-reported on every run for ever. `translate`, `add`,
+  `import` and `retranslate` now report `translated` / `failed` / `unchanged`
+  separately, and only a real error affects the exit code.
+- **The backend's own per-row reasons are printed instead of summed.** A count
+  of failures cannot distinguish a malformed plural row from a dead service;
+  the reason string can, and it was already being parsed and then discarded.
+  This applies to the whole-batch rejection path too, where the detail lives in
+  `results.failed` behind a top-level "All translations failed."
+
+### Added
+- **`fl retranslate --accept-unchanged`** (`accept_unchanged` on MCP) marks every
+  value that came back identical to its source as checked, which `status` and
+  `retranslate` already honour. This is what makes the queue closable: nothing
+  in the pipeline previously *set* checked, so a deliberately-identical row
+  could never leave the work list. Reviewers can flip any of them back with
+  `fl edit --no-checked`.
+- **`fl edit` gained the plural fields**: `--singular-case`, `--plural-case`,
+  `--zero-case`, `--two-case`, `--few-case`, `--many-case`, `--plural-param`,
+  `--plural`. The backend stores plural cases separately and rejects a
+  `--value` carrying the placeholder, so a bad plural translation previously
+  could not be repaired from the terminal at all.
+- **The client models every CLDR plural category.** It had `zero`, `one`
+  (`singular_case`) and `other` (`plural_case`) only — no `two`, `few` or
+  `many`. French, Spanish, Italian, Portuguese, Polish and Czech all require
+  `many`; Polish and Czech also require `few`; Arabic requires `two`. Because
+  the backend re-validates the *whole* row on any write, a row missing a
+  category its locale requires could not be saved at all — not even an update
+  touching nothing but `is_checked`. Those rows were unfixable through the CLI
+  and unexplainable from its output, since the reason was being discarded.
+
+### Fixed
+- **`import --translate` no longer reports a successful import as a total
+  failure.** The import is written before the translate phase runs, so a
+  timeout there — the likeliest outcome for a large import, and the one that
+  actually happened with 837 keys — surfaced as a bare `Error: Gateway
+  Time-out` from a run whose keys were all safely created. Nothing said the
+  keys were in, and nothing named the one-command remedy. It now reports what
+  was imported, what failed, and points at `fl retranslate`, which chunks and
+  therefore survives what one large request does not.
+- **A whole-batch 400 whose rows are all identical-to-source no longer aborts
+  the run.** "Every row in the chunk failed" is a 400 rather than a 207, and it
+  is the *normal* outcome once the only gap left is loanwords — so a project in
+  exactly that state could never complete a run, and therefore could never
+  reach `--accept-unchanged` to get out of it. A rejection carrying no per-row
+  detail is still fatal, so a genuine outage is not absorbed.
+
 ## [1.3.0] - 2026-07-31
 ### Added
 - **`fl guard` now teaches, not just blocks.** Alongside the `.claude/settings.json`

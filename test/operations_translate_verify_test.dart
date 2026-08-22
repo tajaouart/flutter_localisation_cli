@@ -71,17 +71,21 @@ ManagementClient _client(String esValue) {
 }
 
 void main() {
-  test('silent false success is caught: es still == base → reported failed',
+  test('silent false success is caught: es still == base → reported unchanged',
       () async {
+    // The guard here is the count, not the bucket: `translated` must stay at 2
+    // so a row holding the source text can never be passed off as finished.
+    // It is reported as unchanged rather than failed because no error
+    // occurred — and because "Hello" may simply be what Spanish uses.
     final OpResult r = await Operations(_client('Hello'), 9, flavor: 'default')
         .translate('greeting', all: true);
-    expect(r.ok, isFalse, reason: 'must not report ok when a locale is untranslated');
     expect(r.data['translated'], 2, reason: 'fr + de changed; es did not');
-    final List<dynamic> failed = r.data['failed'] as List<dynamic>;
-    expect(failed, hasLength(1));
-    expect((failed.first as Map)['id'], 3);
+    expect(r.data['failed'], isEmpty, reason: 'no backend error occurred');
+    final List<dynamic> unchanged = r.data['unchanged'] as List<dynamic>;
+    expect(unchanged, hasLength(1));
+    expect((unchanged.first as Map)['id'], 3);
     expect(r.message, contains('2/3'));
-    expect(r.message, contains('1 failed'));
+    expect(r.message, contains('1 unchanged'));
   });
 
   test('genuinely translated (es differs from base) → all counted, ok',
