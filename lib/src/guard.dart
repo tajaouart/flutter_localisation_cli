@@ -202,6 +202,21 @@ To add or change a user-facing string:
 2. Pull the regenerated ARBs into the repo: `fl pull`.
 3. Reference the key through the generated accessor in code.
 
+**Work in bulk. Never loop a `fl` command.** Every one of these commands already
+takes the whole job; running it once per item is what exhausts the daily API
+budget, and it is refused after a few calls:
+
+| Instead of looping…                    | Run once                                        |
+| -------------------------------------- | ----------------------------------------------- |
+| `fl add` per key                        | `fl import <file>.arb --translate`               |
+| `fl languages add <code>` per locale    | `fl languages add <c1> <c2> <c3> --auto-translate` |
+| `fl retranslate --locale <one>` per locale | `fl retranslate` (no `--locale` = every locale) |
+| `fl translate <key>` per key            | `fl retranslate`                                 |
+
+A 429 or a refusal is never a signal to sleep and retry: backing off runs the
+same wrong algorithm slower. Switch to the bulk call. If a request times out, do
+not shrink the batch — the client halves and retries on its own.
+
 If the SaaS project is not connected to this git repo, `fl pull` (or the dashboard
 Export) is how the ARBs land here — ask the maintainer to connect the repo in the
 dashboard so it syncs automatically. Do not fabricate the ARB by hand instead.

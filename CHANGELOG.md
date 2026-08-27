@@ -1,5 +1,91 @@
 # Changelog
 
+## [1.7.0] - 2026-08-26
+### Added
+- **The loop is refused, and the refusal names the command to run instead.**
+  A caller that runs a bulk-capable command one target at a time is stopped on
+  the fourth such call in 15 minutes (`lib/src/call_budget.dart`), with the
+  runnable bulk form printed. The ledger is on disk, not in memory: every `fl`
+  run is a fresh VM, so an in-process counter sees exactly one call and never
+  fires — the loop is only visible across processes. The guard sits below
+  `Operations`, so the CLI and the MCP server inherit it from one place; a guard
+  only the CLI enforced would be one an agent routes around by calling the MCP
+  tool. A *wide* call is never refused, and clears the history — penalising the
+  correct command is the one outcome worse than not guarding at all.
+- **`fl languages add` takes many codes.** `fl languages add ja ko th
+  --auto-translate` walks the list in a single command, orders base languages
+  before their script/region variants (`zh` before `zh-Hant`, which the backend
+  requires and which callers previously had to rediscover by hitting the error),
+  and stops on the first throttle instead of collecting one 429 per locale. The
+  MCP `add_language` tool takes `codes: []` to match; the singular `code`
+  remains for a genuine one-off.
+
+- **`fl export`** — write every locale's ARB straight from the API. `clone`/
+  `pull` only work when the dashboard has a git provider linked *and* the
+  repository it names exists; when it does not, a project can be fully
+  translated while the app still ships one language, and nothing in the tool
+  could close the gap. This is the dashboard's Export, from the terminal. The
+  ARBs are still the backend's data — `@@locale` matches the file name (gen_l10n
+  aborts the build when they disagree) and `@key` metadata goes in the template
+  only.
+- **`POST /api/translations/bulk-check/`** and `bulkCheckTranslations`, removing
+  the last per-row loop in the pipeline — and the worst one. `--accept-unchanged`
+  walked every identical-to-source row through `update_translation`, which
+  regenerates and git-pushes every ARB per call: ~1,400 requests and ~1,400 ARB
+  pushes for one pass, an hour of wall clock. Now one request. It also fixes a
+  dead end: a row missing a plural case its locale requires could not be marked
+  checked *at all*, because the single-row serializer revalidated the whole row
+  and rejected an update touching nothing but the flag — so those rows were
+  re-translated on every run for ever.
+
+### Removed
+- **`fl retranslate --chunk-size`.** It read as a tuning knob and behaved as a
+  quota multiplier: lowering it eightfold to clear one gateway timeout turned a
+  33-locale repair into ~260 requests. Chunking is now adaptive — a timeout
+  halves the batch and retries, down to a 100-row floor. The machine can see the
+  timeout; a human reading a help string cannot see the request count they just
+  signed up for.
+
+### Notes
+- Prompted by a real incident on 26 Aug 2026: an agent localising a Flutter app
+  into 36 locales ran `fl languages add <code>` 34 times and `fl retranslate
+  --locale <one> --chunk-size 200` 33 times, and drained a 1000/day budget in
+  under an hour. Every request was valid; only the shape was wrong. The existing
+  `SingleKeyWriteThrottle` did not cover these doors. The backend now throttles
+  them too (`localization/api/throttles.py`), so the wall holds even for a
+  client that has not been updated.
+
+## [1.6.0] - 2026-08-23
+### Added
+- **`fl native` — declare the app's locales to iOS and Android, and translate
+  the iOS permission alerts.** The ARBs only cover the UI. Three things sit
+  outside them and rot silently, because nothing at runtime notices when they
+  are wrong: `CFBundleLocalizations` (absent, iOS reads the bundle as
+  English-only and the App Store Languages row says so — a 31-language app
+  advertised one), `res/xml/locales_config.xml` (absent, Android never offers a
+  per-app language), and the `NS*UsageDescription` strings, which iOS draws
+  itself from the bundle before the Dart isolate exists and which therefore no
+  `context.tr` can ever reach. The command generates all three from the locales
+  the project already ships, writes one `<code>.lproj/InfoPlist.strings` per
+  language and registers it with the Xcode target — an unregistered resource is
+  never copied into the bundle, which is indistinguishable from never having
+  translated it. `--check` fails on drift for CI, `--dry-run` previews,
+  `--init-copy` scaffolds the copy file. Offline and tokenless: a drift check
+  should not need credentials.
+- **`sync_native_locales` MCP tool**, the same thing for Claude, preview-by-
+  default like every other mutating tool.
+
+### Notes
+- The permission sentences live in `<ios-target>/InfoPlist.copy.json`, not on
+  the dashboard: they never reach Dart, so the ARB pipeline would add a
+  round-trip and buy nothing. A locale with no entry is a hard failure, not a
+  silent fallback to the development language — a fluent alert in the wrong
+  language reads as finished and ships.
+- iOS spellings are handled: `fil` beside `tl`, `zh-Hans`/`zh-Hant` instead of a
+  bare `zh` that modern iOS will not match, and an exact locale always beats the
+  expansion that would otherwise shadow it (Traditional Chinese was the case
+  that mattered).
+
 ## [1.5.0] - 2026-08-22
 ### Fixed
 - **Regional and script locales are handled as one identity.** Locale codes

@@ -419,6 +419,29 @@ class ManagementClient {
   /// `is_checked`. That is why every CLDR category is settable here — without
   /// `many`, a French or Polish plural row cannot be completed, and therefore
   /// cannot be edited at all.
+  /// Set `is_checked` on many rows in ONE request.
+  ///
+  /// The single-row path calls `generate_and_push_arb_files` per call, so
+  /// accepting a run's loanword rows one at a time cost a request *and* a full
+  /// ARB regeneration each — ~1,400 of both for one `--accept-unchanged` pass.
+  /// Returns how many rows the backend actually updated.
+  Future<int> bulkCheckTranslations(
+    final List<int> ids, {
+    final bool isChecked = true,
+  }) async {
+    if (ids.isEmpty) return 0;
+    final http.Response res = await _send(
+      'POST',
+      '/api/translations/bulk-check/',
+      body: <String, dynamic>{
+        'translation_ids': ids,
+        'is_checked': isChecked,
+      },
+    );
+    final Map<String, dynamic> j = _json(res);
+    return (j['updated'] as int?) ?? 0;
+  }
+
   Future<Map<String, dynamic>> updateTranslation(
     final int translationId, {
     final String? value,

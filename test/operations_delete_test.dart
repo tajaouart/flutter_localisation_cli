@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_localisation_cli/src/management_client.dart';
+import 'package:flutter_localisation_cli/src/call_budget.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -16,7 +17,7 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock);
     final OpResult r =
-        await Operations(client, 7, flavor: 'default').delete('greeting');
+        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).delete('greeting');
     expect(r.ok, isTrue);
     expect(hits, contains('POST /api/projects/7/translation_keys/delete/'));
     // Must NOT fetch the project or hit per-translation delete for a whole-key delete.
@@ -54,7 +55,7 @@ void main() {
     });
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock);
-    final OpResult r = await Operations(client, 7, flavor: 'default')
+    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
         .delete('greeting', locale: 'fr');
     expect(r.ok, isTrue);
     expect(hits, contains('DELETE /api/translations/42/delete/'));

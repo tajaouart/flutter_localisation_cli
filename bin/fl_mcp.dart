@@ -26,6 +26,7 @@ import 'dart:io';
 import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
+import 'package:flutter_localisation_cli/src/native_sync.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:flutter_localisation_cli/src/project_resolver.dart';
 
@@ -186,6 +187,39 @@ Map<String, dynamic> get _projectProps => <String, dynamic>{
 
 List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       <String, dynamic>{
+        'name': 'sync_native_locales',
+        'description':
+            "Declare the app's locales to iOS and Android, and translate the "
+                'iOS permission alerts. Writes CFBundleLocalizations into '
+                'Info.plist, res/xml/locales_config.xml on Android, and one '
+                '<code>.lproj/InfoPlist.strings per locale registered with the '
+                'Xcode target. Use it after adding or removing a locale — none '
+                'of these files come from the ARBs, and nothing at runtime '
+                'notices when they are stale: the store page just quietly '
+                'claims one language, and the camera prompt stays English. '
+                'Offline, no token. Call with apply=false first to see what is '
+                'stale. The permission sentences come from '
+                '<ios-target>/InfoPlist.copy.json, which the model should '
+                'write and translate itself — they are not ARB keys and never '
+                'reach Dart.',
+        'inputSchema': <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'project_root': <String, dynamic>{
+              'type': 'string',
+              'description':
+                  'Path to the Flutter project root. Defaults to the working '
+                      'directory the server was started in.',
+            },
+            'apply': <String, dynamic>{
+              'type': 'boolean',
+              'description':
+                  'false (default) reports what is stale; true writes it.',
+            },
+          },
+        },
+      },
+      <String, dynamic>{
         'name': 'list_projects',
         'description':
             'List the projects (with their flavors and locales) this token can access. '
@@ -344,17 +378,29 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       <String, dynamic>{
         'name': 'add_language',
         'description':
-            'Add a locale to the flavor. With auto_translate=true the backend AI-fills '
-                'EVERY existing key for that locale in this one request, and keeps '
-                'translating keys added later. This is the ONLY correct way to populate a '
-                'new language — never iterate keys with translate_key or add_string to do '
-                'it. Preview by default; apply=true writes.',
+            'Add one or MORE locales to the flavor. With auto_translate=true the backend '
+                'AI-fills EVERY existing key for those locales, and keeps translating keys '
+                'added later. This is the ONLY correct way to populate a new language — '
+                'never iterate keys with translate_key or add_string to do it. '
+                'PASS EVERY LOCALE YOU WANT IN `codes` — one call, not one call per '
+                'locale; a loop over this tool is refused. Base languages are ordered '
+                'first automatically, so you can pass "zh-Hant" and "zh" together. '
+                'Preview by default; apply=true writes.',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
+            'codes': <String, dynamic>{
+              'type': 'array',
+              'items': <String, dynamic>{'type': 'string'},
+              'description':
+                  'Locale codes to add, e.g. ["id","th","hi"]. Pass ALL of them '
+                      'at once.',
+            },
             'code': <String, dynamic>{
               'type': 'string',
-              'description': 'Locale code to add, e.g. "id", "th", "hi".',
+              'description':
+                  'Deprecated single-locale form; prefer `codes`. Only for a '
+                      'genuine one-off.',
             },
             'auto_translate': <String, dynamic>{
               'type': 'boolean',
@@ -366,7 +412,6 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             'apply': <String, dynamic>{'type': 'boolean', 'default': false},
             ..._projectProps,
           },
-          'required': <String>['code'],
         },
       },
       <String, dynamic>{
@@ -389,7 +434,9 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
               'type': 'array',
               'items': <String, dynamic>{'type': 'string'},
               'description':
-                  'Locale code(s) to repair. Omit for every non-base locale.',
+                  'Locale code(s) to repair. OMIT THIS to repair every locale in '
+                      'one pass — that is almost always correct and costs the same '
+                      'rows. Calling this tool once per locale is refused.',
             },
             'accept_unchanged': <String, dynamic>{
               'type': 'boolean',
@@ -470,6 +517,46 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
   final bool apply = (a['apply'] ?? false) as bool;
 
   try {
+    // sync_native_locales touches only the local repo — no token, no project.
+    if (name == 'sync_native_locales') {
+      final Directory root = Directory(
+        (a['project_root'] as String?) ?? Directory.current.path,
+      );
+      if (!root.existsSync()) {
+        _toolResult(id, <String, dynamic>{
+          'ok': false,
+          'message': 'No such directory: ${root.path}',
+        });
+        return;
+      }
+      final NativeSyncPlan plan;
+      try {
+        plan = planNativeSync(root);
+      } on StateError catch (e) {
+        _toolResult(id, <String, dynamic>{'ok': false, 'message': e.message});
+        return;
+      }
+      final List<String> stale = plan.stale;
+      final List<String> changed = apply ? applyNativeSync(plan) : stale;
+      _toolResult(id, <String, dynamic>{
+        'ok': true,
+        'applied': apply,
+        'locales': plan.locales,
+        'message': apply
+            ? 'Wrote ${changed.length} file(s) for ${plan.locales.length} locale(s).'
+            : stale.isEmpty
+                ? 'Already current for ${plan.locales.length} locale(s).'
+                : '${stale.length} file(s) stale — call again with apply=true.',
+        apply ? 'changed' : 'stale': changed
+            .map((final String path) => path.startsWith(root.path)
+                ? path.substring(root.path.length + 1)
+                : path)
+            .toList(),
+        if (plan.notes.isNotEmpty) 'notes': plan.notes,
+      });
+      return;
+    }
+
     // list_projects needs no project resolution.
     if (name == 'list_projects') {
       final List<ProjectSummary> projects =
@@ -589,8 +676,17 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
           dryRun: !apply,
         );
       case 'add_language':
-        r = await ops.addLanguage(
-          a['code'] as String,
+        final List<String> codes = <String>[
+          for (final Object? c in (a['codes'] as List<dynamic>?) ?? const <dynamic>[])
+            c.toString(),
+          if (a['code'] != null) a['code'].toString(),
+        ];
+        if (codes.isEmpty) {
+          throw ArgumentError('add_language needs `codes` (an array of locale '
+              'codes). Pass every locale you want in one call.');
+        }
+        r = await ops.addLanguages(
+          codes,
           autoTranslate: (a['auto_translate'] ?? false) as bool,
           dryRun: !apply,
         );

@@ -23,6 +23,7 @@ import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/guard.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
+import 'package:flutter_localisation_cli/src/native_sync.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:flutter_localisation_cli/src/project_resolver.dart';
 
@@ -55,6 +56,8 @@ Future<void> main(final List<String> args) async {
   runner.addCommand(CloneCommand());
   runner.addCommand(PullCommand());
   runner.addCommand(GuardCommand());
+  runner.addCommand(NativeCommand());
+  runner.addCommand(ExportCommand());
 
   try {
     final int? code = await runner.run(args);
@@ -497,12 +500,9 @@ class TranslateCommand extends Command<int> with _ApiCommand {
 class RetranslateCommand extends Command<int> with _ApiCommand {
   RetranslateCommand() {
     argParser.addMultiOption('locale',
-        help: 'Locale(s) to repair. Omit for every non-base locale.');
-    argParser.addOption('chunk-size',
-        defaultsTo: '1600',
-        help: 'Rows — (key, locale) pairs — per batch request. The default is '
-            'one full parallel round on the server (4 workers × up to 400 items '
-            'per Gemini call); lower it only if a request times out.');
+        help: 'Locale(s) to repair — repeatable. OMIT to repair every locale '
+            'in one pass, which is almost always what you want; never loop '
+            'this command one locale at a time.');
     argParser.addFlag('accept-unchanged',
         negatable: false,
         help: 'Mark every value that came back identical to the source as '
@@ -528,7 +528,6 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
       final OpResult r = await built.ops.retranslate(
         locales: _locales(argResults!['locale'] as List<String>),
         dryRun: dryRun,
-        chunkSize: int.parse(argResults!['chunk-size'] as String),
         acceptUnchanged: argResults!['accept-unchanged'] as bool,
       );
       if (jsonOut) return emit(r);
@@ -738,25 +737,37 @@ class LanguagesAddCommand extends Command<int> with _ApiCommand {
   String get name => 'add';
   @override
   String get description =>
-      'Add a locale. With --auto-translate the backend fills every existing key '
-      'in one pass — never loop `fl add`/`fl translate` to populate a locale.';
+      'Add one or MORE locales in a single call. With --auto-translate the '
+      'backend fills every existing key in one pass — pass every locale you '
+      'want at once; never loop this command.';
   @override
-  String get invocation => 'fl languages add <code> [--auto-translate]';
+  String get invocation =>
+      'fl languages add <code> [<code> ...] [--auto-translate]';
 
   @override
   Future<int> run() async {
     final List<String> rest = argResults!.rest;
     if (rest.isEmpty) {
-      throw UsageException('Missing <code> argument, e.g. `fl languages add id`.', usage);
+      throw UsageException(
+          'Missing <code> argument, e.g. `fl languages add id ja ko`.', usage);
     }
     final ({ManagementClient client, Operations ops, String projectName}) built =
         await build(loadProject());
     try {
-      return emit(await built.ops.addLanguage(
-        rest.first,
+      final OpResult r = await built.ops.addLanguages(
+        _locales(rest),
         autoTranslate: argResults!['auto-translate'] as bool,
         dryRun: dryRun,
-      ));
+      );
+      if (jsonOut) return emit(r);
+      stdout.writeln(r.message);
+      for (final dynamic row
+          in (r.data['results'] as List<dynamic>?) ?? const <dynamic>[]) {
+        final Map<String, dynamic> m = row as Map<String, dynamic>;
+        stdout.writeln('  ${m['ok'] == true ? '✓' : '✗'} ${m['locale']}  '
+            '${m['message'] ?? ''}');
+      }
+      return r.ok ? 0 : 1;
     } finally {
       built.client.close();
     }
@@ -1002,10 +1013,192 @@ class GuardCommand extends Command<int> {
   }
 }
 
+/// `fl native` — the half of localisation that is not the ARBs.
+///
+/// Offline and tokenless on purpose: it reads the locales the project already
+/// ships and writes what iOS and Android need to know about them. Somebody
+/// running this in CI to check for drift should not need credentials.
+class NativeCommand extends Command<int> {
+  NativeCommand() {
+    argParser
+      ..addFlag('check',
+          negatable: false,
+          help: 'Fail if anything is stale, without writing. For CI.',)
+      ..addFlag('init-copy',
+          negatable: false,
+          help: 'Write a starter InfoPlist.copy.json from the current '
+              'Info.plist, then stop.',);
+  }
+
+  bool get _jsonOut => (globalResults?['json'] as bool?) ?? false;
+  bool get _dryRun => (globalResults?['dry-run'] as bool?) ?? false;
+
+  @override
+  String get name => 'native';
+  @override
+  String get description =>
+      "Declare the app's locales to iOS and Android, and translate the iOS "
+      'permission alerts (Info.plist, locales_config.xml, *.lproj).';
+  @override
+  String get invocation => 'fl native [--check] [--init-copy]';
+
+  @override
+  Future<int> run() async {
+    final Directory root = Directory.current;
+    String? arbDir;
+    try {
+      arbDir = ProjectConfig.load(path: globalResults?['config'] as String?).arbDir;
+    } on Object {
+      // No project config is fine: locales come from the generated Dart, and
+      // this command has nothing to say to the backend.
+      arbDir = null;
+    }
+
+    if (argResults?['init-copy'] as bool? ?? false) {
+      final Directory? target = findIosTargetDir(root);
+      if (target == null) {
+        stderr.writeln('No iOS target found under ${root.path}/ios.');
+        return 1;
+      }
+      final File out = File('${target.path}/$kCopyFileName');
+      if (out.existsSync()) {
+        stderr.writeln('${out.path} already exists — not overwriting it.');
+        return 1;
+      }
+      final NativeSyncPlan plan = planNativeSync(root, arbDir: arbDir);
+      out.writeAsStringSync(
+        initCopyFile(target, plan.locales.contains('en') ? 'en' : plan.locales.first),
+      );
+      stdout.writeln('✓ Wrote ${out.path}');
+      stdout.writeln('  Translate it into: ${plan.locales.join(", ")}');
+      stdout.writeln('  Then run `fl native`.');
+      return 0;
+    }
+
+    final NativeSyncPlan plan;
+    try {
+      plan = planNativeSync(root, arbDir: arbDir);
+    } on StateError catch (e) {
+      stderr.writeln(e.message);
+      return 1;
+    }
+    final List<String> stale = plan.stale;
+
+    if (argResults?['check'] as bool? ?? false) {
+      if (_jsonOut) {
+        stdout.writeln(const JsonEncoder.withIndent('  ').convert(
+          <String, dynamic>{
+            'locales': plan.locales,
+            'stale': stale,
+            'notes': plan.notes,
+          },
+        ),);
+      }
+      if (stale.isEmpty) {
+        if (!_jsonOut) {
+          stdout.writeln('✓ Native locale declarations match '
+              '${plan.locales.length} locale(s).');
+        }
+        return 0;
+      }
+      if (!_jsonOut) {
+        stderr.writeln('Stale for ${plan.locales.length} locale(s):');
+        for (final String path in stale) {
+          stderr.writeln('  · ${_relative(path, root)}');
+        }
+        stderr.writeln('Run: fl native');
+      }
+      return 1;
+    }
+
+    if (_dryRun) {
+      stdout.writeln('DRY RUN: would write ${stale.length} file(s) for '
+          '${plan.locales.length} locale(s):');
+      for (final String path in stale) {
+        stdout.writeln('  · ${_relative(path, root)}');
+      }
+      for (final String note in plan.notes) {
+        stdout.writeln('  ! $note');
+      }
+      return 0;
+    }
+
+    final List<String> changed = applyNativeSync(plan);
+    if (_jsonOut) {
+      stdout.writeln(const JsonEncoder.withIndent('  ').convert(
+        <String, dynamic>{
+          'locales': plan.locales,
+          'changed': changed,
+          'notes': plan.notes,
+        },
+      ),);
+      return 0;
+    }
+    stdout.writeln(changed.isEmpty
+        ? '✓ Already current: ${plan.locales.length} locale(s).'
+        : '✓ Updated ${changed.length} file(s) for ${plan.locales.length} locale(s).');
+    for (final String note in plan.notes) {
+      stdout.writeln('  ! $note');
+    }
+    return 0;
+  }
+
+  String _relative(final String path, final Directory root) =>
+      path.startsWith(root.path) ? path.substring(root.path.length + 1) : path;
+}
+
 String _requireKey(final Command<int> cmd) {
   final List<String> rest = cmd.argResults!.rest;
   if (rest.isEmpty) {
     throw UsageException('Missing <key> argument.', cmd.usage);
   }
   return rest.first;
+}
+
+/// Write every locale's ARB straight from the API.
+///
+/// `clone`/`pull` are the normal path, but they only work when the dashboard
+/// has a git provider linked AND the repository it names actually exists. When
+/// it does not — an unfinished OAuth step, a deleted repo — the project can be
+/// fully translated while the app still ships one language, and until this
+/// command there was nothing in the tool that could close the gap. The ARBs are
+/// still generated from the backend's data, not hand-written; this is the
+/// dashboard's Export, from the terminal.
+class ExportCommand extends Command<int> with _ApiCommand {
+  @override
+  String get name => 'export';
+  @override
+  String get description =>
+      'Write every locale to app_<locale>.arb in arb_dir, straight from the '
+      'API. Use when the ARB git repo is not linked (otherwise prefer `pull`).';
+  @override
+  String get invocation => 'fl export [<dir>]';
+
+  @override
+  Future<int> run() async {
+    final ProjectConfig cfg = loadProject();
+    final String dir = argResults!.rest.isNotEmpty
+        ? argResults!.rest.first
+        : (cfg.arbDir ?? 'arbs/Default');
+    final ({ManagementClient client, Operations ops, String projectName}) built =
+        await build(cfg);
+    try {
+      final OpResult r = await built.ops.exportArbs(dir, dryRun: dryRun);
+      if (jsonOut) return emit(r);
+      stdout.writeln(r.message);
+      for (final dynamic row
+          in (r.data['files'] as List<dynamic>?) ?? const <dynamic>[]) {
+        final Map<String, dynamic> m = row as Map<String, dynamic>;
+        stdout.writeln('  ${m['file']}  ${m['keys']} key(s)'
+            '${m['base'] == true ? '  (template)' : ''}');
+      }
+      if (r.ok && !dryRun) {
+        stdout.writeln('\nNow regenerate the Dart: `flutter pub get` then '
+            '`flutter pub run flutter_localisation:generate <flavor>`.');
+      }
+      return r.ok ? 0 : 1;
+    } finally {
+      built.client.close();
+    }
+  }
 }

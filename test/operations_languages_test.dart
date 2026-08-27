@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_localisation_cli/src/management_client.dart';
+import 'package:flutter_localisation_cli/src/call_budget.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -74,7 +75,7 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default')
+    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
         .addLanguage('id', autoTranslate: true);
 
     expect(r.ok, isTrue);
@@ -108,7 +109,7 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default')
+    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
         .addLanguage('id', autoTranslate: true);
 
     // Must not claim success: that is what pushes callers into per-key loops.
@@ -130,7 +131,7 @@ void main() {
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
     final OpResult r =
-        await Operations(client, 7, flavor: 'default').addLanguage('id');
+        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).addLanguage('id');
 
     expect(r.ok, isFalse);
     expect(r.message, contains('already'));
@@ -162,7 +163,7 @@ void main() {
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
     final OpResult r =
-        await Operations(client, 7, flavor: 'default').addLanguage('pt_br');
+        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).addLanguage('pt_br');
 
     expect(r.ok, isTrue);
     // The backend stores `pt-BR`. Sending `pt_br` made a second row for one
@@ -185,7 +186,7 @@ void main() {
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
     final OpResult r =
-        await Operations(client, 7, flavor: 'default').addLanguage('PT-br');
+        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).addLanguage('PT-br');
 
     expect(r.ok, isFalse);
     expect(r.message, contains('already'));
@@ -220,7 +221,7 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default')
+    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
         .addLanguage('pt-BR', autoTranslate: true);
 
     expect(r.ok, isTrue);
@@ -236,7 +237,7 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default')
+    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
         .addLanguage('th', autoTranslate: true, dryRun: true);
 
     expect(r.ok, isTrue);
@@ -255,7 +256,7 @@ void main() {
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
     final OpResult r =
-        await Operations(client, 7, flavor: 'default').removeLanguage('en');
+        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).removeLanguage('en');
 
     expect(r.ok, isFalse);
     expect(r.message, contains('base language'));
@@ -278,9 +279,96 @@ void main() {
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
     final OpResult r =
-        await Operations(client, 7, flavor: 'default').removeLanguage('id');
+        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).removeLanguage('id');
 
     expect(r.ok, isTrue);
     expect(hits, contains('DELETE /api/delete-language/200/'));
+  });
+
+  // ── Bulk add ──────────────────────────────────────────────────────────────
+  //
+  // The singular form was an open invitation to `for c in …; do fl languages
+  // add $c; done`, which is how a 1000/day budget vanishes in an hour. These
+  // pin the behaviour that makes the loop pointless.
+
+  test('addLanguages adds every code in one invocation', () async {
+    final List<String> posted = <String>[];
+    final Map<String, List<String>> present = <String, List<String>>{};
+    final MockClient mock = MockClient((final http.Request req) async {
+      if (req.url.path == '/api/projects/7/') {
+        return http.Response(_project(keys: 1, extra: present), 200);
+      }
+      final String code =
+          (jsonDecode(req.body) as Map<String, dynamic>)['languageCode'] as String;
+      posted.add(code);
+      present[code] = <String>['t'];
+      return http.Response(jsonEncode(<String, dynamic>{'language': <String, dynamic>{'code': code}}), 200);
+    });
+    final ManagementClient client =
+        ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
+
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+        .addLanguages(<String>['ja', 'ko', 'th'], autoTranslate: true);
+
+    expect(r.ok, isTrue);
+    expect(posted, containsAll(<String>['ja', 'ko', 'th']));
+    expect(r.message, contains('3/3'));
+  });
+
+  test('addLanguages sends base languages before their variants', () async {
+    // `zh-Hant` cannot be filled before `zh` exists — gen-l10n needs the base
+    // ARB beside any variant, and the backend enforces it. A caller listing
+    // them in the other order used to eat a hard error and have to rediscover
+    // the rule; ordering is free.
+    final List<String> posted = <String>[];
+    final Map<String, List<String>> present = <String, List<String>>{};
+    final MockClient mock = MockClient((final http.Request req) async {
+      if (req.url.path == '/api/projects/7/') {
+        return http.Response(_project(keys: 1, extra: present), 200);
+      }
+      final Map<String, dynamic> b = jsonDecode(req.body) as Map<String, dynamic>;
+      final String code = b['languageCode'] as String;
+      posted.add(code);
+      present[code] = <String>['t'];
+      return http.Response(jsonEncode(<String, dynamic>{'language': <String, dynamic>{'code': code}}), 200);
+    });
+    final ManagementClient client =
+        ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
+
+    await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
+        .addLanguages(<String>['zh-Hant', 'pt-BR', 'zh', 'pt']);
+
+    expect(posted.indexOf('zh'), lessThan(posted.indexOf('zh-Hant')));
+    expect(posted.indexOf('pt'), lessThan(posted.indexOf('pt-BR')));
+  });
+
+  test('addLanguages stops the moment it is rate limited', () async {
+    // Grinding through the remaining 30 locales to collect 30 identical 429s
+    // is the exact behaviour the bulk form exists to prevent.
+    final List<String> posted = <String>[];
+    final MockClient mock = MockClient((final http.Request req) async {
+      if (req.url.path == '/api/projects/7/') {
+        return http.Response(_project(keys: 1), 200);
+      }
+      final Map<String, dynamic> b = jsonDecode(req.body) as Map<String, dynamic>;
+      posted.add(b['languageCode'] as String);
+      return http.Response('{"detail":"Rate limited for another 600s"}', 429,
+          headers: <String, String>{'retry-after': '600'});
+    });
+    final ManagementClient client =
+        ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
+
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+        .addLanguages(<String>['ja', 'ko', 'th', 'vi', 'id']);
+
+    expect(r.ok, isFalse);
+    // One locale attempted, not five.
+    expect(posted.toSet().length, 1);
+    expect(
+      (r.data['failures'] as List<dynamic>).join(' '),
+      contains('were not attempted'),
+    );
   });
 }

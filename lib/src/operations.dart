@@ -7,7 +7,9 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter_localisation_cli/src/call_budget.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
@@ -69,11 +71,17 @@ typedef VerifyOutcome = ({
 });
 
 class Operations {
-  Operations(this.client, this.projectId, {this.flavor});
+  Operations(this.client, this.projectId, {this.flavor, final CallBudget? budget})
+      : budget = budget ?? CallBudget();
 
   final ManagementClient client;
   final int projectId;
   final String? flavor;
+
+  /// Refuses a caller that is looping a bulk-capable command one item at a
+  /// time. Lives here rather than in the CLI so the MCP server cannot be used
+  /// as a way around it.
+  final CallBudget budget;
 
   /// Rows per AI batch request — one full parallel round on the server.
   ///
@@ -131,10 +139,44 @@ class Operations {
     // whole project, and that cost should not multiply with the row count.
     for (var i = 0; i < ids.length; i += chunkSize) {
       final int end = i + chunkSize > ids.length ? ids.length : i + chunkSize;
-      unattributed.addAll(await _batchInto(ids.sublist(i, end), backendErrors));
+      unattributed
+          .addAll(await _batchAdaptive(ids.sublist(i, end), backendErrors));
     }
     final VerifyOutcome out = await _verify(ids, backendErrors);
     return _withUnattributed(out, unattributed);
+  }
+
+  /// Smallest batch worth sending. Below this the request overhead — and the
+  /// count against the quota — dominates the work done.
+  static const int _minChunk = 100;
+
+  /// Run one chunk, halving and retrying if the gateway times out.
+  ///
+  /// The alternative was a `--chunk-size` flag, and that flag was a trap: it
+  /// looked like a tuning knob and behaved like a quota multiplier. Lowering it
+  /// eightfold to clear one timeout turned a 33-locale repair into ~260
+  /// requests. The machine can see the timeout and halve on its own; a human
+  /// reading a help string cannot see the request count they just signed up
+  /// for. So the knob is gone and this does the work.
+  Future<List<String>> _batchAdaptive(
+    final List<int> ids,
+    final Map<int, String> into,
+  ) async {
+    try {
+      return await _batchInto(ids, into);
+    } on ApiException catch (e) {
+      final bool timedOut = e.statusCode == 504 ||
+          e.statusCode == 502 ||
+          e.statusCode == 408 ||
+          e.message.toLowerCase().contains('time-out') ||
+          e.message.toLowerCase().contains('timeout');
+      if (!timedOut || ids.length <= _minChunk) rethrow;
+      final int half = ids.length ~/ 2;
+      return <String>[
+        ...await _batchAdaptive(ids.sublist(0, half), into),
+        ...await _batchAdaptive(ids.sublist(half), into),
+      ];
+    }
   }
 
   /// Runs one batch and records its per-row errors into [into].
@@ -755,6 +797,16 @@ class Operations {
     final int chunkSize = _defaultChunkSize,
     final bool acceptUnchanged = false,
   }) async {
+    // Narrowing a whole-project repair to one locale, over and over, is the
+    // most expensive way to do the cheapest thing: omitting --locale covers
+    // every locale in the same pass, for the same rows.
+    budget.guard(
+      command: 'retranslate',
+      narrow: locales != null && locales.length == 1,
+      bulkForm: 'fl retranslate'
+          '${acceptUnchanged ? ' --accept-unchanged' : ''}'
+          '   # no --locale: every locale, one pass',
+    );
     final ProjectData project = await client.getProject(projectId);
     final FlavorData f = project.flavor(flavor);
     final String? baseCode = project.baseLanguage(flavor)?.code;
@@ -820,7 +872,7 @@ class Operations {
     for (var i = 0; i < ids.length; i += chunkSize) {
       final List<int> chunk =
           ids.sublist(i, i + chunkSize > ids.length ? ids.length : i + chunkSize);
-      unattributed.addAll(await _batchInto(chunk, backendErrors));
+      unattributed.addAll(await _batchAdaptive(chunk, backendErrors));
     }
 
     final VerifyOutcome result =
@@ -830,21 +882,20 @@ class Operations {
     final List<({int id, String reason})> acceptFailed =
         <({int id, String reason})>[];
     if (acceptUnchanged) {
-      for (final ({int id, String key, String locale}) e in result.unchanged) {
-        try {
-          await client.updateTranslation(e.id, isChecked: true);
-          accepted++;
-        } on ManagementException catch (err) {
-          // One row refusing the flag is not a reason to abandon the rest —
-          // but the reason must survive. Swallowing it here reproduces exactly
-          // the defect this whole change exists to fix: a bare count that says
-          // something is wrong without saying what, when the message is
-          // actionable ("'many_case' must be provided for locale 'fr'").
-          acceptFailed.add((
-            id: e.id,
-            reason: '${e.locale} ${e.key}: ${err.message}',
-          ));
-        }
+      // ONE request for the whole set. This was a per-row loop, and the row
+      // count is the size of the unchanged bucket — ~1,400 on a 36-locale
+      // project, each triggering a full server-side ARB regeneration. The
+      // pipeline's own worst offender; see `bulkCheckTranslations`.
+      try {
+        accepted = await client.bulkCheckTranslations(
+          <int>[for (final ({int id, String key, String locale}) e in result.unchanged) e.id],
+        );
+      } on ManagementException catch (err) {
+        // The whole batch failed, so no row can be attributed — but the reason
+        // must survive. Swallowing it reproduces exactly the defect this
+        // reporting exists to fix: a bare count that says something is wrong
+        // without saying what.
+        acceptFailed.add((id: -1, reason: err.message));
       }
     }
 
@@ -894,7 +945,114 @@ class Operations {
   ///
   /// This is the bulk primitive for a new language: one request, and the backend
   /// back-fills all existing keys. Callers must never iterate keys themselves.
+  /// Add one or more locales in a single invocation.
+  ///
+  /// Plural because the singular form was an invitation to `for code in …; do
+  /// fl languages add $code; done`, which is how a daily budget disappears. The
+  /// backend endpoint is still per-locale — that is not something the client can
+  /// change — but one command that walks the list is not the same thing as a
+  /// caller that walks it: this one paces itself, orders the list correctly,
+  /// stops the moment it is throttled, and reports the whole run at the end.
+  ///
+  /// Codes are reordered base-language-first. `--auto-translate` on `zh-Hant`
+  /// fails outright when `zh` is absent (gen-l10n needs the base ARB beside any
+  /// variant), so a caller passing `zh-Hant zh` in that order used to eat a
+  /// hard error and have to rediscover the rule. Sorting is free and the
+  /// intent is unambiguous.
+  Future<OpResult> addLanguages(
+    final List<String> rawLanguageCodes, {
+    final bool autoTranslate = false,
+    final bool dryRun = false,
+  }) async {
+    if (rawLanguageCodes.isEmpty) {
+      return OpResult(false, 'No locale codes given.');
+    }
+    budget.guard(
+      command: 'languages add',
+      narrow: rawLanguageCodes.length == 1,
+      bulkForm: 'fl languages add <code> <code> <code> '
+          '${autoTranslate ? '--auto-translate' : ''}'.trimRight(),
+    );
+
+    // Base languages first: a script/region variant cannot be filled before the
+    // language it varies exists.
+    final List<String> ordered = <String>[...rawLanguageCodes]..sort(
+        (final String a, final String b) {
+          final bool aBase = !canonicalizeOrKeep(a).contains('-');
+          final bool bBase = !canonicalizeOrKeep(b).contains('-');
+          if (aBase == bBase) return 0;
+          return aBase ? -1 : 1;
+        },
+      );
+
+    final List<Map<String, dynamic>> results = <Map<String, dynamic>>[];
+    final List<String> failures = <String>[];
+    for (final String code in ordered) {
+      try {
+        final OpResult r = await _addOneLanguage(code,
+            autoTranslate: autoTranslate, dryRun: dryRun);
+        results.add(<String, dynamic>{
+          'locale': canonicalizeOrKeep(code),
+          'ok': r.ok,
+          'message': r.message,
+          ...r.data,
+        });
+        if (!r.ok) failures.add('${canonicalizeOrKeep(code)}: ${r.message}');
+      } on ManagementException catch (e) {
+        // Being throttled mid-run is not a per-locale failure — every
+        // subsequent call would fail the same way, and grinding through the
+        // rest of the list to collect 30 identical 429s is precisely the
+        // behaviour this method exists to prevent. Stop and report.
+        failures.add('${canonicalizeOrKeep(code)}: ${e.message}');
+        final bool throttled = e.message.toLowerCase().contains('rate limit');
+        results.add(<String, dynamic>{
+          'locale': canonicalizeOrKeep(code),
+          'ok': false,
+          'message': e.message,
+        });
+        if (throttled) {
+          failures.add('Stopped early: the remaining '
+              '${ordered.length - results.length} locale(s) were not attempted.');
+          break;
+        }
+      }
+    }
+
+    final int ok = results.where((final Map<String, dynamic> r) => r['ok'] == true).length;
+    return OpResult(
+      failures.isEmpty,
+      '${dryRun ? 'DRY RUN: would add' : 'Added'} $ok/${ordered.length} locale(s).',
+      <String, dynamic>{'results': results, if (failures.isNotEmpty) 'failures': failures},
+    );
+  }
+
+  /// Backwards-compatible single-locale form. Prefer [addLanguages].
   Future<OpResult> addLanguage(
+    final String rawLanguageCode, {
+    final bool autoTranslate = false,
+    final bool dryRun = false,
+  }) =>
+      addLanguages(<String>[rawLanguageCode],
+              autoTranslate: autoTranslate, dryRun: dryRun)
+          .then((final OpResult r) => _unwrapSingle(r));
+
+  /// Unwrap a one-element [addLanguages] run back to the shape callers expect.
+  static OpResult _unwrapSingle(final OpResult r) {
+    final List<dynamic> results =
+        (r.data['results'] as List<dynamic>?) ?? const <dynamic>[];
+    if (results.length != 1) return r;
+    final Map<String, dynamic> only = results.first as Map<String, dynamic>;
+    return OpResult(
+      only['ok'] == true,
+      only['message'] as String? ?? r.message,
+      <String, dynamic>{
+        for (final MapEntry<String, dynamic> e in only.entries)
+          if (e.key != 'ok' && e.key != 'message') e.key: e.value,
+      },
+    );
+  }
+
+  Future<OpResult> _addOneLanguage(
     final String rawLanguageCode, {
     final bool autoTranslate = false,
     final bool dryRun = false,
@@ -1059,5 +1217,79 @@ class Operations {
     }
     return OpResult(true, 'Status for "${project.name}" / flavor "${f.name}".',
         <String, dynamic>{'flavor': f.name, 'locales': rows},);
+  }
+}
+
+/// Writes the project's translations to ARB files on disk.
+///
+/// The counterpart to `fl import`, and the terminal equivalent of the
+/// dashboard's Export. It exists because the only other way to get ARBs into a
+/// repo was `fl clone`/`fl pull` — a git pull from the repo the backend pushes
+/// to — and that path is dead whenever the dashboard has no git provider linked,
+/// or has one pointing at a repository that does not exist. Both happen, and
+/// when they do the project is fully translated and the app still ships in one
+/// language, with nothing in the tool able to close the gap.
+///
+/// Separate from [Operations] because it touches the filesystem and nothing
+/// else does; kept in this library so both surfaces can reach it.
+extension ArbExport on Operations {
+  /// Write one `app_<locale>.arb` per locale into [dir]. Returns the files.
+  ///
+  /// `@key` metadata (description, placeholders) is written to the **template**
+  /// (base-locale) ARB only. That is where `gen_l10n` reads it from, and
+  /// repeating it in 35 translated files would be 35 copies to drift.
+  Future<OpResult> exportArbs(
+    final String dir, {
+    final bool dryRun = false,
+  }) async {
+    final ProjectData project = await client.getProject(projectId);
+    final FlavorData f = project.flavor(flavor);
+    if (f.languages.isEmpty) {
+      return OpResult(false, 'Flavor "${f.name}" has no locales.');
+    }
+
+    final List<Map<String, dynamic>> written = <Map<String, dynamic>>[];
+    for (final LanguageData lang in f.languages) {
+      // Underscores, in BOTH the file name and `@@locale`. gen_l10n compares
+      // the two and aborts the whole build if they disagree ("the locale
+      // specified in @@locale and the arb filename do not match"), so a
+      // hyphenated BCP-47 tag inside `app_en_US.arb` is not a cosmetic
+      // difference — it stops the app compiling. This matches what the
+      // backend's own ARB writer emits.
+      final String tag = lang.code.replaceAll('-', '_');
+      final Map<String, dynamic> arb = <String, dynamic>{'@@locale': tag};
+      for (final TranslationEntry t in lang.translations) {
+        if (t.key.isEmpty) continue;
+        arb[t.key] = t.value;
+        if (!lang.isBase) continue;
+        final Map<String, dynamic> meta = <String, dynamic>{
+          if (t.description.isNotEmpty) 'description': t.description,
+          if (t.placeholders.isNotEmpty) 'placeholders': t.placeholders,
+        };
+        if (meta.isNotEmpty) arb['@${t.key}'] = meta;
+      }
+      final String file = 'app_$tag.arb';
+      written.add(<String, dynamic>{
+        'file': file,
+        'locale': lang.code,
+        'keys': lang.translations.where((final TranslationEntry t) => t.key.isNotEmpty).length,
+        'base': lang.isBase,
+      });
+      if (dryRun) continue;
+      final File out = File('$dir/$file');
+      out.parent.createSync(recursive: true);
+      out.writeAsStringSync(
+          '${const JsonEncoder.withIndent('  ').convert(arb)}\n');
+    }
+
+    final Map<String, dynamic> base = written.firstWhere(
+        (final Map<String, dynamic> w) => w['base'] == true,
+        orElse: () => written.first);
+    return OpResult(
+      true,
+      '${dryRun ? 'DRY RUN: would write' : 'Wrote'} ${written.length} ARB '
+      'file(s) to $dir (template: ${base['file']}).',
+      <String, dynamic>{'files': written, 'template': base['file'], 'dir': dir},
+    );
   }
 }

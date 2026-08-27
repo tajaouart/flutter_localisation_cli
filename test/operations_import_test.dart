@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_localisation_cli/src/management_client.dart';
+import 'package:flutter_localisation_cli/src/call_budget.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -44,7 +45,7 @@ void main() {
       'k2': 'v2',
       '@k1': <String, dynamic>{'description': 'meta, not a key'},
     });
-    final OpResult r = await Operations(client, 7, flavor: 'default').importArb(arb);
+    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).importArb(arb);
 
     expect(r.ok, isTrue);
     expect(hits, contains('POST /api/project/7/import-arb/'));
@@ -61,7 +62,7 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default')
+    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
         .importArb(jsonEncode(<String, dynamic>{'k': 'v'}), dryRun: true);
 
     expect(r.ok, isTrue);
@@ -79,7 +80,7 @@ void main() {
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
     final OpResult r =
-        await Operations(client, 7, flavor: 'default').importArb('not json {');
+        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).importArb('not json {');
 
     expect(r.ok, isFalse);
     expect(r.message, contains('Invalid ARB'));
@@ -100,7 +101,7 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    await Operations(client, 7, flavor: 'default')
+    await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
         .importArb(jsonEncode(<String, dynamic>{'k': 'v'}), languageCode: 'fr');
 
     // A targeted locale import must NOT fan out across every language, else it
@@ -123,7 +124,7 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    await Operations(client, 7, flavor: 'default')
+    await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
         .importArb(jsonEncode(<String, dynamic>{'k': 'v'}));
 
     // A base-language import seeds all locales so fresh keys are translatable.
@@ -145,7 +146,7 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    await Operations(client, 7, flavor: 'default')
+    await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
         .importArb(jsonEncode(<String, dynamic>{'k': 'v'}), languageCode: 'en');
 
     // `--language en` on an en-base project must behave exactly like omitting
@@ -196,7 +197,7 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default').importArb(
+    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).importArb(
       jsonEncode(<String, dynamic>{'k': 'v'}),
       translate: true,
     );
@@ -487,7 +488,7 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default').importArb(
+    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).importArb(
       jsonEncode(<String, dynamic>{'k': 'v'}),
       translate: true,
     );

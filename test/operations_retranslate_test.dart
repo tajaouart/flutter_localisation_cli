@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
+import 'package:flutter_localisation_cli/src/call_budget.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -60,11 +61,14 @@ String _project({
 
 /// Serves [before] until the batch endpoint is hit, then [after]. Records every
 /// `translation_ids` payload the caller sent.
-({MockClient client, List<List<int>> batches}) _mock({
+({MockClient client, List<List<int>> batches, List<List<int>> checked}) _mock({
   required final String before,
   required final String after,
 }) {
   final List<List<int>> batches = <List<int>>[];
+  // Every /translations/bulk-check/ call, so a test can assert there was
+  // exactly ONE — the whole point of that endpoint.
+  final List<List<int>> checked = <List<int>>[];
   final MockClient client = MockClient((final http.Request req) async {
     if (req.url.path == '/api/ai_batch_translate/') {
       final Map<String, dynamic> body =
@@ -75,15 +79,25 @@ String _project({
         200,
       );
     }
+    if (req.url.path == '/api/translations/bulk-check/') {
+      final Map<String, dynamic> body =
+          jsonDecode(req.body) as Map<String, dynamic>;
+      checked.add((body['translation_ids'] as List<dynamic>).cast<int>());
+      return http.Response(
+        jsonEncode(<String, dynamic>{'updated': checked.last.length}),
+        200,
+      );
+    }
     return http.Response(batches.isEmpty ? before : after, 200);
   });
-  return (client: client, batches: batches);
+  return (client: client, batches: batches, checked: checked);
 }
 
 Operations _ops(final MockClient c) => Operations(
       ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: c),
       7,
       flavor: 'default',
+      budget: CallBudget.disabled(),
     );
 
 void main() {
@@ -100,7 +114,7 @@ void main() {
         'fr': <Row>[v('Bonjour'), v('Au revoir'), v('Enregistrer')],
       },
     );
-    final ({List<List<int>> batches, MockClient client}) m =
+    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
         _mock(before: before, after: after);
 
     final OpResult r = await _ops(m.client).retranslate();
@@ -120,7 +134,7 @@ void main() {
         'fr': <Row>[v('OK', checked: true), v('Save')],
       },
     );
-    final ({List<List<int>> batches, MockClient client}) m =
+    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
         _mock(before: p, after: p);
 
     final OpResult r = await _ops(m.client).retranslate(dryRun: true);
@@ -137,7 +151,7 @@ void main() {
         'fr': <Row>[v(''), v('Enregistrer')],
       },
     );
-    final ({List<List<int>> batches, MockClient client}) m =
+    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
         _mock(before: p, after: p);
 
     final OpResult r = await _ops(m.client).retranslate(dryRun: true);
@@ -154,7 +168,7 @@ void main() {
         'de': <Row>[v('Save')],
       },
     );
-    final ({List<List<int>> batches, MockClient client}) m =
+    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
         _mock(before: p, after: p);
 
     final OpResult r =
@@ -170,7 +184,7 @@ void main() {
         'fr': <Row>[v('Save')],
       },
     );
-    final ({List<List<int>> batches, MockClient client}) m =
+    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
         _mock(before: p, after: p);
 
     final OpResult r = await _ops(m.client).retranslate(locales: <String>['zz']);
@@ -189,7 +203,7 @@ void main() {
         'fr': <Row>[for (int i = 0; i < 5; i++) v('source $i')],
       },
     );
-    final ({List<List<int>> batches, MockClient client}) m =
+    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
         _mock(before: p, after: p);
 
     await _ops(m.client).retranslate(chunkSize: 2);
@@ -211,7 +225,7 @@ void main() {
         'fr': <Row>[v('Save')],
       },
     );
-    final ({List<List<int>> batches, MockClient client}) m =
+    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
         _mock(before: p, after: p);
 
     final OpResult r = await _ops(m.client).retranslate();
@@ -234,13 +248,16 @@ void main() {
         'fr': <Row>[v('Save')],
       },
     );
-    final ({List<List<int>> batches, MockClient client}) m =
-        _mock(before: p, after: p);
+    final ({List<List<int>> batches, List<List<int>> checked, MockClient client})
+        m = _mock(before: p, after: p);
 
     final OpResult r = await _ops(m.client).retranslate(acceptUnchanged: true);
 
     expect(r.data['accepted'], 1);
     expect(r.message, contains('1 accepted as checked'));
+    // ONE request for the whole set, not one per row. This was a per-row loop
+    // and each of those calls made the server regenerate and push every ARB.
+    expect(m.checked.length, 1);
   });
 
   test('a 400 whose rows are all identical-to-source still completes',
@@ -276,6 +293,16 @@ void main() {
             },
           }),
           400,
+        );
+      }
+      if (req.url.path == '/api/translations/bulk-check/') {
+        final Map<String, dynamic> body =
+            jsonDecode(req.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode(<String, dynamic>{
+            'updated': (body['translation_ids'] as List<dynamic>).length,
+          }),
+          200,
         );
       }
       return http.Response(p, 200);
