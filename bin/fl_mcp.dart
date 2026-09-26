@@ -23,6 +23,7 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_localisation_cli/src/arb_sync.dart';
 import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
@@ -43,8 +44,11 @@ const String _serverInstructions =
     'produced by this backend + `fl` codegen and are write-protected there — '
     'never tell the user to hand-edit them, and never edit them yourself. '
     'To add or change a string, use these tools (add_string / edit_string / '
-    'import_arb) or the dashboard, then have the user run `fl pull` to sync the '
-    'ARBs into their repo. '
+    'import_arb) or the dashboard, then call pull_arbs to bring the ARBs down '
+    'into the repo (or have the user run `fl sync`, which also regenerates the '
+    'Dart). Never run git yourself in the ARB directory: it is generated output '
+    'the backend owns, and pull_arbs already handles a dirty or diverged clone, '
+    'a missing remote and a repo it cannot reach. '
     'WORK IN BULK. Adding or translating N strings must cost O(1) requests, not '
     'O(N): collect them into an .arb file and call import_arb ONCE with '
     'translate=true — it creates every key across every locale and '
@@ -508,6 +512,48 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
           },
         },
       },
+      <String, dynamic>{
+        'name': 'pull_arbs',
+        'description':
+            'Bring the repo\'s ARB files in line with the service — the step after any '
+                'write. Uses the git mirror when there is a usable one and the API when '
+                'there is not, so a dirty clone, a stale local commit, a wrong git '
+                'credential or an unlinked repo can never block it. Never run git '
+                'commands in the ARB directory yourself. It refuses only when the '
+                'template holds keys the service does not have (they would be '
+                'overwritten away) — import those first, or pass adopt=true to import '
+                'them as part of the pull. After it lands, the Dart still has to be '
+                'regenerated in the app repo (`dart run flutter_localisation <arb_root> '
+                '<flavor>`, or `fl sync` which does all three steps).',
+        'inputSchema': <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'dir': <String, dynamic>{
+              'type': 'string',
+              'description':
+                  'ARB directory (default: arb_dir from flutterlocalisation.json).',
+            },
+            'adopt': <String, dynamic>{
+              'type': 'boolean',
+              'description':
+                  'Import keys that exist only on disk instead of refusing.',
+              'default': false,
+            },
+            'discard_local': <String, dynamic>{
+              'type': 'boolean',
+              'description':
+                  'Take the service copy even though local-only keys would be lost.',
+              'default': false,
+            },
+            'apply': <String, dynamic>{
+              'type': 'boolean',
+              'description': 'false = preview only (default); true = write the files.',
+              'default': false,
+            },
+            ..._projectProps,
+          },
+        },
+      },
     ];
 
 Future<void> _callTool(final Object? id, final Map<String, dynamic> params) async {
@@ -592,6 +638,111 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
     );
     final Operations ops =
         Operations(_client, target.projectId, flavor: target.flavor);
+
+    // The ARBs on disk, brought level with the service. Lives here rather
+    // than behind an instruction to "run `fl pull`" because the agent is the
+    // one that just wrote the strings, and the step it skips is the step the
+    // user notices.
+    if (name == 'pull_arbs') {
+      final ProjectData p = await _client.getProject(target.projectId);
+      final LanguageData? base = p.baseLanguage(target.flavor);
+      if (base == null) {
+        _toolResult(id, <String, dynamic>{
+          'ok': false,
+          'message': 'Project "${p.name}" has no base language.',
+        });
+        return;
+      }
+      final String dir = (a['dir'] as String?) ??
+          ProjectConfig.load().arbDir ??
+          'arbs';
+      final String template = 'app_${base.code.replaceAll('-', '_')}.arb';
+      final Set<String> serviceKeys = <String>{
+        for (final TranslationEntry t in base.translations)
+          if (t.key.isNotEmpty) t.key,
+      };
+      final File templateFile = File('$dir/$template');
+      final List<String> orphans = localOnlyKeys(templateFile, serviceKeys);
+      final bool adopt = (a['adopt'] ?? false) as bool;
+      final bool discardLocal = (a['discard_local'] ?? false) as bool;
+
+      if (orphans.isNotEmpty && !adopt && !discardLocal) {
+        _toolResult(id, <String, dynamic>{
+          'ok': false,
+          'local_only_keys': orphans,
+          'message':
+              '$template holds ${orphans.length} key(s) the service does not '
+              'have; syncing would overwrite the file and lose them. Import '
+              'them first (import_arb), or call again with adopt=true. '
+              'discard_local=true takes the service copy instead.',
+        });
+        return;
+      }
+      if (!apply) {
+        _toolResult(id, <String, dynamic>{
+          'ok': true,
+          'applied': false,
+          'dir': dir,
+          'template': template,
+          'service_keys': serviceKeys.length,
+          if (orphans.isNotEmpty) 'would_import': orphans,
+          'message': 'Would sync "$dir" to ${p.name}'
+              '${orphans.isEmpty ? '' : ', importing ${orphans.length} '
+                  'local-only key(s) first'}. Call again with apply=true.',
+        });
+        return;
+      }
+
+      final List<String> steps = <String>[];
+      if (orphans.isNotEmpty && adopt) {
+        final OpResult imported = await ops.importArb(
+          templateFile.readAsStringSync(),
+          languageCode: base.code,
+          translate: true,
+        );
+        if (!imported.ok) {
+          _toolResult(id, <String, dynamic>{
+            'ok': false,
+            'message': 'Adopting local-only keys failed: ${imported.message}',
+          });
+          return;
+        }
+        steps.add(imported.message);
+      }
+
+      final GitSyncOutcome outcome = await GitMirror(dir).hardSync();
+      if (outcome.ok) {
+        _toolResult(id, <String, dynamic>{
+          'ok': true,
+          'applied': true,
+          'method': ArbSyncMethod.git.name,
+          'dir': dir,
+          'upstream': outcome.upstream,
+          if (outcome.discardedAnything) 'discarded': <String, dynamic>{
+            'working_changes': outcome.discardedWorkingChanges,
+            'local_commits': outcome.discardedLocalCommits,
+            'recovery_ref': outcome.recoveryRef,
+          },
+          'steps': steps,
+          'message': 'Synced "$dir" to ${outcome.upstream}. Regenerate the '
+              'Dart next.',
+        });
+        return;
+      }
+      final OpResult exported = await ops.exportArbs(dir);
+      _toolResult(id, <String, dynamic>{
+        'ok': exported.ok,
+        'applied': true,
+        'method': ArbSyncMethod.api.name,
+        'dir': dir,
+        'git_skipped': outcome.skip?.name,
+        if (outcome.detail.isNotEmpty) 'git_detail': outcome.detail,
+        'steps': steps,
+        'message': '${exported.message} (git mirror unavailable: '
+            '${outcome.detail.isEmpty ? outcome.skip?.name : outcome.detail})',
+      });
+      return;
+    }
 
     // Read-only and not an OpResult — answer directly.
     if (name == 'project_repo') {

@@ -1,5 +1,53 @@
 # Changelog
 
+## [1.8.0] - 2026-09-26
+### Changed
+- **`fl pull` is a sync, not a `git pull`.** The ARB directory is generated
+  output the backend owns, so there is never a local contribution to
+  reconcile — but the old command ran `git pull --rebase` inside it, and that
+  made every bit of local state a blocker. An edited `app_en.arb` (which is
+  exactly what the documented import flow tells you to create) stopped the
+  pull with *"cannot pull with rebase: You have unstaged changes"*; a stale
+  local commit turned it into a 36-file rebase conflict. Both ended with a
+  user hand-running git inside a directory they are told never to hand-edit.
+  `fl pull` now fetches and hard-resets onto the upstream branch, so neither
+  can block it, and parks anything it discards under `refs/fl/pre-sync/<stamp>`
+  — printed, so "it threw away my edit" always has an answer.
+- **`fl pull` falls back to the API when git cannot deliver.** The clone is
+  authenticated by whatever ambient git credential is active, so the wrong
+  logged-in account, no credential helper, or a repo that was never linked all
+  surfaced the same way: `remote: Repository not found`, and a dead end —
+  while the same ARBs sat behind the API token the CLI already holds. A
+  missing git binary, a plain directory, a missing remote and an unreachable
+  remote now all fail over to writing the files from the API, and say so.
+  Git also runs with `GIT_TERMINAL_PROMPT=0`, so a credential prompt can never
+  hang the command (or raise a GUI keychain dialog) instead of failing.
+- **`fl export` writes exactly what the backend pushes.** It used to put `@key`
+  metadata in the template only and omit `@@last_modified`, so the first
+  fallback export rewrote all 36 locale files: a 19,575-line diff that was
+  pure formatting. The two writers now agree byte for byte, and an unchanged
+  locale keeps its existing timestamp, so re-running an export is a no-op in
+  git. (The backend's own writer gained the trailing newline that was the last
+  byte of difference.)
+
+### Added
+- **`fl sync [<file.arb>]`** — import, pull, and regenerate the Dart in one
+  command. Every consuming repo was documenting the same three steps in its
+  own words, which meant every repo also documented its own way of getting
+  them wrong.
+- **A guard against losing keys that exist only on disk.** Both refresh paths
+  rewrite the template from the service, so a key staged by hand for an import
+  that never ran would disappear — this is how eight onboarding keys were lost
+  in one repo, and why that repo's CLAUDE.md carried a "never run `fl export`
+  here" rule. `fl pull` and `fl export` now name those keys and refuse;
+  `fl pull --adopt` imports them first, `--discard-local` takes the service
+  copy on purpose. The rule can go.
+- **MCP `pull_arbs`.** The server used to tell the agent to ask the user to run
+  `fl pull` — the step most likely to be skipped, by the party that just wrote
+  the strings. The tool carries the same guard, the same fallback and the same
+  preview/apply split as the CLI, and the server instructions now say plainly
+  that git is never to be run in the ARB directory.
+
 ## [1.7.0] - 2026-08-26
 ### Added
 - **The loop is refused, and the refusal names the command to run instead.**

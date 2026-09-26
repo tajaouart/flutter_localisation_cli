@@ -44,7 +44,8 @@ fl languages remove id                   # drop a locale and its translations
 fl delete greeting                       # whole key (or --locale fr for one locale)
 fl repo                                  # print the ARB git repo URL (from the dashboard)
 fl clone                                 # first-time: clone that repo into arb_dir
-fl pull                                  # git pull the ARB repo (arb_dir in config)
+fl pull                                  # sync arb_dir with the service (git or API)
+fl sync app_en.arb                       # import, pull and regenerate the Dart, in one
 fl guard                                 # stop AI agents editing ARBs + generated Dart
 fl native                                # tell iOS + Android about the locales, translate
                                          # the iOS permission alerts
@@ -92,18 +93,31 @@ naming the locales that were left unseeded (usually: re-run the import against t
 language so every locale gets rows). Fix the bulk call; do not fall back to per-key writes.
 That silent "nothing to translate" success was the original trap.
 
-### `fl export` — ARBs without a git link
+### `fl pull` / `fl sync` — getting the ARBs into the repo
 
-`fl clone` / `fl pull` are the normal way to get ARBs into a repo, and they only work when
-the dashboard has a git provider linked **and** the repository it names actually exists.
-When it does not — an unfinished OAuth step, a repo deleted later — a project can be fully
-translated while the app still ships one language, and nothing in the tool could close the
-gap.
+The ARB directory is **generated output the backend owns**. Nothing in it is a local
+contribution, so `fl pull` does not merge or rebase: it fetches and hard-resets onto the
+upstream branch. A dirty file or a stale local commit cannot block it, and whatever it
+discards is parked under `refs/fl/pre-sync/<stamp>`, printed so it can be read back with
+`git show`. You never need to run git in that directory yourself — that is the point.
+
+When the git mirror cannot deliver (no repo linked, repository deleted, the wrong git
+credential active on the machine, no git at all), `pull` writes the same files from the API
+instead and says which path it took. The two writers are byte-identical, so failing over
+does not produce a diff.
 
 ```bash
-fl export              # every locale -> arb_dir, straight from the API
-fl export path/to/dir  # or somewhere else
+fl pull                # sync arb_dir: git mirror if usable, API otherwise
+fl pull --no-git       # skip the mirror, write from the API
+fl sync app_en.arb     # import that file, pull, then regenerate the Dart
+fl export path/to/dir  # just the write, to any directory
 ```
+
+**Keys that exist only on disk stop a sync.** Both paths rewrite the template from the
+service, so a key staged by hand for an import that never ran would vanish — it has
+happened, and it took an app's build with it. `pull` and `export` name those keys and
+refuse; `fl pull --adopt` imports them first, `--discard-local` takes the service copy on
+purpose.
 
 This is the dashboard's Export, from the terminal. The ARBs are the backend's data, not
 hand-written: `@@locale` is written in the same underscored form as the file name (gen_l10n
@@ -185,12 +199,14 @@ nullable-getter: false
 `bitbucket` or `bitbucket_server`) and warns when the git token needs reconnecting. `--json`
 gives `{project, repository: {provider, url, needs_reauth}}`; it exits non-zero when no
 provider is linked. `fl clone [<dir>]` refuses to clobber a non-empty directory — use
-`fl pull` to update an existing clone. Preview either with `--dry-run`.
+`fl pull` to update an existing clone. Preview either with `--dry-run`. If the clone never
+happens, or the machine's git credential cannot see the repo, `fl pull` still works: it
+writes the ARBs from the API.
 
 `fl guard` writes `permissions.deny` rules into `.claude/settings.json` so Claude Code refuses
 to `Edit`/`Write` the backend-managed files — the ARB directory (`arb_dir` + `l10n.yaml`
 `arb-dir`/`output-dir`) and `lib/generated_translation_methods.dart`. Those may only change via
-`fl` / `flutter_localisation` + `git pull`; a direct AI edit is silently overwritten on the next
+`fl` / `flutter_localisation` + `fl pull`; a direct AI edit is silently overwritten on the next
 sync (or lost, for the gitignored ARB repo). Run it once per project (`--dry-run` to preview).
 
 A project-local `flutterlocalisation.json` is **optional** — set it to avoid `--project` each
@@ -238,7 +254,7 @@ before codegen.
 ```
 fl add / Claude ─▶ backend creates/translates ─▶ backend pushes ARBs to your git repo
                                                             │
-                                     fl pull / git pull ◀───┘ ─▶ codegen ─▶ typed strings
+                                     fl pull / fl sync  ◀───┘ ─▶ codegen ─▶ typed strings
 ```
 
 ## License

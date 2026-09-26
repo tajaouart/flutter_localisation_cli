@@ -1257,18 +1257,24 @@ extension ArbExport on Operations {
       // difference — it stops the app compiling. This matches what the
       // backend's own ARB writer emits.
       final String tag = lang.code.replaceAll('-', '_');
-      final Map<String, dynamic> arb = <String, dynamic>{'@@locale': tag};
+      final Map<String, dynamic> body = <String, dynamic>{};
       for (final TranslationEntry t in lang.translations) {
         if (t.key.isEmpty) continue;
-        arb[t.key] = t.value;
-        if (!lang.isBase) continue;
+        body[t.key] = t.value;
+        // Placeholders before description: the order the backend's writer
+        // emits them in, and this file has to match it byte for byte.
         final Map<String, dynamic> meta = <String, dynamic>{
-          if (t.description.isNotEmpty) 'description': t.description,
           if (t.placeholders.isNotEmpty) 'placeholders': t.placeholders,
+          if (t.description.isNotEmpty) 'description': t.description,
         };
-        if (meta.isNotEmpty) arb['@${t.key}'] = meta;
+        if (meta.isNotEmpty) body['@${t.key}'] = meta;
       }
       final String file = 'app_$tag.arb';
+      final Map<String, dynamic> arb = <String, dynamic>{
+        '@@locale': tag,
+        '@@last_modified': _stampFor(File('$dir/$file'), tag, body),
+        ...body,
+      };
       written.add(<String, dynamic>{
         'file': file,
         'locale': lang.code,
@@ -1291,5 +1297,39 @@ extension ArbExport on Operations {
       'file(s) to $dir (template: ${base['file']}).',
       <String, dynamic>{'files': written, 'template': base['file'], 'dir': dir},
     );
+  }
+
+  /// The `@@last_modified` value to write for one locale.
+  ///
+  /// Reuses the stamp already on disk when the rest of the file is unchanged,
+  /// so re-running an export is a no-op in git. Otherwise: now, in the shape
+  /// Python's `datetime.isoformat()` produces on the backend, because the two
+  /// writers have to agree down to the byte.
+  String _stampFor(
+    final File existing,
+    final String tag,
+    final Map<String, dynamic> body,
+  ) {
+    final String now =
+        '${DateTime.now().toUtc().toIso8601String().replaceFirst('Z', '')}'
+        '+00:00';
+    if (!existing.existsSync()) return now;
+    try {
+      final Object? decoded = jsonDecode(existing.readAsStringSync());
+      if (decoded is! Map<String, dynamic>) return now;
+      final Object? stamp = decoded['@@last_modified'];
+      if (stamp is! String || stamp.isEmpty) return now;
+      final Map<String, dynamic> onDisk = <String, dynamic>{...decoded}
+        ..remove('@@locale')
+        ..remove('@@last_modified');
+      const JsonEncoder enc = JsonEncoder.withIndent('  ');
+      if (decoded['@@locale'] == tag &&
+          enc.convert(onDisk) == enc.convert(body)) {
+        return stamp;
+      }
+    } catch (_) {
+      // An unparseable file is one we are about to replace anyway.
+    }
+    return now;
   }
 }

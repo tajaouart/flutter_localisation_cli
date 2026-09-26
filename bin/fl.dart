@@ -1,4 +1,5 @@
 #!/usr/bin/env dart
+
 /// `fl` — FlutterLocalisation management CLI.
 ///
 /// Add / edit / delete translation keys and strings — full parity with the dashboard —
@@ -18,6 +19,7 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 
+import 'package:flutter_localisation_cli/src/arb_sync.dart';
 import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/guard.dart';
@@ -33,14 +35,24 @@ Future<void> main(final List<String> args) async {
     'FlutterLocalisation management CLI — manage translation keys from the terminal.',
   )
     ..argParser.addOption('config', help: 'Path to flutterlocalisation.json.')
-    ..argParser.addOption('token', help: 'flk_live_ API token (overrides env/file).')
-    ..argParser.addOption('project',
-        help: 'Project name or id (overrides config; use `fl projects` to list).',)
-    ..argParser.addOption('flavor', help: 'Flavor name (if the project has several).')
-    ..argParser.addFlag('dry-run',
-        negatable: false, help: 'Show what would happen without changing anything.',)
-    ..argParser.addFlag('json',
-        negatable: false, help: 'Emit machine-readable JSON.',);
+    ..argParser
+        .addOption('token', help: 'flk_live_ API token (overrides env/file).')
+    ..argParser.addOption(
+      'project',
+      help: 'Project name or id (overrides config; use `fl projects` to list).',
+    )
+    ..argParser
+        .addOption('flavor', help: 'Flavor name (if the project has several).')
+    ..argParser.addFlag(
+      'dry-run',
+      negatable: false,
+      help: 'Show what would happen without changing anything.',
+    )
+    ..argParser.addFlag(
+      'json',
+      negatable: false,
+      help: 'Emit machine-readable JSON.',
+    );
 
   runner.addCommand(LoginCommand());
   runner.addCommand(ProjectsCommand());
@@ -55,6 +67,7 @@ Future<void> main(final List<String> args) async {
   runner.addCommand(RepoCommand());
   runner.addCommand(CloneCommand());
   runner.addCommand(PullCommand());
+  runner.addCommand(SyncCommand());
   runner.addCommand(GuardCommand());
   runner.addCommand(NativeCommand());
   runner.addCommand(ExportCommand());
@@ -70,14 +83,17 @@ Future<void> main(final List<String> args) async {
     if (e is ApiException) _writeRowErrors(e);
     final String msg = e.message.toLowerCase();
     if (msg.contains('re-auth') || msg.contains('token expired')) {
-      stderr.writeln('Hint: the backend\'s GitHub connection is disconnected. The change '
+      stderr.writeln(
+          'Hint: the backend\'s GitHub connection is disconnected. The change '
           'was saved, but ARB files can\'t sync until you reconnect GitHub in the dashboard '
           '(project → Repo → reconnect).');
     } else if (e is ApiException && e.isForbidden) {
-      stderr.writeln('Hint: your token may lack the required scope, or the plan '
-          'limit was reached.');
+      stderr
+          .writeln('Hint: your token may lack the required scope, or the plan '
+              'limit was reached.');
     } else if (e is ApiException && e.isAuth) {
-      stderr.writeln('Hint: run `fl login --token flk_live_...` or set \$FL_API_TOKEN.');
+      stderr.writeln(
+          'Hint: run `fl login --token flk_live_...` or set \$FL_API_TOKEN.');
     }
     exit(1);
   }
@@ -179,8 +195,11 @@ mixin _ApiCommand on Command<int> {
 class LoginCommand extends Command<int> {
   LoginCommand() {
     argParser.addOption('token', mandatory: true, help: 'flk_live_ API token.');
-    argParser.addOption('base-url',
-        defaultsTo: kDefaultBaseUrl, help: 'API base URL to associate the token with.',);
+    argParser.addOption(
+      'base-url',
+      defaultsTo: kDefaultBaseUrl,
+      help: 'API base URL to associate the token with.',
+    );
   }
 
   @override
@@ -213,22 +232,28 @@ class ProjectsCommand extends Command<int> with _ApiCommand {
     try {
       final List<ProjectSummary> projects = await client.listProjects();
       if (jsonOut) {
-        stdout.writeln(const JsonEncoder.withIndent('  ').convert(
-          projects
-              .map((final ProjectSummary p) => <String, dynamic>{
+        stdout.writeln(
+          const JsonEncoder.withIndent('  ').convert(
+            projects
+                .map(
+                  (final ProjectSummary p) => <String, dynamic>{
                     'id': p.id,
                     'name': p.name,
                     'workspace': p.workspace,
                     'flavors': p.flavors
-                        .map((final FlavorSummary f) => <String, dynamic>{
-                              'name': f.name,
-                              'base': f.baseLanguage,
-                              'locales': f.languages,
-                            },)
+                        .map(
+                          (final FlavorSummary f) => <String, dynamic>{
+                            'name': f.name,
+                            'base': f.baseLanguage,
+                            'locales': f.languages,
+                          },
+                        )
                         .toList(),
-                  },)
-              .toList(),
-        ),);
+                  },
+                )
+                .toList(),
+          ),
+        );
         return 0;
       }
       if (projects.isEmpty) {
@@ -256,13 +281,21 @@ class ProjectsCommand extends Command<int> with _ApiCommand {
 class AddCommand extends Command<int> with _ApiCommand {
   AddCommand() {
     argParser.addOption('value', mandatory: true, help: 'Base-language value.');
-    argParser.addFlag('translate',
-        abbr: 't', negatable: false, help: 'AI-translate all other locales.',);
-    argParser.addOption('description',
-        help: 'Key description (ARB @key.description).',);
-    argParser.addMultiOption('placeholder',
-        help: 'Placeholder as name:type[:format] (repeatable), '
-            'e.g. --placeholder count:int:decimalPattern.',);
+    argParser.addFlag(
+      'translate',
+      abbr: 't',
+      negatable: false,
+      help: 'AI-translate all other locales.',
+    );
+    argParser.addOption(
+      'description',
+      help: 'Key description (ARB @key.description).',
+    );
+    argParser.addMultiOption(
+      'placeholder',
+      help: 'Placeholder as name:type[:format] (repeatable), '
+          'e.g. --placeholder count:int:decimalPattern.',
+    );
   }
 
   @override
@@ -281,7 +314,11 @@ class AddCommand extends Command<int> with _ApiCommand {
     final String key = _requireKey(this);
     final Map<String, dynamic>? placeholders =
         parsePlaceholderSpecs(argResults!['placeholder'] as List<String>);
-    final ({ManagementClient client, Operations ops, String projectName}) built = await build(loadProject());
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
     try {
       final OpResult r = await built.ops.add(
         key,
@@ -301,16 +338,22 @@ class AddCommand extends Command<int> with _ApiCommand {
 
 class ImportCommand extends Command<int> with _ApiCommand {
   ImportCommand() {
-    argParser.addOption('language',
-        abbr: 'l',
-        help: 'Locale the ARB represents (default: the project base language).',);
-    argParser.addFlag('overwrite',
-        negatable: false,
-        help: 'Overwrite values of keys that already exist.',);
-    argParser.addFlag('translate',
-        abbr: 't',
-        negatable: false,
-        help: 'AI-translate the other locales after import (one batch pass).',);
+    argParser.addOption(
+      'language',
+      abbr: 'l',
+      help: 'Locale the ARB represents (default: the project base language).',
+    );
+    argParser.addFlag(
+      'overwrite',
+      negatable: false,
+      help: 'Overwrite values of keys that already exist.',
+    );
+    argParser.addFlag(
+      'translate',
+      abbr: 't',
+      negatable: false,
+      help: 'AI-translate the other locales after import (one batch pass).',
+    );
   }
 
   @override
@@ -334,8 +377,11 @@ class ImportCommand extends Command<int> with _ApiCommand {
       return 1;
     }
     final String content = await file.readAsString();
-    final ({ManagementClient client, Operations ops, String projectName}) built =
-        await build(loadProject());
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
     try {
       final OpResult r = await built.ops.importArb(
         content,
@@ -353,14 +399,23 @@ class ImportCommand extends Command<int> with _ApiCommand {
 
 class EditCommand extends Command<int> with _ApiCommand {
   EditCommand() {
-    argParser.addOption('locale', mandatory: true, help: 'Locale code, e.g. fr.');
+    argParser.addOption('locale',
+        mandatory: true, help: 'Locale code, e.g. fr.');
     argParser.addOption('value', help: 'New value.');
-    argParser.addFlag('checked', defaultsTo: null, help: 'Set is_checked true/false.',);
-    argParser.addOption('description',
-        help: 'Key description (ARB @key.description).',);
-    argParser.addMultiOption('placeholder',
-        help: 'Placeholder as name:type[:format] (repeatable), '
-            'e.g. --placeholder count:int:decimalPattern.',);
+    argParser.addFlag(
+      'checked',
+      defaultsTo: null,
+      help: 'Set is_checked true/false.',
+    );
+    argParser.addOption(
+      'description',
+      help: 'Key description (ARB @key.description).',
+    );
+    argParser.addMultiOption(
+      'placeholder',
+      help: 'Placeholder as name:type[:format] (repeatable), '
+          'e.g. --placeholder count:int:decimalPattern.',
+    );
     // A plural row cannot be repaired through --value: the backend stores the
     // cases separately and assembles the ICU itself, so it rejects a value
     // carrying `{count}` with "unexpected ['count']". Without these flags the
@@ -388,7 +443,8 @@ class EditCommand extends Command<int> with _ApiCommand {
   @override
   String get name => 'edit';
   @override
-  String get description => 'Edit a locale\'s value / flags of an existing key.';
+  String get description =>
+      'Edit a locale\'s value / flags of an existing key.';
   @override
   String get invocation =>
       'fl edit <key> --locale <code> [--value "..."] [--singular-case "..." '
@@ -399,7 +455,11 @@ class EditCommand extends Command<int> with _ApiCommand {
     final String key = _requireKey(this);
     final Map<String, dynamic>? placeholders =
         parsePlaceholderSpecs(argResults!['placeholder'] as List<String>);
-    final ({ManagementClient client, Operations ops, String projectName}) built = await build(loadProject());
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
     try {
       final OpResult r = await built.ops.edit(
         key,
@@ -428,8 +488,10 @@ class EditCommand extends Command<int> with _ApiCommand {
 
 class DeleteCommand extends Command<int> with _ApiCommand {
   DeleteCommand() {
-    argParser.addOption('locale',
-        help: 'Delete only this locale (default: the whole key, all locales).',);
+    argParser.addOption(
+      'locale',
+      help: 'Delete only this locale (default: the whole key, all locales).',
+    );
   }
 
   @override
@@ -442,7 +504,11 @@ class DeleteCommand extends Command<int> with _ApiCommand {
   @override
   Future<int> run() async {
     final String key = _requireKey(this);
-    final ({ManagementClient client, Operations ops, String projectName}) built = await build(loadProject());
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
     try {
       final OpResult r = await built.ops.delete(
         key,
@@ -458,22 +524,32 @@ class DeleteCommand extends Command<int> with _ApiCommand {
 
 class TranslateCommand extends Command<int> with _ApiCommand {
   TranslateCommand() {
-    argParser.addFlag('all',
-        negatable: false, help: 'Translate every non-base locale (default: only missing).',);
-    argParser.addMultiOption('locale', help: 'Specific locale(s) to translate.');
+    argParser.addFlag(
+      'all',
+      negatable: false,
+      help: 'Translate every non-base locale (default: only missing).',
+    );
+    argParser.addMultiOption('locale',
+        help: 'Specific locale(s) to translate.');
   }
 
   @override
   String get name => 'translate';
   @override
-  String get description => 'AI-translate a key\'s locales (default: only missing).';
+  String get description =>
+      'AI-translate a key\'s locales (default: only missing).';
   @override
-  String get invocation => 'fl translate <key> [--all | --locale fr --locale de]';
+  String get invocation =>
+      'fl translate <key> [--all | --locale fr --locale de]';
 
   @override
   Future<int> run() async {
     final String key = _requireKey(this);
-    final ({ManagementClient client, Operations ops, String projectName}) built = await build(loadProject());
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
     try {
       final OpResult r = await built.ops.translate(
         key,
@@ -522,8 +598,11 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
 
   @override
   Future<int> run() async {
-    final ({ManagementClient client, Operations ops, String projectName}) built =
-        await build(loadProject());
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
     try {
       final OpResult r = await built.ops.retranslate(
         locales: _locales(argResults!['locale'] as List<String>),
@@ -583,7 +662,8 @@ void _reportUnchanged(final OpResult r) {
       (r.data['unchanged'] as List<dynamic>?) ?? const <dynamic>[];
   if (rows.isEmpty) return;
   final int accepted = (r.data['accepted'] as int?) ?? 0;
-  stdout.writeln('\n${rows.length} value(s) came back identical to the source.');
+  stdout
+      .writeln('\n${rows.length} value(s) came back identical to the source.');
   stdout.writeln(
       'That is usually correct — loanwords and product names ("OK", "Premium", '
       '"Normal") are the same word in many languages.');
@@ -633,7 +713,11 @@ class StatusCommand extends Command<int> with _ApiCommand {
 
   @override
   Future<int> run() async {
-    final ({ManagementClient client, Operations ops, String projectName}) built = await build(loadProject());
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
     try {
       final OpResult r = await built.ops.status();
       if (jsonOut) return emit(r);
@@ -650,8 +734,9 @@ class StatusCommand extends Command<int> with _ApiCommand {
             ? '  ⚠ $untranslated same as source — `fl retranslate`'
             : '';
         stdout.writeln(
-            '  ${m['locale']}$tag: ${m['translated'] ?? m['filled']}/${m['total']} '
-            '(${m['translated_percent'] ?? m['percent']}%)$gap',);
+          '  ${m['locale']}$tag: ${m['translated'] ?? m['filled']}/${m['total']} '
+          '(${m['translated_percent'] ?? m['percent']}%)$gap',
+        );
       }
       // Without this, a project whose remaining gap is entirely loanwords shows
       // a warning on most of its locales that `fl retranslate` can never clear
@@ -662,8 +747,7 @@ class StatusCommand extends Command<int> with _ApiCommand {
         stdout.writeln(
             '\nSome of those are probably correct: a loanword is the same word '
             'in both languages.');
-        stdout.writeln(
-            'Run `fl retranslate` to fill the real gaps, then '
+        stdout.writeln('Run `fl retranslate` to fill the real gaps, then '
             '`fl retranslate --accept-unchanged` to mark the deliberate matches '
             'checked and clear these warnings for good.');
       }
@@ -695,19 +779,22 @@ class LanguagesCommand extends Command<int> with _ApiCommand {
   String get description =>
       'List the project locales, or add/remove one (`languages add <code> '
       '--auto-translate` back-fills every existing key in one request).';
-
 }
 
 class LanguagesListCommand extends Command<int> with _ApiCommand {
   @override
   String get name => 'list';
   @override
-  String get description => 'List the locales and how many keys each has filled.';
+  String get description =>
+      'List the locales and how many keys each has filled.';
 
   @override
   Future<int> run() async {
-    final ({ManagementClient client, Operations ops, String projectName}) built =
-        await build(loadProject());
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
     try {
       final OpResult r = await built.ops.listLanguages();
       if (jsonOut) return emit(r);
@@ -715,7 +802,8 @@ class LanguagesListCommand extends Command<int> with _ApiCommand {
       for (final row in (r.data['locales'] as List)) {
         final Map<String, dynamic> m = row as Map<String, dynamic>;
         final String tag = (m['base'] as bool) ? ' (base)' : '';
-        stdout.writeln('  ${m['locale']}$tag: ${m['filled']}/${m['keys']} filled');
+        stdout.writeln(
+            '  ${m['locale']}$tag: ${m['filled']}/${m['keys']} filled');
       }
       return 0;
     } finally {
@@ -726,11 +814,13 @@ class LanguagesListCommand extends Command<int> with _ApiCommand {
 
 class LanguagesAddCommand extends Command<int> with _ApiCommand {
   LanguagesAddCommand() {
-    argParser.addFlag('auto-translate',
-        abbr: 't',
-        negatable: false,
-        help: 'AI-fill every existing key for the new locale, server-side, in '
-            'this same request — and keep translating keys added later.',);
+    argParser.addFlag(
+      'auto-translate',
+      abbr: 't',
+      negatable: false,
+      help: 'AI-fill every existing key for the new locale, server-side, in '
+          'this same request — and keep translating keys added later.',
+    );
   }
 
   @override
@@ -751,8 +841,11 @@ class LanguagesAddCommand extends Command<int> with _ApiCommand {
       throw UsageException(
           'Missing <code> argument, e.g. `fl languages add id ja ko`.', usage);
     }
-    final ({ManagementClient client, Operations ops, String projectName}) built =
-        await build(loadProject());
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
     try {
       final OpResult r = await built.ops.addLanguages(
         _locales(rest),
@@ -788,8 +881,11 @@ class LanguagesRemoveCommand extends Command<int> with _ApiCommand {
     if (rest.isEmpty) {
       throw UsageException('Missing <code> argument.', usage);
     }
-    final ({ManagementClient client, Operations ops, String projectName}) built =
-        await build(loadProject());
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
     try {
       return emit(await built.ops.removeLanguage(rest.first, dryRun: dryRun));
     } finally {
@@ -812,37 +908,44 @@ class RepoCommand extends Command<int> with _ApiCommand {
   @override
   Future<int> run() async {
     final ProjectConfig cfg = loadProject();
-    final ({ManagementClient client, Operations ops, String projectName}) built =
-        await build(cfg);
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(cfg);
     try {
       final ProjectData p = await built.client.getProject(built.ops.projectId);
       final GitRepository? repo = p.repository;
       if (jsonOut) {
-        stdout.writeln(const JsonEncoder.withIndent('  ').convert(
-          <String, dynamic>{
-            'project': p.name,
-            'repository': repo == null
-                ? null
-                : <String, dynamic>{
-                    'provider': repo.provider,
-                    'url': repo.url,
-                    'needs_reauth': repo.needsReauth,
-                  },
-          },
-        ),);
+        stdout.writeln(
+          const JsonEncoder.withIndent('  ').convert(
+            <String, dynamic>{
+              'project': p.name,
+              'repository': repo == null
+                  ? null
+                  : <String, dynamic>{
+                      'provider': repo.provider,
+                      'url': repo.url,
+                      'needs_reauth': repo.needsReauth,
+                    },
+            },
+          ),
+        );
         return repo == null ? 1 : 0;
       }
       if (repo == null) {
         stderr.writeln(
-            'No git provider linked for "${p.name}". Link one in the dashboard '
-            '→ Project → Git, then re-run.',);
+          'No git provider linked for "${p.name}". Link one in the dashboard '
+          '→ Project → Git, then re-run.',
+        );
         return 1;
       }
       stdout.writeln('${repo.url}  (${repo.provider})');
       if (repo.needsReauth) {
         stderr.writeln(
-            'Warning: the git token needs reconnecting in the dashboard — '
-            'ARB pushes are currently failing.',);
+          'Warning: the git token needs reconnecting in the dashboard — '
+          'ARB pushes are currently failing.',
+        );
       }
       return 0;
     } finally {
@@ -868,8 +971,11 @@ class CloneCommand extends Command<int> with _ApiCommand {
     final List<String> rest = argResults!.rest;
     final String dir = rest.isNotEmpty ? rest.first : (cfg.arbDir ?? 'arbs');
 
-    final ({ManagementClient client, Operations ops, String projectName}) built =
-        await build(cfg);
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(cfg);
     final ProjectData p;
     try {
       p = await built.client.getProject(built.ops.projectId);
@@ -880,15 +986,16 @@ class CloneCommand extends Command<int> with _ApiCommand {
     final GitRepository? repo = p.repository;
     if (repo == null) {
       stderr.writeln(
-          'No git provider linked for "${p.name}". Link one in the dashboard '
-          '→ Project → Git, then re-run.',);
+        'No git provider linked for "${p.name}". Link one in the dashboard '
+        '→ Project → Git, then re-run.',
+      );
       return 1;
     }
-    if (Directory(dir).existsSync() &&
-        Directory(dir).listSync().isNotEmpty) {
+    if (Directory(dir).existsSync() && Directory(dir).listSync().isNotEmpty) {
       stderr.writeln(
-          'Error: "$dir" already exists and is not empty. Use `fl pull` to '
-          'update it, or pass a different <dir>.',);
+        'Error: "$dir" already exists and is not empty. Use `fl pull` to '
+        'update it, or pass a different <dir>.',
+      );
       return 1;
     }
     if (dryRun) {
@@ -906,30 +1013,289 @@ class CloneCommand extends Command<int> with _ApiCommand {
       stderr.write(res.stderr);
       return res.exitCode;
     }
-    stdout.writeln('✓ Cloned. Add "/$dir/" to .gitignore — the backend owns it.');
+    stdout
+        .writeln('✓ Cloned. Add "/$dir/" to .gitignore — the backend owns it.');
     return 0;
   }
 }
 
 class PullCommand extends Command<int> with _ApiCommand {
+  PullCommand() {
+    argParser
+      ..addFlag(
+        'adopt',
+        negatable: false,
+        help: 'Import keys that exist only on disk before syncing, instead '
+            'of refusing.',
+      )
+      ..addFlag(
+        'discard-local',
+        negatable: false,
+        help: 'Drop keys that exist only on disk (they are recoverable from '
+            'the ref the sync prints).',
+      )
+      ..addFlag(
+        'no-git',
+        negatable: false,
+        help: 'Skip the git mirror and write the ARBs straight from the API.',
+      );
+  }
+
   @override
   String get name => 'pull';
   @override
-  String get description => 'git pull the ARB repo (arb_dir in config).';
+  String get description =>
+      'Sync arb_dir with the service (git mirror if there is one, API '
+      'otherwise). Never needs a git command.';
+
+  @override
+  Future<int> run() async => _pullArbs(
+        this,
+        adopt: argResults!['adopt'] as bool,
+        discardLocal: argResults!['discard-local'] as bool,
+        noGit: argResults!['no-git'] as bool,
+      );
+}
+
+/// Bring `arb_dir` to exactly what the service holds.
+///
+/// Shared by `fl pull` and `fl sync` so there is one definition of "in sync"
+/// and one place where the local-only-key guard lives.
+Future<int> _pullArbs(
+  final _ApiCommand cmd, {
+  final bool adopt = false,
+  final bool discardLocal = false,
+  final bool noGit = false,
+}) async {
+  final ProjectConfig cfg = cmd.loadProject();
+  final String dir = cfg.arbDir ?? '.';
+
+  final ({ManagementClient client, Operations ops, String projectName}) built =
+      await cmd.build(cfg);
+  try {
+    final ProjectData project =
+        await built.client.getProject(built.ops.projectId);
+    final LanguageData? base = project.baseLanguage(built.ops.flavor);
+    if (base == null) {
+      stderr.writeln('Project "${project.name}" has no base language.');
+      return 1;
+    }
+    final String templateName = 'app_${base.code.replaceAll('-', '_')}.arb';
+    final File template = File('$dir/$templateName');
+    final Set<String> serviceKeys = <String>{
+      for (final TranslationEntry t in base.translations)
+        if (t.key.isNotEmpty) t.key,
+    };
+
+    // The one thing a sync must not do quietly: both refresh paths rewrite
+    // the template from the service, so a key staged on disk and never
+    // imported would disappear. Stop, name them, and offer both answers.
+    final List<String> orphans = localOnlyKeys(template, serviceKeys);
+    if (orphans.isNotEmpty && !adopt && !discardLocal) {
+      stderr.writeln(
+          '$templateName has ${orphans.length} key(s) the service does not '
+          'have yet:');
+      for (final String k in orphans.take(20)) {
+        stderr.writeln('  $k');
+      }
+      if (orphans.length > 20) {
+        stderr.writeln('  … and ${orphans.length - 20} more.');
+      }
+      stderr.writeln('Syncing would overwrite the file and lose them. Either:\n'
+          '  fl pull --adopt           import them first, then sync\n'
+          '  fl pull --discard-local   drop them and take the service copy');
+      return 1;
+    }
+    if (orphans.isNotEmpty && adopt) {
+      if (cmd.dryRun) {
+        stdout.writeln(
+            'DRY RUN: would import ${orphans.length} local-only key(s) '
+            'before syncing.');
+      } else {
+        stdout.writeln('Importing ${orphans.length} local-only key(s) from '
+            '$templateName …');
+        final OpResult imported = await built.ops.importArb(
+          template.readAsStringSync(),
+          languageCode: base.code,
+          translate: true,
+        );
+        if (!imported.ok) {
+          stderr.writeln(imported.message);
+          return 1;
+        }
+        stdout.writeln('  ${imported.message}');
+      }
+    }
+
+    if (cmd.dryRun) {
+      stdout.writeln('DRY RUN: would sync "$dir" to the service.');
+      return 0;
+    }
+
+    // Git when it can deliver, API when it cannot. Same outcome either way,
+    // which is why the fallback is silent enough to be routine and loud
+    // enough to explain itself.
+    if (!noGit) {
+      final GitSyncOutcome outcome = await GitMirror(dir).hardSync();
+      if (outcome.ok) {
+        stdout.writeln('✓ Synced "$dir" to ${outcome.upstream}.');
+        if (outcome.discardedAnything) {
+          final List<String> what = <String>[
+            if (outcome.discardedWorkingChanges) 'local edits',
+            if (outcome.discardedLocalCommits > 0)
+              '${outcome.discardedLocalCommits} local commit(s)',
+          ];
+          stdout.writeln(
+              '  Discarded ${what.join(' and ')} — the backend owns this '
+              'directory.');
+          if (outcome.recoveryRef != null) {
+            stdout.writeln('  Recover with: git -C $dir show '
+                '${outcome.recoveryRef}');
+          }
+        }
+        if (cmd.jsonOut) {
+          stdout.writeln(
+            const JsonEncoder.withIndent('  ').convert(
+              <String, dynamic>{
+                'ok': true,
+                'method': ArbSyncMethod.git.name,
+                'dir': dir,
+                'upstream': outcome.upstream,
+                'adopted': adopt ? orphans : <String>[],
+              },
+            ),
+          );
+        }
+        return 0;
+      }
+      stdout.writeln('Git mirror unavailable (${_skipReason(outcome)}) — '
+          'writing the ARBs from the API instead.');
+    }
+
+    final OpResult r = await built.ops.exportArbs(dir);
+    if (cmd.jsonOut) {
+      return cmd.emit(
+        OpResult(
+          r.ok,
+          r.message,
+          <String, dynamic>{
+            ...r.data,
+            'method': ArbSyncMethod.api.name,
+            'adopted': adopt ? orphans : <String>[],
+          },
+        ),
+      );
+    }
+    stdout.writeln(r.ok ? '✓ ${r.message}' : r.message);
+    return r.ok ? 0 : 1;
+  } finally {
+    built.client.close();
+  }
+}
+
+String _skipReason(final GitSyncOutcome o) => switch (o.skip) {
+      GitSkipReason.gitMissing => 'no git on PATH',
+      GitSkipReason.notARepo => 'not a git clone',
+      GitSkipReason.noRemote => 'no remote',
+      GitSkipReason.unreachable =>
+        o.detail.isEmpty ? 'remote unreachable' : o.detail,
+      null => 'unknown',
+    };
+
+/// The whole round trip in one command: push copy up, bring ARBs down,
+/// regenerate the Dart.
+///
+/// It exists because the three steps were documented as three commands in
+/// every consuming repo, which meant every repo also documented its own way
+/// of getting them wrong. One command, one order, no git.
+class SyncCommand extends Command<int> with _ApiCommand {
+  SyncCommand() {
+    argParser
+      ..addFlag(
+        'overwrite',
+        negatable: false,
+        help: 'Let the imported file change values of keys that exist.',
+      )
+      ..addFlag(
+        'translate',
+        defaultsTo: true,
+        help: 'AI-translate the other locales after the import.',
+      )
+      ..addFlag(
+        'codegen',
+        defaultsTo: true,
+        help: 'Regenerate the Dart with the flutter_localisation package.',
+      );
+  }
+
+  @override
+  String get name => 'sync';
+  @override
+  String get description =>
+      'Import an ARB (optional), sync arb_dir, then regenerate the Dart — the '
+      'whole flow in one command.';
+  @override
+  String get invocation => 'fl sync [<file.arb>]';
 
   @override
   Future<int> run() async {
     final ProjectConfig cfg = loadProject();
-    final String dir = cfg.arbDir ?? '.';
-    stdout.writeln('Pulling ARBs in $dir …');
-    final ProcessResult res =
-        await Process.run('git', <String>['pull', '--rebase'], workingDirectory: dir);
-    stdout.write(res.stdout);
-    if (res.exitCode != 0) {
-      stderr.write(res.stderr);
-      return res.exitCode;
+    final List<String> rest = argResults!.rest;
+    final bool translate = argResults!['translate'] as bool;
+    final bool overwrite = argResults!['overwrite'] as bool;
+    final bool codegen = argResults!['codegen'] as bool;
+
+    if (rest.isNotEmpty) {
+      final File file = File(rest.first);
+      if (!file.existsSync()) {
+        stderr.writeln('Error: "${rest.first}" not found.');
+        return 1;
+      }
+      final ({
+        ManagementClient client,
+        Operations ops,
+        String projectName
+      }) built = await build(cfg);
+      try {
+        final OpResult r = await built.ops.importArb(
+          file.readAsStringSync(),
+          overwrite: overwrite,
+          translate: translate,
+          dryRun: dryRun,
+        );
+        stdout.writeln(r.message);
+        if (!r.ok) return 1;
+      } finally {
+        built.client.close();
+      }
     }
-    stdout.writeln('✓ Pulled.');
+
+    final int pulled = await _pullArbs(this, adopt: rest.isNotEmpty);
+    if (pulled != 0) return pulled;
+    if (!codegen || dryRun) return 0;
+
+    final String dir = cfg.arbDir ?? 'arbs';
+    // `arb_dir` points at the flavor folder (arbs/Default); the generator
+    // takes the root and the flavor as two arguments.
+    final List<String> parts = dir.split('/')
+      ..removeWhere((final String p) => p.isEmpty);
+    final String root =
+        parts.length > 1 ? parts.sublist(0, parts.length - 1).join('/') : dir;
+    final String flavorDir = parts.length > 1 ? parts.last : 'Default';
+    stdout.writeln('Regenerating Dart from $root/$flavorDir …');
+    final ProcessResult gen = await Process.run(
+      'dart',
+      <String>['run', 'flutter_localisation', root, flavorDir],
+    );
+    stdout.write(gen.stdout);
+    if (gen.exitCode != 0) {
+      stderr.write(gen.stderr);
+      stderr.writeln(
+          'Codegen failed. Is flutter_localisation a dependency of this app? '
+          'Re-run with --no-codegen to skip it.');
+      return gen.exitCode;
+    }
+    stdout.writeln('✓ In sync: service → ARBs → Dart.');
     return 0;
   }
 }
@@ -965,14 +1331,16 @@ class GuardCommand extends Command<int> {
         for (final String g in globs) ...<String>['Edit($g)', 'Write($g)'],
       ];
       if (_jsonOut) {
-        stdout.writeln(const JsonEncoder.withIndent('  ').convert(
-          <String, dynamic>{
-            'dryRun': true,
-            'protected': globs,
-            'rules': rules,
-            'docs': <String>['AGENTS.md', 'CLAUDE.md'],
-          },
-        ),);
+        stdout.writeln(
+          const JsonEncoder.withIndent('  ').convert(
+            <String, dynamic>{
+              'dryRun': true,
+              'protected': globs,
+              'rules': rules,
+              'docs': <String>['AGENTS.md', 'CLAUDE.md'],
+            },
+          ),
+        );
       } else {
         stdout.writeln('DRY RUN: would deny AI edits to:');
         for (final String g in globs) {
@@ -988,9 +1356,11 @@ class GuardCommand extends Command<int> {
     final AgentDocsResult docs =
         installAgentDocs(root, projectLabel: projectLabel, globs: globs);
     if (_jsonOut) {
-      stdout.writeln(const JsonEncoder.withIndent('  ').convert(
-        <String, dynamic>{...r.toJson(), ...docs.toJson()},
-      ),);
+      stdout.writeln(
+        const JsonEncoder.withIndent('  ').convert(
+          <String, dynamic>{...r.toJson(), ...docs.toJson()},
+        ),
+      );
       return 0;
     }
     stdout.writeln(r.created
@@ -1021,13 +1391,17 @@ class GuardCommand extends Command<int> {
 class NativeCommand extends Command<int> {
   NativeCommand() {
     argParser
-      ..addFlag('check',
-          negatable: false,
-          help: 'Fail if anything is stale, without writing. For CI.',)
-      ..addFlag('init-copy',
-          negatable: false,
-          help: 'Write a starter InfoPlist.copy.json from the current '
-              'Info.plist, then stop.',);
+      ..addFlag(
+        'check',
+        negatable: false,
+        help: 'Fail if anything is stale, without writing. For CI.',
+      )
+      ..addFlag(
+        'init-copy',
+        negatable: false,
+        help: 'Write a starter InfoPlist.copy.json from the current '
+            'Info.plist, then stop.',
+      );
   }
 
   bool get _jsonOut => (globalResults?['json'] as bool?) ?? false;
@@ -1047,7 +1421,8 @@ class NativeCommand extends Command<int> {
     final Directory root = Directory.current;
     String? arbDir;
     try {
-      arbDir = ProjectConfig.load(path: globalResults?['config'] as String?).arbDir;
+      arbDir =
+          ProjectConfig.load(path: globalResults?['config'] as String?).arbDir;
     } on Object {
       // No project config is fine: locales come from the generated Dart, and
       // this command has nothing to say to the backend.
@@ -1067,7 +1442,8 @@ class NativeCommand extends Command<int> {
       }
       final NativeSyncPlan plan = planNativeSync(root, arbDir: arbDir);
       out.writeAsStringSync(
-        initCopyFile(target, plan.locales.contains('en') ? 'en' : plan.locales.first),
+        initCopyFile(
+            target, plan.locales.contains('en') ? 'en' : plan.locales.first),
       );
       stdout.writeln('✓ Wrote ${out.path}');
       stdout.writeln('  Translate it into: ${plan.locales.join(", ")}');
@@ -1086,13 +1462,15 @@ class NativeCommand extends Command<int> {
 
     if (argResults?['check'] as bool? ?? false) {
       if (_jsonOut) {
-        stdout.writeln(const JsonEncoder.withIndent('  ').convert(
-          <String, dynamic>{
-            'locales': plan.locales,
-            'stale': stale,
-            'notes': plan.notes,
-          },
-        ),);
+        stdout.writeln(
+          const JsonEncoder.withIndent('  ').convert(
+            <String, dynamic>{
+              'locales': plan.locales,
+              'stale': stale,
+              'notes': plan.notes,
+            },
+          ),
+        );
       }
       if (stale.isEmpty) {
         if (!_jsonOut) {
@@ -1125,13 +1503,15 @@ class NativeCommand extends Command<int> {
 
     final List<String> changed = applyNativeSync(plan);
     if (_jsonOut) {
-      stdout.writeln(const JsonEncoder.withIndent('  ').convert(
-        <String, dynamic>{
-          'locales': plan.locales,
-          'changed': changed,
-          'notes': plan.notes,
-        },
-      ),);
+      stdout.writeln(
+        const JsonEncoder.withIndent('  ').convert(
+          <String, dynamic>{
+            'locales': plan.locales,
+            'changed': changed,
+            'notes': plan.notes,
+          },
+        ),
+      );
       return 0;
     }
     stdout.writeln(changed.isEmpty
@@ -1165,6 +1545,13 @@ String _requireKey(final Command<int> cmd) {
 /// still generated from the backend's data, not hand-written; this is the
 /// dashboard's Export, from the terminal.
 class ExportCommand extends Command<int> with _ApiCommand {
+  ExportCommand() {
+    argParser.addFlag('discard-local',
+        negatable: false,
+        help: 'Write even though the template holds keys the service does '
+            'not have (they are lost).',);
+  }
+
   @override
   String get name => 'export';
   @override
@@ -1180,9 +1567,44 @@ class ExportCommand extends Command<int> with _ApiCommand {
     final String dir = argResults!.rest.isNotEmpty
         ? argResults!.rest.first
         : (cfg.arbDir ?? 'arbs/Default');
-    final ({ManagementClient client, Operations ops, String projectName}) built =
-        await build(cfg);
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(cfg);
     try {
+      // The same hazard `pull` guards: this rewrites the template from the
+      // service, so a key staged on disk and never imported disappears. That
+      // is how eight onboarding keys were lost once, and why this command
+      // carried a "never run it here" warning in a consuming repo instead of
+      // a check.
+      if (!(argResults!['discard-local'] as bool)) {
+        final ProjectData project =
+            await built.client.getProject(built.ops.projectId);
+        final LanguageData? base = project.baseLanguage(built.ops.flavor);
+        if (base != null) {
+          final String template =
+              'app_${base.code.replaceAll('-', '_')}.arb';
+          final List<String> orphans = localOnlyKeys(
+            File('$dir/$template'),
+            <String>{
+              for (final TranslationEntry t in base.translations)
+                if (t.key.isNotEmpty) t.key,
+            },
+          );
+          if (orphans.isNotEmpty) {
+            stderr.writeln(
+                '$template holds ${orphans.length} key(s) the service does '
+                'not have: ${orphans.take(10).join(', ')}'
+                '${orphans.length > 10 ? ', …' : ''}');
+            stderr.writeln(
+                'Exporting would overwrite them. Import them first '
+                '(`fl import $dir/$template --translate`), or run '
+                '`fl pull --adopt`, or force with `--discard-local`.');
+            return 1;
+          }
+        }
+      }
       final OpResult r = await built.ops.exportArbs(dir, dryRun: dryRun);
       if (jsonOut) return emit(r);
       stdout.writeln(r.message);
