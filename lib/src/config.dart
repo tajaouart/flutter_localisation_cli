@@ -14,6 +14,8 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 
 const String kDefaultBaseUrl = 'https://api.flutterlocalisation.com';
@@ -67,12 +69,22 @@ class ProjectConfig {
       throw ConfigException('Could not parse ${file.path}: $e');
     }
     final Object? pid = json['project_id'];
+    // `arb_dir` is written relative to the config file, which is how every
+    // other project-local config in the ecosystem reads (l10n.yaml, pubspec).
+    // Resolving it against the shell's cwd wrote 74 ARBs into whatever folder
+    // the user happened to be in when they ran `fl pull --config …`.
+    final String? rawArbDir = json['arb_dir'] as String?;
+    final String? arbDir = rawArbDir == null
+        ? null
+        : (p.isAbsolute(rawArbDir)
+            ? rawArbDir
+            : p.normalize(p.join(file.parent.path, rawArbDir)));
     return ProjectConfig(
       baseUrl: (json['base_url'] as String?)?.trimRight() ?? kDefaultBaseUrl,
       projectId: pid is int ? pid : null,
       project: json['project'] as String?,
       flavor: json['flavor'] as String?,
-      arbDir: json['arb_dir'] as String?,
+      arbDir: arbDir,
     );
   }
 

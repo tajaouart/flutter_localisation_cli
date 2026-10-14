@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:test/test.dart';
@@ -9,6 +11,7 @@ import 'package:test/test.dart';
 /// credentials-file fallback that `fl_mcp` now relies on (previously it read
 /// only $FL_API_TOKEN and ignored the file written by `fl login`).
 void main() {
+  _arbDirTests();
   late Directory tmp;
 
   // The env var short-circuits the file fallback; if the runner has it set,
@@ -63,4 +66,36 @@ void main() {
       throwsA(isA<AuthConfigException>()),
     );
   }, skip: skipIfEnv);
+}
+
+void _arbDirTests() {
+  group('arb_dir in flutterlocalisation.json', () {
+    late Directory tmp;
+    setUp(() => tmp = Directory.systemTemp.createTempSync('fl_arbdir_test'));
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    test('a relative arb_dir resolves against the config file, not the cwd', () {
+      final Directory project = Directory(p.join(tmp.path, 'app'))..createSync();
+      File(p.join(project.path, 'flutterlocalisation.json'))
+          .writeAsStringSync(jsonEncode({'project': 'X', 'arb_dir': 'lib/l10n'}));
+
+      final ProjectConfig cfg =
+          ProjectConfig.load(path: p.join(project.path, 'flutterlocalisation.json'));
+
+      expect(cfg.arbDir, p.join(project.path, 'lib', 'l10n'));
+      expect(p.isAbsolute(cfg.arbDir!), isTrue);
+    });
+
+    test('an absolute arb_dir is kept as is', () {
+      final String abs = p.join(tmp.path, 'elsewhere');
+      File(p.join(tmp.path, 'flutterlocalisation.json'))
+          .writeAsStringSync(jsonEncode({'arb_dir': abs}));
+      expect(ProjectConfig.load(path: p.join(tmp.path, 'flutterlocalisation.json')).arbDir, abs);
+    });
+
+    test('no arb_dir stays null so commands keep their own default', () {
+      File(p.join(tmp.path, 'flutterlocalisation.json')).writeAsStringSync('{}');
+      expect(ProjectConfig.load(path: p.join(tmp.path, 'flutterlocalisation.json')).arbDir, isNull);
+    });
+  });
 }

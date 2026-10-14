@@ -1,6 +1,12 @@
 # Changelog
 
-## [1.8.0] - 2026-09-26
+## [1.8.0] - 2026-10-15
+### Fixed
+- **`arb_dir` in `flutterlocalisation.json` is relative to that file, not to
+  the shell's working directory.** Running `fl pull` from a subfolder (or from
+  an IDE task whose cwd is not the repo root) wrote the ARBs next to wherever
+  the shell happened to be. An absolute `arb_dir` is left as is.
+
 ### Changed
 - **`fl pull` is a sync, not a `git pull`.** The ARB directory is generated
   output the backend owns, so there is never a local contribution to

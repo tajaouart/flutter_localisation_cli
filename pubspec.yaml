@@ -22,6 +22,7 @@ environment:
 dependencies:
   http: ^1.4.0
   args: ^2.4.0
+  path: ^1.9.1
 
 dev_dependencies:
   test: ^1.16.0
