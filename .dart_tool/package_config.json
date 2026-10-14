@@ -303,8 +303,8 @@
     }
   ],
   "generator": "pub",
-  "generatorVersion": "3.13.0",
+  "generatorVersion": "3.13.3",
   "flutterRoot": "file:///Volumes/Lexar/DevStore/development-flutter",
-  "flutterVersion": "3.47.0",
+  "flutterVersion": "3.47.4",
   "pubCache": "file:///Users/mounirtajaouart/.pub-cache"
 }

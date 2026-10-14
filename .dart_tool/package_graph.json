@@ -5,10 +5,11 @@
   "packages": [
     {
       "name": "flutter_localisation_cli",
-      "version": "1.4.0",
+      "version": "1.8.0",
       "dependencies": [
         "args",
-        "http"
+        "http",
+        "path"
       ],
       "devDependencies": [
         "lints",
@@ -50,6 +51,11 @@
         "webkit_inspection_protocol",
         "yaml"
       ]
+    },
+    {
+      "name": "path",
+      "version": "1.9.1",
+      "dependencies": []
     },
     {
       "name": "args",
@@ -213,11 +219,6 @@
         "async",
         "stack_trace"
       ]
-    },
-    {
-      "name": "path",
-      "version": "1.9.1",
-      "dependencies": []
     },
     {
       "name": "package_config",

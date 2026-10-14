@@ -243,11 +243,12 @@ claude mcp add flutter-localisation --env FL_API_TOKEN=flk_live_xxx -- fl_mcp
 ```
 
 Then ask: *"list my projects"*, then *"in Chat Bot, add `checkout_button` = 'Buy now' and
-translate it to all locales."* Tools: `list_projects`, `list_status`, `project_repo`, `add_string`,
-`edit_string`, `delete_string`, `translate_key`, `import_arb` (each takes an optional
-`project`/`flavor`), and `sync_native_locales` — the MCP face of `fl native`, which needs
-no token and takes an optional `project_root`. `project_repo` returns the linked ARB git repo so Claude can clone it
-before codegen.
+translate it to all locales."* Tools: `list_projects`, `list_status`, `list_languages`,
+`add_language`, `project_repo`, `add_string`, `edit_string`, `delete_string`, `translate_key`,
+`retranslate`, `import_arb`, `pull_arbs` (each takes an optional `project`/`flavor`), and
+`sync_native_locales` — the MCP face of `fl native`, which needs no token and takes an optional
+`project_root`. `project_repo` returns the linked ARB git repo so the agent can clone it before
+codegen; `pull_arbs` writes the ARBs into `arb_dir` the same way `fl pull` does.
 
 ## How strings reach your app
 
