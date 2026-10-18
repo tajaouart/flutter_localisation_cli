@@ -56,6 +56,17 @@ fl native                                # tell iOS + Android about the locales,
 `-t/--translate` batch-fills the other locales afterwards; `--language <code>` sets the locale
 the file represents (default: the base language). Preview with `--dry-run`.
 
+The result says what the server actually wrote: keys written, keys skipped because they
+already hold a different value (pass `--overwrite` to replace them), and keys already
+identical. Importing one locale's translations replaces rows that still hold a copy of the
+base text (what adding a locale seeds them with) without `--overwrite`; rows marked checked
+are kept. Placeholder types always come from the base language, so a translated ARB without
+`@key` metadata cannot turn an `int` into a `String`.
+
+`fl status` and `fl retranslate` treat a variant of the base language (`en-GB`, `en-US` for
+an `en` base) that reads the same as the base as finished, and never flag a value with no
+words in it (`{count}`). `fl retranslate --include-variants` sends the variant rows anyway.
+
 ### Bulk rules — read before scripting this CLI
 
 Work must cost **O(1) requests, not O(N)**. Two commands cover every bulk case:

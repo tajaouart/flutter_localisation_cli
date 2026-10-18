@@ -66,3 +66,24 @@ String canonicalizeOrKeep(final String code) {
 /// Hyphens are what BCP-47 uses and underscores are what the Dart tooling
 /// reads; a file named `app_pt-BR.arb` is not picked up by `gen_l10n` at all.
 String arbSuffix(final String code) => canonicalizeOrKeep(code).replaceAll('-', '_');
+
+/// The language subtag: `en` for `en-GB`, `pt` for `pt_BR`.
+String languageOf(final String code) =>
+    canonicalizeOrKeep(code).split('-').first.toLowerCase();
+
+/// True when [code] is a regional or script variant of the language [baseCode]
+/// is written in (`en-GB` and `en-US` for an `en` base, `fr-CA` for `fr-FR`).
+///
+/// A variant that reads the same as the base is usually right, not
+/// untranslated: most English strings are already valid British English.
+bool isVariantOf(final String code, final String baseCode) =>
+    canonicalizeOrKeep(code) != canonicalizeOrKeep(baseCode) &&
+    languageOf(code) == languageOf(baseCode);
+
+final RegExp _simplePlaceholder = RegExp(r'\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}');
+final RegExp _letter = RegExp(r'\p{L}', unicode: true);
+
+/// False for a value that has nothing to translate: only placeholders,
+/// digits, symbols or punctuation (`{count}`, `{a} / {b}`, `100%`).
+bool hasTranslatableText(final String value) =>
+    _letter.hasMatch(value.replaceAll(_simplePlaceholder, ''));

@@ -452,6 +452,15 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
                       're-translated and re-reported on every run for ever. '
                       'Review the "unchanged" list from a previous run first.',
             },
+            'include_variants': <String, dynamic>{
+              'type': 'boolean',
+              'default': false,
+              'description':
+                  'Also send values identical to the source in variants of the '
+                      'base language (en-GB, en-US for an en base). Skipped by '
+                      'default, since matching the source is usually correct '
+                      'there.',
+            },
             'apply': <String, dynamic>{'type': 'boolean', 'default': false},
             ..._projectProps,
           },
@@ -846,6 +855,7 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
           locales: (a['locales'] as List<dynamic>?)?.cast<String>(),
           dryRun: !apply,
           acceptUnchanged: (a['accept_unchanged'] ?? false) as bool,
+          includeVariants: (a['include_variants'] ?? false) as bool,
         );
       case 'list_languages':
         r = await ops.listLanguages();

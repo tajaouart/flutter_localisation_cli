@@ -584,6 +584,11 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
         help: 'Mark every value that came back identical to the source as '
             'checked, so it stops being re-translated on every run. Use after '
             'reviewing the list this command prints.');
+    argParser.addFlag('include-variants',
+        negatable: false,
+        help: 'Also send values that match the source in variants of the base '
+            'language (en-GB, en-US for an en base). Skipped by default: '
+            'there, matching the source is usually correct.');
   }
 
   @override
@@ -594,7 +599,8 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
       'to the source.';
   @override
   String get invocation =>
-      'fl retranslate [--locale ar --locale ru] [--accept-unchanged]';
+      'fl retranslate [--locale ar --locale ru] [--accept-unchanged] '
+      '[--include-variants]';
 
   @override
   Future<int> run() async {
@@ -608,6 +614,7 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
         locales: _locales(argResults!['locale'] as List<String>),
         dryRun: dryRun,
         acceptUnchanged: argResults!['accept-unchanged'] as bool,
+        includeVariants: argResults!['include-variants'] as bool,
       );
       if (jsonOut) return emit(r);
       stdout.writeln(r.message);
@@ -725,7 +732,11 @@ class StatusCommand extends Command<int> with _ApiCommand {
       var totalUntranslated = 0;
       for (final row in (r.data['locales'] as List)) {
         final Map<String, dynamic> m = row as Map<String, dynamic>;
-        final String tag = (m['base'] as bool) ? ' (base)' : '';
+        final String tag = (m['base'] as bool)
+            ? ' (base)'
+            : m['variant_of'] != null
+                ? ' (variant of ${m['variant_of']})'
+                : '';
         // Show the translated count, not the filled one: a row still holding
         // the source text is otherwise indistinguishable from a finished 100%.
         final int untranslated = (m['untranslated'] as int?) ?? 0;

@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.9.0] - 2026-10-18
+### Fixed
+- **`fl import` reports what was written, not how many keys the file had.**
+  Importing a locale's translations after `fl languages add` printed
+  "Imported 191 key(s)" while every key was skipped, because each row already
+  held the seeded base text. The backend now replaces those stand-in rows in a
+  single-locale import, and the CLI prints written / skipped / identical
+  counts from the server, with the skipped keys and the `--overwrite` remedy.
+  Older backends keep the old wording.
+- **Placeholder types come from the base language.** A translated ARB has no
+  `@key` metadata, so its placeholders were stored and exported as `String`
+  while the template said `int`, and `flutter gen-l10n` refused the build.
+  `fl export`/`fl pull` (API path) now type every translated locale's
+  placeholders as the base types them.
+- **"Project not found" names the workspace the token searched**, and says a
+  token only reaches the workspace it was created in.
+
+### Changed
+- **Variants of the base language are not "untranslated" when they match it.**
+  `fl status` counts `en-GB` / `en-US` rows identical to `en` as done and
+  labels the locale `(variant of en)`; `fl retranslate` skips them unless the
+  locale is named or `--include-variants` is passed (`include_variants` on the
+  MCP tool). Values with no words in them (`{count}`, `100%`) are never
+  flagged.
+
 ## [1.8.0] - 2026-10-15
 ### Fixed
 - **`arb_dir` in `flutterlocalisation.json` is relative to that file, not to

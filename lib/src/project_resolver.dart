@@ -47,7 +47,9 @@ class ProjectResolver {
   }) async {
     final List<ProjectSummary> list = await projects();
     if (list.isEmpty) {
-      throw ResolveException('No projects are accessible with this token.');
+      throw ResolveException(
+        'No projects are accessible with this token. $_tokenScopeHint',
+      );
     }
 
     final String? selector = project ?? defaultProject;
@@ -78,8 +80,20 @@ class ProjectResolver {
         return p;
       }
     }
+    // A token is scoped to one workspace, so the usual cause is a token from
+    // the wrong one. Say which workspace was searched, or the list of names
+    // reads like the project was deleted.
+    final List<String> workspaces = <String>{
+      for (final ProjectSummary p in list)
+        if (p.workspace.isNotEmpty) p.workspace,
+    }.toList();
+    final String where = workspaces.isEmpty
+        ? ''
+        : ' in workspace${workspaces.length > 1 ? 's' : ''} '
+            '${workspaces.map((final String w) => '"$w"').join(', ')}';
     throw ResolveException(
-      'Project "$selector" not found. Available: ${_names(list)}.',
+      'Project "$selector" not found$where. Available: ${_names(list)}. '
+      '$_tokenScopeHint',
     );
   }
 
@@ -101,6 +115,11 @@ class ProjectResolver {
       '(${project.flavors.map((final FlavorSummary f) => f.name).join(", ")}); specify one.',
     );
   }
+
+  static const String _tokenScopeHint =
+      'A token only reaches the workspace it was created in: for a project in '
+      'another workspace, use a token from that workspace '
+      '(`fl login --token ...`, or FL_API_TOKEN for one command).';
 
   String _names(final List<ProjectSummary> list) =>
       list.map((final ProjectSummary p) => p.name).join(', ');

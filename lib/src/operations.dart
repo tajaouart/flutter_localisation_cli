@@ -460,9 +460,17 @@ class Operations {
         // against a deployment that predates it.
         autoTranslate: translate);
 
+    final ({String phrase, String hint, Map<String, dynamic> data}) outcome =
+        _importOutcome(importResponse, keyCount);
+
     if (!translate) {
-      return OpResult(true, 'Imported $keyCount key(s) into "${fl.name}".',
-          <String, dynamic>{'imported': keyCount, 'flavor': fl.name});
+      return OpResult(true, '${outcome.phrase} into "${fl.name}".${outcome.hint}',
+          <String, dynamic>{
+            'imported': keyCount,
+            ...outcome.data,
+            'flavor': fl.name,
+            ...outcome.data,
+          });
     }
 
     // The server did the filling: one round trip, and no re-fetch to work out
@@ -478,12 +486,13 @@ class Operations {
       return OpResult(
         ok,
         ok
-            ? 'Imported $keyCount key(s) and translated $filled locale-string(s)'
-                '${failedRows > 0 ? ' ($failedRows failed)' : ''}.'
+            ? '${outcome.phrase} and translated $filled locale-string(s)'
+                '${failedRows > 0 ? ' ($failedRows failed)' : ''}.${outcome.hint}'
             : (serverSide['message'] as String?) ??
-                'Imported $keyCount key(s); translating them failed.',
+                '${outcome.phrase}; translating them failed.',
         <String, dynamic>{
           'imported': keyCount,
+          ...outcome.data,
           'translated': filled,
           'failed_count': failedRows,
           'server_side': true,
@@ -551,12 +560,13 @@ class Operations {
       if (unseeded.isNotEmpty) {
         return OpResult(
           false,
-          'Imported $keyCount key(s), but ${unseeded.join(", ")} have no rows for '
+          '${outcome.phrase}, but ${unseeded.join(", ")} have no rows for '
           'them, so --translate had nothing to work on. Re-run the import against '
           'the base language (omit --language) so every locale is seeded, then '
           'translate. Do NOT fall back to per-key add/translate.',
           <String, dynamic>{
             'imported': keyCount,
+            ...outcome.data,
             'translated': 0,
             'unseeded_locales': unseeded,
           },
@@ -564,8 +574,12 @@ class Operations {
       }
       return OpResult(
         true,
-        'Imported $keyCount key(s); every locale already translated.',
-        <String, dynamic>{'imported': keyCount, 'translated': 0},
+        '${outcome.phrase}; every locale already translated.${outcome.hint}',
+        <String, dynamic>{
+          'imported': keyCount,
+          'translated': 0,
+          ...outcome.data,
+        },
       );
     }
     // The import has already been written at this point, so a failure in the
@@ -581,12 +595,13 @@ class Operations {
     } on ManagementException catch (e) {
       return OpResult(
         false,
-        'Imported $keyCount key(s), but translating them failed: ${e.message}. '
+        '${outcome.phrase}, but translating them failed: ${e.message}. '
         'The keys ARE created and hold the base text — run `fl retranslate` to '
         'fill them (it works in chunks, so it survives what one big request '
         'does not).',
         <String, dynamic>{
           'imported': keyCount,
+          ...outcome.data,
           'translated': 0,
           'translate_error': e.message,
           'pending': targets.length,
@@ -596,9 +611,9 @@ class Operations {
 
     return OpResult(
       result.failed.isEmpty,
-      'Imported $keyCount key(s) and translated '
+      '${outcome.phrase} and translated '
       '${result.translated}/${targets.length} locale-strings'
-      '${_outcomeSuffix(result)}.',
+      '${_outcomeSuffix(result)}.${outcome.hint}',
       <String, dynamic>{
         'imported': keyCount,
         'translated': result.translated,
@@ -606,6 +621,55 @@ class Operations {
         'unchanged': _unchangedJson(result.unchanged),
       },
     );
+  }
+
+  /// What an import actually changed, from the server's `import` block.
+  ///
+  /// The key count alone said "Imported 191 key(s)" for a run that skipped all
+  /// 191 because they already held values. Backends that predate the block get
+  /// the old wording.
+  static ({String phrase, String hint, Map<String, dynamic> data})
+      _importOutcome(final Map<String, dynamic> response, final int keyCount) {
+    final Object? summary = response['import'];
+    final Object? keys = summary is Map<String, dynamic> ? summary['keys'] : null;
+    if (keys is! Map<String, dynamic>) {
+      return (
+        phrase: 'Imported $keyCount key(s)',
+        hint: '',
+        data: const <String, dynamic>{},
+      );
+    }
+    final int written = (keys['written'] as num?)?.toInt() ?? 0;
+    final int skipped = (keys['skipped'] as num?)?.toInt() ?? 0;
+    final int unchanged = (keys['unchanged'] as num?)?.toInt() ?? 0;
+    final List<String> skippedKeys = <String>[
+      for (final Object? k
+          in ((summary as Map<String, dynamic>)['skipped_keys'] as List?) ??
+              const <Object?>[])
+        '$k',
+    ];
+    final Map<String, dynamic> data = <String, dynamic>{
+      'written': written,
+      'skipped': skipped,
+      'unchanged': unchanged,
+      if (skippedKeys.isNotEmpty) 'skipped_keys': skippedKeys,
+    };
+    final List<String> parts = <String>[
+      '$written written',
+      if (skipped > 0) '$skipped skipped',
+      if (unchanged > 0) '$unchanged already identical',
+    ];
+    final String phrase = written == 0 && skipped > 0
+        ? 'Nothing written: $skipped of $keyCount key(s) skipped'
+        : 'Imported $keyCount key(s) (${parts.join(', ')})';
+    String hint = '';
+    if (skipped > 0) {
+      final String sample = skippedKeys.take(5).join(', ');
+      hint = ' $skipped key(s) already hold a different value and were kept'
+          '${sample.isEmpty ? '' : ' ($sample${skipped > 5 ? ', ...' : ''})'}. '
+          'Pass --overwrite to replace them.';
+    }
+    return (phrase: phrase, hint: hint, data: data);
   }
 
   /// Edit one locale's value (or plural/placeholder fields) of an existing key.
@@ -796,6 +860,7 @@ class Operations {
     final bool dryRun = false,
     final int chunkSize = _defaultChunkSize,
     final bool acceptUnchanged = false,
+    final bool includeVariants = false,
   }) async {
     // Narrowing a whole-project repair to one locale, over and over, is the
     // most expensive way to do the cheapest thing: omitting --locale covers
@@ -841,12 +906,20 @@ class Operations {
       if (locales != null && locales.isNotEmpty && !locales.contains(l.code)) {
         continue;
       }
+      // A locale named explicitly is one the caller wants worked on, variant
+      // or not.
+      final bool identicalIsFine = !includeVariants &&
+          !(locales?.contains(l.code) ?? false) &&
+          isVariantOf(l.code, baseCode);
       var n = 0;
       for (final TranslationEntry t in l.translations) {
         final String? base = baseByKey[t.key];
         if (base == null || base.trim().isEmpty) continue;
         final bool needsWork = t.value.trim().isEmpty ||
-            (t.value.trim() == base.trim() && !t.isChecked);
+            (t.value.trim() == base.trim() &&
+                !t.isChecked &&
+                !identicalIsFine &&
+                hasTranslatableText(base));
         if (needsWork) {
           ids.add(t.id);
           n++;
@@ -1193,14 +1266,20 @@ class Operations {
       final int filled = l.translations.where((final TranslationEntry t) => !t.isEmpty).length;
       // Rows a reviewer has marked checked are counted as translated even when
       // they equal the source: that is how a deliberate match is recorded.
-      final int sameAsBase = l.isBase
+      // A variant of the base language (`en-GB` for `en`) that reads the same
+      // is finished, and so is a value with no words in it (`{count}`):
+      // flagging either sends the caller to `fl retranslate` for nothing.
+      final bool identicalIsFine =
+          baseCode != null && isVariantOf(l.code, baseCode);
+      final int sameAsBase = l.isBase || identicalIsFine
           ? 0
           : l.translations.where((final TranslationEntry t) {
               final String? base = baseByKey[t.key];
               return base != null &&
                   base.trim().isNotEmpty &&
                   t.value.trim() == base.trim() &&
-                  !t.isChecked;
+                  !t.isChecked &&
+                  hasTranslatableText(base);
             }).length;
       final int translated = l.isBase ? total : filled - sameAsBase;
       rows.add(<String, dynamic>{
@@ -1213,6 +1292,7 @@ class Operations {
         'percent': total == 0 ? 100 : ((filled / total) * 100).round(),
         'translated_percent':
             total == 0 ? 100 : ((translated / total) * 100).round(),
+        if (identicalIsFine) 'variant_of': baseCode,
       });
     }
     return OpResult(true, 'Status for "${project.name}" / flavor "${f.name}".',
@@ -1235,9 +1315,9 @@ class Operations {
 extension ArbExport on Operations {
   /// Write one `app_<locale>.arb` per locale into [dir]. Returns the files.
   ///
-  /// `@key` metadata (description, placeholders) is written to the **template**
-  /// (base-locale) ARB only. That is where `gen_l10n` reads it from, and
-  /// repeating it in 35 translated files would be 35 copies to drift.
+  /// `@key` metadata is written to every locale, as the backend's writer does.
+  /// A translated locale's placeholders are typed as the base types them:
+  /// `gen_l10n` aborts when a translated file disagrees with the template.
   Future<OpResult> exportArbs(
     final String dir, {
     final bool dryRun = false,
@@ -1247,6 +1327,14 @@ extension ArbExport on Operations {
     if (f.languages.isEmpty) {
       return OpResult(false, 'Flavor "${f.name}" has no locales.');
     }
+
+    final Map<String, Map<String, dynamic>> basePlaceholders =
+        <String, Map<String, dynamic>>{
+      for (final LanguageData l in f.languages)
+        if (l.isBase)
+          for (final TranslationEntry t in l.translations)
+            if (t.placeholders.isNotEmpty) t.key: t.placeholders,
+    };
 
     final List<Map<String, dynamic>> written = <Map<String, dynamic>>[];
     for (final LanguageData lang in f.languages) {
@@ -1263,8 +1351,11 @@ extension ArbExport on Operations {
         body[t.key] = t.value;
         // Placeholders before description: the order the backend's writer
         // emits them in, and this file has to match it byte for byte.
+        final Map<String, dynamic> placeholders = lang.isBase
+            ? t.placeholders
+            : inheritPlaceholders(t.placeholders, basePlaceholders[t.key]);
         final Map<String, dynamic> meta = <String, dynamic>{
-          if (t.placeholders.isNotEmpty) 'placeholders': t.placeholders,
+          if (placeholders.isNotEmpty) 'placeholders': placeholders,
           if (t.description.isNotEmpty) 'description': t.description,
         };
         if (meta.isNotEmpty) body['@${t.key}'] = meta;
@@ -1332,4 +1423,22 @@ extension ArbExport on Operations {
     }
     return now;
   }
+}
+
+/// [placeholders] with each name [base] also declares typed as [base] types it.
+///
+/// Mirrors the backend's `placeholders.inherit`: a translated locale's stored
+/// types are usually guesses (`String`), and `gen_l10n` refuses a translated
+/// ARB whose placeholder type differs from the template's.
+Map<String, dynamic> inheritPlaceholders(
+  final Map<String, dynamic> placeholders,
+  final Map<String, dynamic>? base,
+) {
+  if (base == null || base.isEmpty) return placeholders;
+  return <String, dynamic>{
+    for (final MapEntry<String, dynamic> e in placeholders.entries)
+      e.key: base[e.key] is Map && (base[e.key] as Map).isNotEmpty
+          ? Map<String, dynamic>.from(base[e.key] as Map)
+          : e.value,
+  };
 }
