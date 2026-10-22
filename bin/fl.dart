@@ -93,8 +93,12 @@ Future<void> main(final List<String> args) async {
           .writeln('Hint: your token may lack the required scope, or the plan '
               'limit was reached.');
     } else if (e is ApiException && e.isAuth) {
+      final String from =
+          _tokenSource == null ? 'The token' : 'The token from $_tokenSource';
       stderr.writeln(
-          'Hint: run `fl login --token flk_live_...` or set \$FL_API_TOKEN.');
+          'Hint: $from was rejected: revoked, expired, or made for another '
+          'workspace. Create one in the dashboard (workspace → API tokens) and '
+          'run `fl login --token flk_live_...`, or set \$FL_API_TOKEN.');
     }
     exit(1);
   }
@@ -137,6 +141,9 @@ void _writeRowErrors(final ApiException e) {
 }
 
 /// Shared helpers for commands that talk to the API.
+/// Where the last resolved token came from, named in the 401 hint.
+String? _tokenSource;
+
 mixin _ApiCommand on Command<int> {
   bool get jsonOut => (globalResults?['json'] as bool?) ?? false;
   bool get dryRun => (globalResults?['dry-run'] as bool?) ?? false;
@@ -149,6 +156,7 @@ mixin _ApiCommand on Command<int> {
       explicit: globalResults?['token'] as String?,
       baseUrl: cfg.baseUrl,
     );
+    _tokenSource = creds.source;
     return ManagementClient(baseUrl: cfg.baseUrl, token: creds.token);
   }
 
@@ -201,12 +209,18 @@ class LoginCommand extends Command<int> {
       defaultsTo: kDefaultBaseUrl,
       help: 'API base URL to associate the token with.',
     );
+    argParser.addFlag(
+      'verify',
+      defaultsTo: true,
+      help: 'Check the token against the API before saving it.',
+    );
   }
 
   @override
   String get name => 'login';
   @override
-  String get description => 'Store a scoped API token (~/.config, chmod 600).';
+  String get description =>
+      'Check a scoped API token against the API and store it (~/.config, chmod 600).';
 
   @override
   Future<int> run() async {
@@ -214,6 +228,24 @@ class LoginCommand extends Command<int> {
     final String baseUrl = argResults!['base-url'] as String;
     if (!token.startsWith('flk_')) {
       stderr.writeln('Warning: token does not look like a flk_ key.');
+    }
+    if (argResults!['verify'] as bool) {
+      final ManagementClient client =
+          ManagementClient(baseUrl: baseUrl, token: token);
+      try {
+        final List<ProjectSummary> projects = await client.listProjects();
+        stdout.writeln(
+            '✓ $baseUrl accepts the token (${projects.length} project(s)).');
+      } on ApiException catch (e) {
+        if (!e.isAuth) rethrow;
+        stderr.writeln(
+            'Error: $baseUrl rejected the token (HTTP 401). Nothing saved. '
+            'Create one in the dashboard (workspace → API tokens), or pass '
+            '--no-verify to store it anyway.');
+        return 1;
+      } finally {
+        client.close();
+      }
     }
     Credentials.save(token, baseUrl: baseUrl);
     stdout.writeln('✓ Token saved for $baseUrl.');
@@ -245,6 +277,7 @@ class ProjectsCommand extends Command<int> with _ApiCommand {
                     'flavors': p.flavors
                         .map(
                           (final FlavorSummary f) => <String, dynamic>{
+                            'id': f.id,
                             'name': f.name,
                             'base': f.baseLanguage,
                             'locales': f.languages,
@@ -271,7 +304,8 @@ class ProjectsCommand extends Command<int> with _ApiCommand {
         for (final FlavorSummary f in p.flavors) {
           final String base =
               f.baseLanguage != null ? '  [base ${f.baseLanguage}]' : '';
-          stdout.writeln('  · ${f.name}: ${f.languages.join(", ")}$base');
+          final String id = f.id == null ? '' : ' (id ${f.id})';
+          stdout.writeln('  · ${f.name}$id: ${f.languages.join(", ")}$base');
         }
       }
       return 0;
@@ -455,7 +489,9 @@ class EditCommand extends Command<int> with _ApiCommand {
   @override
   String get invocation =>
       'fl edit <key> --locale <code> [--value "..."] [--singular-case "..." '
-      '--plural-case "..."]';
+      '--plural-case "..."]\n'
+      'A String Catalog key may be given by its stem: "done_body" finds '
+      '"done_body %@ %lld". Placeholders are written {arg1}, {arg2} in the value.';
 
   @override
   Future<int> run() async {

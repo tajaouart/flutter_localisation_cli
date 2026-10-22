@@ -77,6 +77,62 @@ void main() {
     expect(r.out, isNot(contains('regenerate the Dart')), reason: 'no gen_l10n step for iOS');
   });
 
+  test('login refuses a token the API rejects and saves one it accepts', () async {
+    final File creds = File(p.join(tmp.path, '.config', 'flutterlocalisation', 'credentials.json'));
+
+    final Run bad = await fl(<String>['login', '--token', 'flk_live_stale', '--base-url', backend.url]);
+    expect(bad.code, 1);
+    expect(bad.err, contains('rejected the token'));
+    expect(bad.err, contains('--no-verify'));
+    expect(creds.existsSync(), isFalse);
+
+    final Run good = await fl(<String>['login', '--token', 'flk_live_test', '--base-url', backend.url]);
+    expect(good.code, 0, reason: good.err);
+    expect(good.out, contains('accepts the token (1 project(s))'));
+    final Map<String, dynamic> saved = jsonDecode(creds.readAsStringSync()) as Map<String, dynamic>;
+    expect((saved['tokens'] as Map<String, dynamic>)[backend.url], 'flk_live_test');
+
+    final Run unverified = await fl(<String>['login', '--token', 'flk_live_stale', '--base-url', backend.url, '--no-verify']);
+    expect(unverified.code, 0, reason: unverified.err);
+  });
+
+  test('a rejected token names where it came from', () async {
+    final ProcessResult r = await Process.run(
+      'dart',
+      <String>['run', p.join(packageRoot(), 'bin', 'fl.dart'), 'projects'],
+      workingDirectory: tmp.path,
+      environment: <String, String>{'FL_API_TOKEN': 'flk_live_stale', 'HOME': tmp.path},
+    );
+    expect(r.exitCode, 1);
+    expect(r.stderr as String, contains(r'The token from $FL_API_TOKEN was rejected'));
+    expect(r.stderr as String, contains('fl login'));
+  });
+
+  test('projects lists each flavor with its id', () async {
+    final Run text = await fl(<String>['projects']);
+    expect(text.code, 0, reason: text.err);
+    expect(text.out, contains('Default (id 3): en'));
+    final Run json = await fl(<String>['projects', '--json']);
+    final List<dynamic> projects = jsonDecode(json.out) as List<dynamic>;
+    final Map<String, dynamic> flavor =
+        ((projects.single as Map<String, dynamic>)['flavors'] as List<dynamic>).single as Map<String, dynamic>;
+    expect(flavor['id'], 3);
+  });
+
+  test('edit finds a catalog key by its stem and keeps its placeholders', () async {
+    final Run stem = await fl(<String>['--dry-run', 'edit', 'running', '--locale', 'en', '--value', '{arg1} s to go']);
+    expect(stem.code, 0, reason: stem.err);
+    expect(stem.out, contains('would update "running %lld" [en]'));
+
+    final Run dropped = await fl(<String>['--dry-run', 'edit', 'running', '--locale', 'en', '--value', 'almost done']);
+    expect(dropped.code, 1);
+    expect(dropped.out, contains('must keep {arg1}'));
+
+    final Run unknown = await fl(<String>['--dry-run', 'edit', 'runn', '--locale', 'en', '--value', 'x']);
+    expect(unknown.code, 1);
+    expect(unknown.err, contains('Did you mean "running %lld"?'));
+  });
+
   test('pull --dry-run touches nothing', () async {
     final Run r = await fl(<String>['--dry-run', 'pull']);
     expect(r.code, 0, reason: r.err);

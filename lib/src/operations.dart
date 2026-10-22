@@ -730,8 +730,25 @@ class Operations {
   }) async {
     final ProjectData project = await client.getProject(projectId);
     final int id = project.resolveId(key, locale, flavorName: flavor);
+    final String full = project.canonicalKey(key, flavorName: flavor);
+    final TranslationEntry? base = project.baseEntry(full, flavorName: flavor);
+    if (value != null && base != null && !base.isPluralEnabled) {
+      final List<String> dropped = <String>[
+        for (final String name in base.placeholders.keys)
+          if (!value.contains('{$name}')) '{$name}',
+      ];
+      if (dropped.isNotEmpty) {
+        return OpResult(
+          false,
+          'Value for "$full" [$locale] must keep ${dropped.join(', ')}: '
+          'the key\'s placeholders are written as '
+          '${base.placeholders.keys.map((final String n) => '{$n}').join(', ')} '
+          'in every locale (base: "${base.value}").',
+        );
+      }
+    }
     if (dryRun) {
-      return OpResult(true, 'DRY RUN: would update "$key" [$locale] (id $id).');
+      return OpResult(true, 'DRY RUN: would update "$full" [$locale] (id $id).');
     }
     await client.updateTranslation(
       id,
@@ -749,7 +766,7 @@ class Operations {
       description: description,
       isChecked: isChecked,
     );
-    return OpResult(true, 'Updated "$key" [$locale].', <String, dynamic>{'key': key, 'locale': locale});
+    return OpResult(true, 'Updated "$full" [$locale].', <String, dynamic>{'key': full, 'locale': locale});
   }
 
   /// Delete a key. Without [locale] the whole key is removed (all locales + the key

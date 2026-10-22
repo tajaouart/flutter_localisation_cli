@@ -131,6 +131,13 @@ class FakeBackend {
     final HttpResponse res = req.response;
     res.headers.contentType = ContentType.json;
 
+    if (req.headers.value('authorization') != 'Bearer flk_live_test') {
+      res.statusCode = HttpStatus.unauthorized;
+      res.write(jsonEncode(<String, String>{'error': 'Invalid API token.'}));
+      await res.close();
+      return;
+    }
+
     if (req.method == 'GET' && path == '/api/projects/') {
       res.write(jsonEncode(<String, dynamic>{
         'projects': <Map<String, dynamic>>[
@@ -141,6 +148,7 @@ class FakeBackend {
             'platforms': platforms,
             'flavors': <Map<String, dynamic>>[
               <String, dynamic>{
+                'id': 3,
                 'name': 'Default',
                 'base_language': 'en',
                 'languages': <String>['en'],

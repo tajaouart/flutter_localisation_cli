@@ -36,6 +36,7 @@ fl projects                              # list your projects (name, flavors, lo
 fl status --project "Chat Bot"           # completion % per locale
 fl add greeting --value "Hello" -t       # add key + AI-translate every other locale
 fl edit greeting --locale fr --value "Bonjour"
+fl edit done_body --locale fr --value "{arg1} en {arg2} s"   # catalog key by its stem
 fl import strings.arb -t                 # bulk-create MANY keys from one ARB, then translate
 fl translate greeting --missing          # fill only empty locales
 fl languages                             # list locales + how many keys each has filled

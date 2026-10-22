@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.11.0] - 2026-10-22
+### Changed
+- **`fl login` checks the token before saving it.** A token the API rejects
+  is not written, so a stale credentials file can no longer sit there until
+  the next command fails with a bare 401. `--no-verify` stores it anyway.
+- A 401 now says where the rejected token came from (`--token`,
+  `$FL_API_TOKEN` or the credentials file) and how to replace it.
+- **Catalog keys by their stem.** `fl edit done_body` finds
+  `done_body %@ %lld`; a stem shared by two keys is refused with both names,
+  and an unknown key lists the closest matches. `fl delete` and
+  `fl translate` resolve the same way.
+- `fl edit --value` refuses a value that drops one of the key's placeholders
+  (`{arg1}`, `{count}`...), naming them and the base value, instead of
+  letting a format string go out without its argument.
+- `fl projects` prints each flavor's id, in text and `--json`, so the id a
+  direct export call needs is no longer hidden.
+
 ## [1.10.0] - 2026-10-22
 ### Added
 - **Native iOS projects.** A project can ship Flutter, iOS or both (platforms

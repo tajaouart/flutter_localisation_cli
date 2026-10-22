@@ -219,9 +219,51 @@ class ProjectData {
     return f.languages.isEmpty ? null : f.languages.first;
   }
 
+  /// Every distinct key held by a flavor.
+  Set<String> keysOf({final String? flavorName}) => <String>{
+        for (final LanguageData l in flavor(flavorName).languages)
+          for (final TranslationEntry t in l.translations) t.key,
+      };
+
+  /// The key as the project holds it, or null when nothing matches.
+  ///
+  /// A String Catalog key carries its format specifiers ("done_body %@ %lld")
+  /// while the name a user types is the stem alone. Exact match first, then
+  /// the one key whose stem is [key]; two keys sharing a stem is an error that
+  /// names both, since picking either silently would edit the wrong string.
+  String? matchKey(final String key, {final String? flavorName}) {
+    final Set<String> all = keysOf(flavorName: flavorName);
+    if (all.contains(key)) return key;
+    final List<String> byStem =
+        all.where((final String k) => keyStem(k) == key).toList()..sort();
+    if (byStem.length > 1) {
+      throw ResolveException(
+        'Key "$key" is ambiguous: ${byStem.map((final String k) => '"$k"').join(', ')}. '
+        'Pass the full key.',
+      );
+    }
+    return byStem.isEmpty ? null : byStem.first;
+  }
+
+  /// [matchKey], failing with the closest key names when nothing matches.
+  String canonicalKey(final String key, {final String? flavorName}) {
+    final String? found = matchKey(key, flavorName: flavorName);
+    if (found != null) return found;
+    final String needle = key.toLowerCase();
+    final List<String> near = keysOf(flavorName: flavorName)
+        .where((final String k) => k.toLowerCase().contains(needle))
+        .toList()
+      ..sort();
+    final String hint = near.isEmpty
+        ? ''
+        : ' Did you mean ${near.take(5).map((final String k) => '"$k"').join(', ')}?';
+    throw ResolveException('Key "$key" not found.$hint');
+  }
+
   /// Resolve `(key, locale) → translation id` within a flavor.
   int resolveId(final String key, final String locale, {final String? flavorName}) {
     final FlavorData f = flavor(flavorName);
+    final String full = canonicalKey(key, flavorName: flavorName);
     final LanguageData lang = f.languages.firstWhere(
       (final LanguageData l) => l.code == locale,
       orElse: () => throw ResolveException(
@@ -229,11 +271,22 @@ class ProjectData {
       ),
     );
     final TranslationEntry entry = lang.translations.firstWhere(
-      (final TranslationEntry t) => t.key == key,
+      (final TranslationEntry t) => t.key == full,
       orElse: () =>
-          throw ResolveException('Key "$key" not found for locale "$locale".'),
+          throw ResolveException('Key "$full" not found for locale "$locale".'),
     );
     return entry.id;
+  }
+
+  /// The base-language row of [key], if the flavor has one.
+  TranslationEntry? baseEntry(final String key, {final String? flavorName}) {
+    final String? full = matchKey(key, flavorName: flavorName);
+    final LanguageData? base = baseLanguage(flavorName);
+    if (full == null || base == null) return null;
+    for (final TranslationEntry t in base.translations) {
+      if (t.key == full) return t;
+    }
+    return null;
   }
 
   /// All `(locale, id)` pairs for [key] in a flavor (every locale).
@@ -242,16 +295,24 @@ class ProjectData {
     final String? flavorName,
   }) {
     final FlavorData f = flavor(flavorName);
+    final String? full = matchKey(key, flavorName: flavorName);
     final List<({String locale, int id, bool empty})> out = <({bool empty, int id, String locale})>[];
     for (final LanguageData l in f.languages) {
       for (final TranslationEntry t in l.translations) {
-        if (t.key == key) {
+        if (t.key == full) {
           out.add((locale: l.code, id: t.id, empty: t.isEmpty));
         }
       }
     }
     return out;
   }
+}
+
+/// The part of a key before its first format specifier: `done_body` for
+/// `done_body %@ %lld`, the whole key when there is none.
+String keyStem(final String key) {
+  final int space = key.indexOf(' ');
+  return space < 0 ? key : key.substring(0, space);
 }
 
 /// The per-row failures carried on a batch response body, if it has any.
@@ -350,13 +411,17 @@ class FlavorSummary {
     required this.name,
     required this.baseLanguage,
     required this.languages,
+    this.id,
   });
 
+  /// Null on a backend older than the one that lists flavor ids.
+  final int? id;
   final String name;
   final String? baseLanguage;
   final List<String> languages;
 
   factory FlavorSummary.fromJson(final Map<String, dynamic> j) => FlavorSummary(
+        id: j['id'] as int?,
         name: (j['name'] ?? '') as String,
         baseLanguage: j['base_language'] as String?,
         languages: ((j['languages'] ?? const <dynamic>[]) as List)

@@ -119,9 +119,12 @@ class ProjectConfig {
 
 /// Credential store for the `flk_live_…` token.
 class Credentials {
-  Credentials(this.token);
+  Credentials(this.token, {this.source = 'the --token flag'});
 
   final String token;
+
+  /// Where the token came from, for the message when the API rejects it.
+  final String source;
 
   /// Resolve a token from explicit arg → env var → credentials file.
   ///
@@ -135,7 +138,9 @@ class Credentials {
     if (explicit != null && explicit.isNotEmpty) return Credentials(explicit);
 
     final String? fromEnv = Platform.environment[kTokenEnvVar];
-    if (fromEnv != null && fromEnv.isNotEmpty) return Credentials(fromEnv);
+    if (fromEnv != null && fromEnv.isNotEmpty) {
+      return Credentials(fromEnv, source: '\$$kTokenEnvVar');
+    }
 
     final File file = credentialsFile ?? _credentialsFile();
     if (file.existsSync()) {
@@ -147,7 +152,9 @@ class Credentials {
             (data['tokens'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
         final String? scoped = baseUrl != null ? byHost[baseUrl] as String? : null;
         final String? token = scoped ?? data['token'] as String?;
-        if (token != null && token.isNotEmpty) return Credentials(token);
+        if (token != null && token.isNotEmpty) {
+          return Credentials(token, source: file.path);
+        }
       } catch (_) {
         // fall through to the error below
       }

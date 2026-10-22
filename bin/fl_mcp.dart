@@ -636,6 +636,7 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
                             'ARB files are not updating.',
                   'flavors': p.flavors
                       .map((final FlavorSummary f) => <String, dynamic>{
+                            'id': f.id,
                             'name': f.name,
                             'base_language': f.baseLanguage,
                             'locales': f.languages,
