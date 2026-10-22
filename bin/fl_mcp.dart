@@ -711,7 +711,8 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
           'ok': true,
           'applied': false,
           'dir': dir,
-          'template': template,
+          if (p.shipsFlutter) 'template': template,
+          if (p.shipsIos) 'catalog': kLocalizableCatalog,
           'service_keys': serviceKeys.length,
           if (orphans.isNotEmpty || catalogOrphans.isNotEmpty)
             'would_import': <String>[...orphans, ...catalogOrphans],
