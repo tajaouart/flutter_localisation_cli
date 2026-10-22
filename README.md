@@ -144,7 +144,8 @@ A project can ship a Flutter app, a native iOS app, or both. Set its platforms i
 dashboard (project settings). With `ios` on, the backend renders every locale into one Xcode
 String Catalog, `Localizable.xcstrings` (plus `InfoPlist.xcstrings` when the project holds
 Info.plist keys such as `NSCameraUsageDescription`), and the git mirror pushes it like the
-ARBs. Xcode 15 or later compiles the catalog for any deployment target.
+ARBs. Xcode 15 or later compiles the catalog for any deployment target. Product page:
+https://flutterlocalisation.com/ios (free `.xcstrings` viewer and ARB converter there too).
 
 ```bash
 fl import Gush/Resources/Localizable.xcstrings   # seed a project from the catalog Xcode made
