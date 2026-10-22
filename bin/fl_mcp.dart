@@ -28,6 +28,7 @@ import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/native_sync.dart';
+import 'package:flutter_localisation_cli/src/xcstrings.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:flutter_localisation_cli/src/project_resolver.dart';
 
@@ -479,22 +480,26 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       <String, dynamic>{
         'name': 'import_arb',
         'description':
-            'Bulk-create keys by importing a whole ARB file in ONE request — the right '
-                'tool for adding MANY strings at once. Put all the strings in an ARB JSON '
-                '(a flat {"key":"value"} map, @-metadata allowed) and import it, instead of '
-                'many add_string calls. Provide `path` (an ARB file on disk) or `content` '
-                '(raw ARB JSON). translate=true batch-translates the other locales after '
-                'import (one batch call, not per key). Preview by default; apply=true writes.',
+            'Bulk-create keys by importing a whole ARB file or an Xcode String Catalog '
+                '(.xcstrings) in ONE request, the right tool for adding MANY strings at '
+                'once. Put all the strings in an ARB JSON (a flat {"key":"value"} map, '
+                '@-metadata allowed) and import it, instead of many add_string calls. '
+                'Provide `path` (a file on disk) or `content` (raw JSON). A String '
+                'Catalog carries every locale and names its source language, so '
+                '`language` is ignored for it. translate=true batch-translates the other '
+                'locales after import (one batch call, not per key). Preview by default; '
+                'apply=true writes.',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
             'path': <String, dynamic>{
               'type': 'string',
-              'description': 'Path to an ARB/JSON file to import.',
+              'description': 'Path to an ARB or .xcstrings file to import.',
             },
             'content': <String, dynamic>{
               'type': 'string',
-              'description': 'Raw ARB JSON, as an alternative to path.',
+              'description':
+                  'Raw ARB or String Catalog JSON, as an alternative to path.',
             },
             'language': <String, dynamic>{
               'type': 'string',
@@ -524,8 +529,8 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       <String, dynamic>{
         'name': 'pull_arbs',
         'description':
-            'Bring the repo\'s ARB files in line with the service — the step after any '
-                'write. Uses the git mirror when there is a usable one and the API when '
+            'Bring the repo\'s ARB files (and the String Catalogs of a project that '
+                'ships iOS) in line with the service, the step after any write. Uses the git mirror when there is a usable one and the API when '
                 'there is not, so a dirty clone, a stale local commit, a wrong git '
                 'credential or an unlinked repo can never block it. Never run git '
                 'commands in the ARB directory yourself. It refuses only when the '
@@ -540,7 +545,8 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             'dir': <String, dynamic>{
               'type': 'string',
               'description':
-                  'ARB directory (default: arb_dir from flutterlocalisation.json).',
+                  'ARB directory (default: arb_dir from flutterlocalisation.json; '
+                  'xcstrings_dir for the catalogs of an iOS project).',
             },
             'adopt': <String, dynamic>{
               'type': 'boolean',
@@ -623,6 +629,7 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
                   'name': p.name,
                   'id': p.id,
                   'workspace': p.workspace,
+                  'platforms': p.platforms,
                   if (p.gitNeedsReauth)
                     'warning':
                         'Git sync is disconnected — reconnect GitHub in the dashboard; '
@@ -662,28 +669,40 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
         });
         return;
       }
-      final String dir = (a['dir'] as String?) ??
-          ProjectConfig.load().arbDir ??
-          'arbs';
+      final ProjectConfig cfg = ProjectConfig.load();
+      final String arbDir = (a['dir'] as String?) ?? cfg.arbDir ?? 'arbs';
+      final String catalogDir = (a['dir'] as String?) ?? cfg.catalogDir;
+      // An iOS-only project has no ARBs; its clone is the one holding the
+      // catalog.
+      final String dir = p.shipsFlutter ? arbDir : catalogDir;
       final String template = 'app_${base.code.replaceAll('-', '_')}.arb';
       final Set<String> serviceKeys = <String>{
         for (final TranslationEntry t in base.translations)
           if (t.key.isNotEmpty) t.key,
       };
-      final File templateFile = File('$dir/$template');
-      final List<String> orphans = localOnlyKeys(templateFile, serviceKeys);
+      final File templateFile = File('$arbDir/$template');
+      final File catalogFile = File('$catalogDir/$kLocalizableCatalog');
+      final List<String> orphans =
+          p.shipsFlutter ? localOnlyKeys(templateFile, serviceKeys) : <String>[];
+      final List<String> catalogOrphans = p.shipsIos
+          ? localOnlyCatalogKeys(catalogFile, serviceKeys)
+          : <String>[];
       final bool adopt = (a['adopt'] ?? false) as bool;
       final bool discardLocal = (a['discard_local'] ?? false) as bool;
 
-      if (orphans.isNotEmpty && !adopt && !discardLocal) {
+      if ((orphans.isNotEmpty || catalogOrphans.isNotEmpty) &&
+          !adopt &&
+          !discardLocal) {
+        final String file = orphans.isNotEmpty ? template : kLocalizableCatalog;
         _toolResult(id, <String, dynamic>{
           'ok': false,
-          'local_only_keys': orphans,
+          'local_only_keys': <String>[...orphans, ...catalogOrphans],
           'message':
-              '$template holds ${orphans.length} key(s) the service does not '
-              'have; syncing would overwrite the file and lose them. Import '
-              'them first (import_arb), or call again with adopt=true. '
-              'discard_local=true takes the service copy instead.',
+              '$file holds ${orphans.length + catalogOrphans.length} key(s) '
+              'the service does not have; syncing would overwrite the file '
+              'and lose them. Import them first (import_arb), or call again '
+              'with adopt=true. discard_local=true takes the service copy '
+              'instead.',
         });
         return;
       }
@@ -694,9 +713,11 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
           'dir': dir,
           'template': template,
           'service_keys': serviceKeys.length,
-          if (orphans.isNotEmpty) 'would_import': orphans,
+          if (orphans.isNotEmpty || catalogOrphans.isNotEmpty)
+            'would_import': <String>[...orphans, ...catalogOrphans],
           'message': 'Would sync "$dir" to ${p.name}'
-              '${orphans.isEmpty ? '' : ', importing ${orphans.length} '
+              '${orphans.isEmpty && catalogOrphans.isEmpty ? '' : ', importing '
+                  '${orphans.length + catalogOrphans.length} '
                   'local-only key(s) first'}. Call again with apply=true.',
         });
         return;
@@ -708,6 +729,21 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
           templateFile.readAsStringSync(),
           languageCode: base.code,
           translate: true,
+        );
+        if (!imported.ok) {
+          _toolResult(id, <String, dynamic>{
+            'ok': false,
+            'message': 'Adopting local-only keys failed: ${imported.message}',
+          });
+          return;
+        }
+        steps.add(imported.message);
+      }
+      if (catalogOrphans.isNotEmpty && adopt) {
+        final OpResult imported = await ops.importArb(
+          catalogFile.readAsStringSync(),
+          translate: true,
+          fileName: kLocalizableCatalog,
         );
         if (!imported.ok) {
           _toolResult(id, <String, dynamic>{
@@ -738,7 +774,14 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
         });
         return;
       }
-      final OpResult exported = await ops.exportArbs(dir);
+      final List<OpResult> written = <OpResult>[
+        if (p.shipsFlutter) await ops.exportArbs(arbDir),
+        if (p.shipsIos) await ops.exportCatalogs(catalogDir),
+      ];
+      final OpResult exported = OpResult(
+        written.every((final OpResult r) => r.ok),
+        written.map((final OpResult r) => r.message).join(' '),
+      );
       _toolResult(id, <String, dynamic>{
         'ok': exported.ok,
         'applied': true,
@@ -896,6 +939,7 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
             overwrite: (a['overwrite'] ?? false) as bool,
             translate: (a['translate'] ?? false) as bool,
             dryRun: !apply,
+            fileName: path == null ? null : File(path).uri.pathSegments.last,
           );
         }
       default:

@@ -28,6 +28,7 @@ import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/native_sync.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:flutter_localisation_cli/src/project_resolver.dart';
+import 'package:flutter_localisation_cli/src/xcstrings.dart';
 
 Future<void> main(final List<String> args) async {
   final CommandRunner<int> runner = CommandRunner<int>(
@@ -240,6 +241,7 @@ class ProjectsCommand extends Command<int> with _ApiCommand {
                     'id': p.id,
                     'name': p.name,
                     'workspace': p.workspace,
+                    'platforms': p.platforms,
                     'flavors': p.flavors
                         .map(
                           (final FlavorSummary f) => <String, dynamic>{
@@ -264,7 +266,8 @@ class ProjectsCommand extends Command<int> with _ApiCommand {
         final String warn = p.gitNeedsReauth
             ? '  ⚠️  git sync disconnected — reconnect GitHub in the dashboard'
             : '';
-        stdout.writeln('${p.name}  (id ${p.id})$warn');
+        stdout.writeln(
+            '${p.name}  (id ${p.id}, platforms: ${p.platforms.join(', ')})$warn');
         for (final FlavorSummary f in p.flavors) {
           final String base =
               f.baseLanguage != null ? '  [base ${f.baseLanguage}]' : '';
@@ -341,7 +344,8 @@ class ImportCommand extends Command<int> with _ApiCommand {
     argParser.addOption(
       'language',
       abbr: 'l',
-      help: 'Locale the ARB represents (default: the project base language).',
+      help: 'Locale the ARB represents (default: the project base language). '
+          'Ignored for a String Catalog, which carries every locale.',
     );
     argParser.addFlag(
       'overwrite',
@@ -360,10 +364,12 @@ class ImportCommand extends Command<int> with _ApiCommand {
   String get name => 'import';
   @override
   String get description =>
-      'Bulk-create keys from an ARB file in ONE request (vs many `add`s).';
+      'Bulk-create keys from an ARB file or an Xcode String Catalog '
+      '(.xcstrings) in ONE request (vs many `add`s).';
   @override
   String get invocation =>
-      'fl import <file.arb> [--language <code>] [--overwrite] [--translate]';
+      'fl import <file.arb|file.xcstrings> [--language <code>] [--overwrite] '
+      '[--translate]';
 
   @override
   Future<int> run() async {
@@ -389,6 +395,7 @@ class ImportCommand extends Command<int> with _ApiCommand {
         overwrite: argResults!['overwrite'] as bool,
         translate: argResults!['translate'] as bool,
         dryRun: dryRun,
+        fileName: file.uri.pathSegments.last,
       );
       return emit(r);
     } finally {
@@ -1048,7 +1055,7 @@ class PullCommand extends Command<int> with _ApiCommand {
       ..addFlag(
         'no-git',
         negatable: false,
-        help: 'Skip the git mirror and write the ARBs straight from the API.',
+        help: 'Skip the git mirror and write the files straight from the API.',
       );
   }
 
@@ -1056,8 +1063,9 @@ class PullCommand extends Command<int> with _ApiCommand {
   String get name => 'pull';
   @override
   String get description =>
-      'Sync arb_dir with the service (git mirror if there is one, API '
-      'otherwise). Never needs a git command.';
+      'Sync arb_dir (and the String Catalogs of an iOS project) with the '
+      'service: git mirror if there is one, API otherwise. Never needs a git '
+      'command.';
 
   @override
   Future<int> run() async => _pullArbs(
@@ -1079,7 +1087,8 @@ Future<int> _pullArbs(
   final bool noGit = false,
 }) async {
   final ProjectConfig cfg = cmd.loadProject();
-  final String dir = cfg.arbDir ?? '.';
+  final String arbDir = cfg.arbDir ?? '.';
+  final String catalogDir = cfg.catalogDir;
 
   final ({ManagementClient client, Operations ops, String projectName}) built =
       await cmd.build(cfg);
@@ -1091,50 +1100,84 @@ Future<int> _pullArbs(
       stderr.writeln('Project "${project.name}" has no base language.');
       return 1;
     }
+    // An iOS-only project has no ARBs anywhere, so its "directory" is the
+    // one holding the catalog; in a mixed project both sit in one clone.
+    final String dir = project.shipsFlutter ? arbDir : catalogDir;
     final String templateName = 'app_${base.code.replaceAll('-', '_')}.arb';
-    final File template = File('$dir/$templateName');
+    final File template = File('$arbDir/$templateName');
+    final File catalog = File('$catalogDir/$kLocalizableCatalog');
     final Set<String> serviceKeys = <String>{
       for (final TranslationEntry t in base.translations)
         if (t.key.isNotEmpty) t.key,
     };
 
     // The one thing a sync must not do quietly: both refresh paths rewrite
-    // the template from the service, so a key staged on disk and never
+    // the files from the service, so a key staged on disk and never
     // imported would disappear. Stop, name them, and offer both answers.
-    final List<String> orphans = localOnlyKeys(template, serviceKeys);
-    if (orphans.isNotEmpty && !adopt && !discardLocal) {
-      stderr.writeln(
-          '$templateName has ${orphans.length} key(s) the service does not '
-          'have yet:');
-      for (final String k in orphans.take(20)) {
-        stderr.writeln('  $k');
-      }
-      if (orphans.length > 20) {
-        stderr.writeln('  … and ${orphans.length - 20} more.');
+    // Each platform's file is checked on its own; the catalog is the only
+    // place an iOS developer's new key can be.
+    final List<String> orphans =
+        project.shipsFlutter ? localOnlyKeys(template, serviceKeys) : <String>[];
+    final List<String> catalogOrphans = project.shipsIos
+        ? localOnlyCatalogKeys(catalog, serviceKeys)
+        : <String>[];
+    final List<({String file, List<String> keys})> staged =
+        <({String file, List<String> keys})>[
+      if (orphans.isNotEmpty) (file: templateName, keys: orphans),
+      if (catalogOrphans.isNotEmpty)
+        (file: kLocalizableCatalog, keys: catalogOrphans),
+    ];
+    if (staged.isNotEmpty && !adopt && !discardLocal) {
+      for (final ({String file, List<String> keys}) entry in staged) {
+        stderr.writeln(
+            '${entry.file} has ${entry.keys.length} key(s) the service does '
+            'not have yet:');
+        for (final String k in entry.keys.take(20)) {
+          stderr.writeln('  $k');
+        }
+        if (entry.keys.length > 20) {
+          stderr.writeln('  … and ${entry.keys.length - 20} more.');
+        }
       }
       stderr.writeln('Syncing would overwrite the file and lose them. Either:\n'
           '  fl pull --adopt           import them first, then sync\n'
           '  fl pull --discard-local   drop them and take the service copy');
       return 1;
     }
-    if (orphans.isNotEmpty && adopt) {
+    if (staged.isNotEmpty && adopt) {
       if (cmd.dryRun) {
         stdout.writeln(
-            'DRY RUN: would import ${orphans.length} local-only key(s) '
-            'before syncing.');
+            'DRY RUN: would import ${staged.map((final e) => e.keys.length).reduce((final a, final b) => a + b)} '
+            'local-only key(s) before syncing.');
       } else {
-        stdout.writeln('Importing ${orphans.length} local-only key(s) from '
-            '$templateName …');
-        final OpResult imported = await built.ops.importArb(
-          template.readAsStringSync(),
-          languageCode: base.code,
-          translate: true,
-        );
-        if (!imported.ok) {
-          stderr.writeln(imported.message);
-          return 1;
+        if (orphans.isNotEmpty) {
+          stdout.writeln('Importing ${orphans.length} local-only key(s) from '
+              '$templateName …');
+          final OpResult imported = await built.ops.importArb(
+            template.readAsStringSync(),
+            languageCode: base.code,
+            translate: true,
+          );
+          if (!imported.ok) {
+            stderr.writeln(imported.message);
+            return 1;
+          }
+          stdout.writeln('  ${imported.message}');
         }
-        stdout.writeln('  ${imported.message}');
+        if (catalogOrphans.isNotEmpty) {
+          stdout.writeln('Importing ${catalogOrphans.length} local-only key(s) '
+              'from $kLocalizableCatalog …');
+          final OpResult imported = await built.ops.importArb(
+            catalog.readAsStringSync(),
+            translate: true,
+            fileName: kLocalizableCatalog,
+          );
+          if (!imported.ok) {
+            stderr.writeln(imported.message);
+            return 1;
+          }
+          stdout.writeln('  ${imported.message}');
+        }
       }
     }
 
@@ -1172,7 +1215,7 @@ Future<int> _pullArbs(
                 'method': ArbSyncMethod.git.name,
                 'dir': dir,
                 'upstream': outcome.upstream,
-                'adopted': adopt ? orphans : <String>[],
+                'adopted': adopt ? <String>[...orphans, ...catalogOrphans] : <String>[],
               },
             ),
           );
@@ -1180,10 +1223,15 @@ Future<int> _pullArbs(
         return 0;
       }
       stdout.writeln('Git mirror unavailable (${_skipReason(outcome)}) — '
-          'writing the ARBs from the API instead.');
+          'writing the files from the API instead.');
     }
 
-    final OpResult r = await built.ops.exportArbs(dir);
+    final OpResult r = await _exportFromApi(
+      built.ops,
+      project,
+      arbDir: arbDir,
+      catalogDir: catalogDir,
+    );
     if (cmd.jsonOut) {
       return cmd.emit(
         OpResult(
@@ -1192,7 +1240,7 @@ Future<int> _pullArbs(
           <String, dynamic>{
             ...r.data,
             'method': ArbSyncMethod.api.name,
-            'adopted': adopt ? orphans : <String>[],
+            'adopted': adopt ? <String>[...orphans, ...catalogOrphans] : <String>[],
           },
         ),
       );
@@ -1202,6 +1250,36 @@ Future<int> _pullArbs(
   } finally {
     built.client.close();
   }
+}
+
+/// Every file the project ships, written from the API: ARBs for Flutter,
+/// String Catalogs for iOS, both for a project that has both.
+Future<OpResult> _exportFromApi(
+  final Operations ops,
+  final ProjectData project, {
+  required final String arbDir,
+  required final String catalogDir,
+  final bool dryRun = false,
+}) async {
+  final List<OpResult> results = <OpResult>[
+    if (project.shipsFlutter) await ops.exportArbs(arbDir, dryRun: dryRun),
+    if (project.shipsIos) await ops.exportCatalogs(catalogDir, dryRun: dryRun),
+  ];
+  final OpResult? failed =
+      results.cast<OpResult?>().firstWhere((final OpResult? r) => !r!.ok, orElse: () => null);
+  if (failed != null) return failed;
+  return OpResult(
+    true,
+    results.map((final OpResult r) => r.message).join('\n'),
+    <String, dynamic>{
+      'files': <dynamic>[
+        for (final OpResult r in results) ...?(r.data['files'] as List<dynamic>?),
+      ],
+      if (project.shipsFlutter) 'template': results.first.data['template'],
+      if (project.shipsFlutter) 'dir': arbDir,
+      if (project.shipsIos) 'catalog_dir': catalogDir,
+    },
+  );
 }
 
 String _skipReason(final GitSyncOutcome o) => switch (o.skip) {
@@ -1243,10 +1321,10 @@ class SyncCommand extends Command<int> with _ApiCommand {
   String get name => 'sync';
   @override
   String get description =>
-      'Import an ARB (optional), sync arb_dir, then regenerate the Dart — the '
-      'whole flow in one command.';
+      'Import an ARB or String Catalog (optional), sync arb_dir, then '
+      'regenerate the Dart, the whole flow in one command.';
   @override
-  String get invocation => 'fl sync [<file.arb>]';
+  String get invocation => 'fl sync [<file.arb|file.xcstrings>]';
 
   @override
   Future<int> run() async {
@@ -1273,6 +1351,7 @@ class SyncCommand extends Command<int> with _ApiCommand {
           overwrite: overwrite,
           translate: translate,
           dryRun: dryRun,
+          fileName: file.uri.pathSegments.last,
         );
         stdout.writeln(r.message);
         if (!r.ok) return 1;
@@ -1284,6 +1363,19 @@ class SyncCommand extends Command<int> with _ApiCommand {
     final int pulled = await _pullArbs(this, adopt: rest.isNotEmpty);
     if (pulled != 0) return pulled;
     if (!codegen || dryRun) return 0;
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) target = await build(cfg);
+    try {
+      final ProjectData project =
+          await target.client.getProject(target.ops.projectId);
+      // Xcode compiles the catalog itself; there is no Dart to regenerate.
+      if (!project.shipsFlutter) return 0;
+    } finally {
+      target.client.close();
+    }
 
     final String dir = cfg.arbDir ?? 'arbs';
     // `arb_dir` points at the flavor folder (arbs/Default); the generator
@@ -1567,56 +1659,79 @@ class ExportCommand extends Command<int> with _ApiCommand {
   String get name => 'export';
   @override
   String get description =>
-      'Write every locale to app_<locale>.arb in arb_dir, straight from the '
-      'API. Use when the ARB git repo is not linked (otherwise prefer `pull`).';
+      'Write every locale straight from the API: app_<locale>.arb files in '
+      'arb_dir for Flutter, Localizable.xcstrings in xcstrings_dir for iOS. '
+      'Use when the git repo is not linked (otherwise prefer `pull`).';
   @override
   String get invocation => 'fl export [<dir>]';
 
   @override
   Future<int> run() async {
     final ProjectConfig cfg = loadProject();
-    final String dir = argResults!.rest.isNotEmpty
-        ? argResults!.rest.first
-        : (cfg.arbDir ?? 'arbs/Default');
+    final String? positional =
+        argResults!.rest.isNotEmpty ? argResults!.rest.first : null;
     final ({
       ManagementClient client,
       Operations ops,
       String projectName
     }) built = await build(cfg);
     try {
-      // The same hazard `pull` guards: this rewrites the template from the
+      final ProjectData project =
+          await built.client.getProject(built.ops.projectId);
+      // A given directory is where the files go, whichever kind they are;
+      // without one each kind has its own configured home.
+      final String arbDir = positional ?? cfg.arbDir ?? 'arbs/Default';
+      final String catalogDir = positional ??
+          (project.shipsFlutter ? cfg.catalogDir : cfg.xcstringsDir ?? cfg.arbDir ?? '.');
+      // The same hazard `pull` guards: this rewrites the files from the
       // service, so a key staged on disk and never imported disappears. That
       // is how eight onboarding keys were lost once, and why this command
       // carried a "never run it here" warning in a consuming repo instead of
       // a check.
       if (!(argResults!['discard-local'] as bool)) {
-        final ProjectData project =
-            await built.client.getProject(built.ops.projectId);
         final LanguageData? base = project.baseLanguage(built.ops.flavor);
         if (base != null) {
+          final Set<String> serviceKeys = <String>{
+            for (final TranslationEntry t in base.translations)
+              if (t.key.isNotEmpty) t.key,
+          };
           final String template =
               'app_${base.code.replaceAll('-', '_')}.arb';
-          final List<String> orphans = localOnlyKeys(
-            File('$dir/$template'),
-            <String>{
-              for (final TranslationEntry t in base.translations)
-                if (t.key.isNotEmpty) t.key,
-            },
-          );
-          if (orphans.isNotEmpty) {
+          final List<({String file, List<String> keys})> staged =
+              <({String file, List<String> keys})>[
+            if (project.shipsFlutter)
+              (
+                file: '$arbDir/$template',
+                keys: localOnlyKeys(File('$arbDir/$template'), serviceKeys),
+              ),
+            if (project.shipsIos)
+              (
+                file: '$catalogDir/$kLocalizableCatalog',
+                keys: localOnlyCatalogKeys(
+                    File('$catalogDir/$kLocalizableCatalog'), serviceKeys),
+              ),
+          ];
+          for (final ({String file, List<String> keys}) entry in staged) {
+            if (entry.keys.isEmpty) continue;
             stderr.writeln(
-                '$template holds ${orphans.length} key(s) the service does '
-                'not have: ${orphans.take(10).join(', ')}'
-                '${orphans.length > 10 ? ', …' : ''}');
+                '${entry.file} holds ${entry.keys.length} key(s) the service '
+                'does not have: ${entry.keys.take(10).join(', ')}'
+                '${entry.keys.length > 10 ? ', …' : ''}');
             stderr.writeln(
                 'Exporting would overwrite them. Import them first '
-                '(`fl import $dir/$template --translate`), or run '
+                '(`fl import ${entry.file} --translate`), or run '
                 '`fl pull --adopt`, or force with `--discard-local`.');
             return 1;
           }
         }
       }
-      final OpResult r = await built.ops.exportArbs(dir, dryRun: dryRun);
+      final OpResult r = await _exportFromApi(
+        built.ops,
+        project,
+        arbDir: arbDir,
+        catalogDir: catalogDir,
+        dryRun: dryRun,
+      );
       if (jsonOut) return emit(r);
       stdout.writeln(r.message);
       for (final dynamic row
@@ -1625,7 +1740,7 @@ class ExportCommand extends Command<int> with _ApiCommand {
         stdout.writeln('  ${m['file']}  ${m['keys']} key(s)'
             '${m['base'] == true ? '  (template)' : ''}');
       }
-      if (r.ok && !dryRun) {
+      if (r.ok && !dryRun && project.shipsFlutter) {
         stdout.writeln('\nNow regenerate the Dart: `flutter pub get` then '
             '`flutter pub run flutter_localisation:generate <flavor>`.');
       }

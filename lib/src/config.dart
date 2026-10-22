@@ -2,7 +2,8 @@
 ///
 /// Two layers:
 ///  * **Project config** — `flutterlocalisation.json` in the project root (or a path passed
-///    via `--config`). Holds `base_url`, `project_id`, `flavor`, and optional `arb_dir`.
+///    via `--config`). Holds `base_url`, `project_id`, `flavor`, and the optional
+///    `arb_dir` and `xcstrings_dir`.
 ///  * **Credentials** — the `flk_live_…` API token. Resolved from (in order):
 ///      1. `--token` flag / explicit argument,
 ///      2. `FL_API_TOKEN` environment variable,
@@ -29,6 +30,7 @@ class ProjectConfig {
     this.project,
     this.flavor,
     this.arbDir,
+    this.xcstringsDir,
   });
 
   final String baseUrl;
@@ -41,6 +43,14 @@ class ProjectConfig {
   final String? project;
   final String? flavor;
   final String? arbDir;
+
+  /// Where `fl pull` writes the iOS String Catalogs. Optional: a Flutter app
+  /// with native iOS strings keeps them beside the ARBs, an iOS-only app
+  /// points this at its Xcode resources folder.
+  final String? xcstringsDir;
+
+  /// The catalog folder in effect: `xcstrings_dir`, else `arb_dir`, else here.
+  String get catalogDir => xcstringsDir ?? arbDir ?? '.';
 
   /// A selector string (name or id) for [ProjectResolver], or null.
   String? get projectSelector => project ?? projectId?.toString();
@@ -73,18 +83,21 @@ class ProjectConfig {
     // other project-local config in the ecosystem reads (l10n.yaml, pubspec).
     // Resolving it against the shell's cwd wrote 74 ARBs into whatever folder
     // the user happened to be in when they ran `fl pull --config …`.
-    final String? rawArbDir = json['arb_dir'] as String?;
-    final String? arbDir = rawArbDir == null
-        ? null
-        : (p.isAbsolute(rawArbDir)
-            ? rawArbDir
-            : p.normalize(p.join(file.parent.path, rawArbDir)));
+    String? relativeToConfig(final String key) {
+      final String? raw = json[key] as String?;
+      if (raw == null) return null;
+      return p.isAbsolute(raw)
+          ? raw
+          : p.normalize(p.join(file.parent.path, raw));
+    }
+
     return ProjectConfig(
       baseUrl: (json['base_url'] as String?)?.trimRight() ?? kDefaultBaseUrl,
       projectId: pid is int ? pid : null,
       project: json['project'] as String?,
       flavor: json['flavor'] as String?,
-      arbDir: arbDir,
+      arbDir: relativeToConfig('arb_dir'),
+      xcstringsDir: relativeToConfig('xcstrings_dir'),
     );
   }
 

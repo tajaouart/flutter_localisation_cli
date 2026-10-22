@@ -137,6 +137,31 @@ template ARB only, which is where gen_l10n reads it from.
 
 Prefer `pull` when the repo is linked — it is the path the backend pushes to.
 
+### Native iOS (String Catalogs)
+
+A project can ship a Flutter app, a native iOS app, or both. Set its platforms in the
+dashboard (project settings). With `ios` on, the backend renders every locale into one Xcode
+String Catalog, `Localizable.xcstrings` (plus `InfoPlist.xcstrings` when the project holds
+Info.plist keys such as `NSCameraUsageDescription`), and the git mirror pushes it like the
+ARBs. Xcode 15 or later compiles the catalog for any deployment target.
+
+```bash
+fl import Gush/Resources/Localizable.xcstrings   # seed a project from the catalog Xcode made
+fl pull                                          # write Localizable.xcstrings into xcstrings_dir
+fl export Gush/Resources                         # same, straight from the API, to a directory
+```
+
+`fl pull` writes the catalog bytes exactly as the backend serves them, in Xcode's own
+formatting, so a build does not rewrite the file and the mirror never sees a diff. The
+local-only guard applies to the catalog too: a key added in Xcode and never imported stops a
+pull; `--adopt` imports it first. An iOS-only project has no ARBs and `fl sync` skips the
+Dart codegen for it.
+
+Placeholders map by type: `{name}` becomes `%@`, an `int` becomes `%lld`, a `double` `%lf`;
+with more than one argument they are numbered (`%1$@`, `%2$lld`). ICU plurals become plural
+variations. Not supported in a catalog: ICU `select`, substitutions (several plural arguments
+in one string) and device variations; the export names the offending keys and refuses.
+
 ### `fl native` — the half of localisation that is not the ARBs
 
 Translating an app is three jobs, and the ARBs are only the first.
@@ -227,6 +252,10 @@ time:
 { "project": "Chat Bot", "flavor": "Default", "arb_dir": "widget_chat_arbs" }
 ```
 
+`xcstrings_dir` (optional) is where `fl pull` writes the iOS String Catalogs, relative to the
+config file like `arb_dir`; an iOS-only app points it at its Xcode resources folder. Without
+it the catalogs go beside the ARBs.
+
 Global flags: `--project <name|id>`, `--flavor`, `--config`, `--dry-run`, `--json`.
 
 ## MCP server (Claude)
@@ -259,7 +288,8 @@ translate it to all locales."* Tools: `list_projects`, `list_status`, `list_lang
 `retranslate`, `import_arb`, `pull_arbs` (each takes an optional `project`/`flavor`), and
 `sync_native_locales` — the MCP face of `fl native`, which needs no token and takes an optional
 `project_root`. `project_repo` returns the linked ARB git repo so the agent can clone it before
-codegen; `pull_arbs` writes the ARBs into `arb_dir` the same way `fl pull` does.
+codegen; `pull_arbs` writes the ARBs into `arb_dir` (and the String Catalogs into
+`xcstrings_dir`) the same way `fl pull` does. `import_arb` takes an `.xcstrings` too.
 
 ## How strings reach your app
 

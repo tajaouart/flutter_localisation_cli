@@ -146,12 +146,24 @@ class GitRepository {
   }
 }
 
+/// The `platforms` list a project JSON carries, defaulting to Flutter.
+///
+/// Every project that predates the field is a Flutter project, and a backend
+/// that predates it omits the field altogether, so absence means Flutter.
+List<String> platformsFromJson(final Object? raw) {
+  if (raw is! List) return const <String>['flutter'];
+  final List<String> found = raw.whereType<String>().toList();
+  return found.isEmpty ? const <String>['flutter'] : found;
+}
+
 class ProjectData {
   ProjectData({
     required this.id,
     required this.name,
     required this.flavors,
     this.repository,
+    this.platforms = const <String>['flutter'],
+    this.xcstringsDir = '',
   });
 
   final int id;
@@ -161,10 +173,22 @@ class ProjectData {
   /// The linked ARB repo, or null when the dashboard has no git provider set up.
   final GitRepository? repository;
 
+  /// What consumes the strings: `flutter` (ARBs) and/or `ios` (String
+  /// Catalogs). Decides which files `pull` and `export` write.
+  final List<String> platforms;
+
+  /// Folder of the catalogs inside the git mirror; empty means `<flavor>/`.
+  final String xcstringsDir;
+
+  bool get shipsFlutter => platforms.contains('flutter');
+  bool get shipsIos => platforms.contains('ios');
+
   factory ProjectData.fromJson(final Map<String, dynamic> j) => ProjectData(
         id: j['id'] as int,
         name: (j['name'] ?? '') as String,
         repository: GitRepository.fromProjectJson(j),
+        platforms: platformsFromJson(j['platforms']),
+        xcstringsDir: (j['xcstrings_dir'] ?? '') as String,
         flavors: ((j['flavors'] ?? const <dynamic>[]) as List)
             .map((final e) => FlavorData.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -292,6 +316,7 @@ class ProjectSummary {
     required this.workspace,
     required this.flavors,
     this.gitNeedsReauth = false,
+    this.platforms = const <String>['flutter'],
   });
 
   final int id;
@@ -303,12 +328,16 @@ class ProjectSummary {
   /// dashboard — ARB pushes are failing, so `pull` won't see new strings.
   final bool gitNeedsReauth;
 
+  /// `flutter` and/or `ios`; see [ProjectData.platforms].
+  final List<String> platforms;
+
   factory ProjectSummary.fromJson(final Map<String, dynamic> j) =>
       ProjectSummary(
         id: j['id'] as int,
         name: (j['name'] ?? '') as String,
         workspace: (j['workspace'] ?? '') as String,
         gitNeedsReauth: (j['git_needs_reauth'] ?? false) as bool,
+        platforms: platformsFromJson(j['platforms']),
         flavors: ((j['flavors'] ?? const <dynamic>[]) as List)
             .map((final e) =>
                 FlavorSummary.fromJson(e as Map<String, dynamic>),)
@@ -541,18 +570,40 @@ class ManagementClient {
     return BatchTranslateResult.fromJson(_json(res));
   }
 
+  /// One String Catalog of a flavor, as the backend renders it.
+  ///
+  /// Returned as the raw body on purpose: the backend writes the file in
+  /// Xcode's own formatting so a build does not rewrite it, and re-encoding
+  /// here would undo that. [table] is `Localizable` or `InfoPlist`.
+  Future<String> downloadCatalog(
+    final int projectId,
+    final int flavorId, {
+    final String table = 'Localizable',
+  }) async {
+    final http.Response res = await _send(
+      'GET',
+      '/api/project/$projectId/export/?flavor_id=$flavorId&format=xcstrings'
+      '&table=$table',
+    );
+    return utf8.decode(res.bodyBytes);
+  }
+
   /// Bulk-create keys by importing a whole ARB file in ONE request (instead of
   /// N per-key adds). [arbContent] is the raw ARB JSON; [languageCode] is the
   /// locale the file represents (usually the base language). By default the keys
   /// are applied across all languages so translations can be batch-filled after.
+  ///
+  /// A String Catalog goes through the same endpoint with [languageCode] null:
+  /// the file names its own source language and carries every locale.
   Future<Map<String, dynamic>> importArb(
     final int projectId,
     final int flavorId,
-    final String languageCode,
+    final String? languageCode,
     final String arbContent, {
     final bool overwriteExisting = false,
     final bool applyToAllLanguages = true,
     final bool autoTranslate = false,
+    final String? fileName,
   }) async {
     final Uri uri = _uri('/api/project/$projectId/import-arb/');
     const String path = '/api/project/.../import-arb/';
@@ -564,7 +615,6 @@ class ManagementClient {
       try {
         final http.MultipartRequest req = http.MultipartRequest('POST', uri)
           ..headers['Authorization'] = 'Bearer $token'
-          ..fields['selected_language_code'] = languageCode
           ..fields['flavor_id'] = flavorId.toString()
           ..fields['apply_to_all_languages'] = applyToAllLanguages.toString()
           ..fields['apply_to_all_flavors'] = 'false'
@@ -575,8 +625,14 @@ class ManagementClient {
           ..files.add(http.MultipartFile.fromString(
             'arb_file',
             arbContent,
-            filename: 'app_${arbSuffix(languageCode)}.arb',
+            filename: fileName ??
+                (languageCode == null
+                    ? 'Localizable.xcstrings'
+                    : 'app_${arbSuffix(languageCode)}.arb'),
           ));
+        if (languageCode != null) {
+          req.fields['selected_language_code'] = languageCode;
+        }
         final http.StreamedResponse streamed = await _http.send(req);
         res = await http.Response.fromStream(streamed);
       } catch (e) {

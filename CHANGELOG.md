@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.10.0] - 2026-10-22
+### Added
+- **Native iOS projects.** A project can ship Flutter, iOS or both (platforms
+  are set in the dashboard). For a project that ships iOS, `fl pull` and
+  `fl export` write `Localizable.xcstrings` (and `InfoPlist.xcstrings` when
+  the project holds Info.plist keys) into `xcstrings_dir`, bytes as the backend
+  serves them. `fl import` accepts an `.xcstrings`, with no `--language`: the
+  catalog carries every locale. The local-only guard covers the catalog, the
+  git mirror cleans `*.xcstrings`, `fl sync` skips codegen for an iOS-only
+  project, and `fl projects` / `fl status` show the platforms. The MCP
+  `import_arb` and `pull_arbs` tools do the same.
+- New config key `xcstrings_dir` in `flutterlocalisation.json`.
+
 ## [1.9.0] - 2026-10-18
 ### Fixed
 - **`fl import` reports what was written, not how many keys the file had.**

@@ -189,7 +189,7 @@ class GitMirror {
     // Untracked ARBs only: a locale the service dropped would otherwise stay
     // on disk and get compiled into the app. Anything else a human left in the
     // directory is theirs and is left alone.
-    await _git(<String>['clean', '-f', '--', '*.arb']);
+    await _git(<String>['clean', '-f', '--', '*.arb', '*.xcstrings']);
 
     return GitSyncOutcome.synced(
       upstream: upstream,

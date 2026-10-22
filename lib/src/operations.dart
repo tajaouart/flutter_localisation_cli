@@ -13,6 +13,7 @@ import 'package:flutter_localisation_cli/src/call_budget.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
+import 'package:flutter_localisation_cli/src/xcstrings.dart';
 
 /// Parse `--placeholder name:type[:format]` specs into the backend's placeholder
 /// map: `{name: {type, format?}}`. Returns null when [raw] is empty so callers
@@ -408,30 +409,47 @@ class Operations {
     final bool translate = false,
     final bool dryRun = false,
     final int chunkSize = _defaultChunkSize,
+    final String? fileName,
   }) async {
     int keyCount;
+    bool catalog;
     try {
       final Object? parsed = jsonDecode(arbContent);
       if (parsed is! Map<String, dynamic>) {
         return OpResult(false, 'Invalid ARB: top-level value must be a JSON object.');
       }
-      keyCount = parsed.keys.where((final String k) => !k.startsWith('@')).length;
+      catalog = isCatalogJson(parsed) ||
+          (fileName != null && fileName.endsWith('.xcstrings'));
+      keyCount = catalog
+          ? catalogKeys(parsed).length
+          : parsed.keys.where((final String k) => !k.startsWith('@')).length;
     } catch (_) {
       return OpResult(false, 'Invalid ARB: not valid JSON.');
     }
 
     final ProjectData project = await client.getProject(projectId);
     final FlavorData fl = project.flavor(flavor);
-    final String lang =
-        languageCode ?? project.baseLanguage(flavor)?.code ?? 'en';
+    // A String Catalog names its own source language and carries every
+    // locale, so there is no language to pick for it.
+    final String? lang = catalog
+        ? null
+        : languageCode ?? project.baseLanguage(flavor)?.code ?? 'en';
+    final String kind = catalog ? 'String Catalog' : 'ARB';
 
     if (dryRun) {
       return OpResult(
         true,
-        'DRY RUN: would import $keyCount key(s) into flavor "${fl.name}" '
-        '(language "$lang"${overwrite ? ', overwriting existing' : ''})'
+        'DRY RUN: would import $keyCount key(s) from the $kind into flavor '
+        '"${fl.name}" '
+        '(${lang == null ? 'every locale in the file' : 'language "$lang"'}'
+        '${overwrite ? ', overwriting existing' : ''})'
         '${translate ? ', then batch-translate the other locales' : ''}.',
-        <String, dynamic>{'keys': keyCount, 'flavor': fl.name, 'language': lang},
+        <String, dynamic>{
+          'keys': keyCount,
+          'flavor': fl.name,
+          if (lang != null) 'language': lang,
+          'format': catalog ? 'xcstrings' : 'arb',
+        },
       );
     }
 
@@ -458,7 +476,8 @@ class Operations {
         // backends ignore the field and answer without a `translation` block,
         // which is what the fallback below keys off — so this stays correct
         // against a deployment that predates it.
-        autoTranslate: translate);
+        autoTranslate: translate,
+        fileName: fileName);
 
     final ({String phrase, String hint, Map<String, dynamic> data}) outcome =
         _importOutcome(importResponse, keyCount);
@@ -510,7 +529,9 @@ class Operations {
     final Set<String> importedKeys = <String>{};
     try {
       final Object? p = jsonDecode(arbContent);
-      if (p is Map<String, dynamic>) {
+      if (isCatalogJson(p)) {
+        importedKeys.addAll(catalogKeys(p));
+      } else if (p is Map<String, dynamic>) {
         importedKeys.addAll(p.keys.where((final String k) => !k.startsWith('@')));
       }
     } catch (_) {}
@@ -648,16 +669,27 @@ class Operations {
               const <Object?>[])
         '$k',
     ];
+    // A String Catalog import also says which locales it wrote and which
+    // keys it had to leave out (a `select`, a key Dart cannot name).
+    final List<String> locales = <String>[
+      for (final Object? l in (summary['locales'] as List?) ?? const <Object?>[]) '$l',
+    ];
+    final List<String> problems = <String>[
+      for (final Object? p in (summary['problems'] as List?) ?? const <Object?>[]) '$p',
+    ];
     final Map<String, dynamic> data = <String, dynamic>{
       'written': written,
       'skipped': skipped,
       'unchanged': unchanged,
       if (skippedKeys.isNotEmpty) 'skipped_keys': skippedKeys,
+      if (locales.isNotEmpty) 'locales': locales,
+      if (problems.isNotEmpty) 'problems': problems,
     };
     final List<String> parts = <String>[
       '$written written',
       if (skipped > 0) '$skipped skipped',
       if (unchanged > 0) '$unchanged already identical',
+      if (locales.isNotEmpty) 'locales: ${locales.join(', ')}',
     ];
     final String phrase = written == 0 && skipped > 0
         ? 'Nothing written: $skipped of $keyCount key(s) skipped'
@@ -668,6 +700,11 @@ class Operations {
       hint = ' $skipped key(s) already hold a different value and were kept'
           '${sample.isEmpty ? '' : ' ($sample${skipped > 5 ? ', ...' : ''})'}. '
           'Pass --overwrite to replace them.';
+    }
+    if (problems.isNotEmpty) {
+      hint += ' ${problems.length} key(s) could not be imported:\n'
+          '${problems.take(10).map((final String p) => '    $p').join('\n')}'
+          '${problems.length > 10 ? '\n    ...' : ''}';
     }
     return (phrase: phrase, hint: hint, data: data);
   }
@@ -1295,8 +1332,16 @@ class Operations {
         if (identicalIsFine) 'variant_of': baseCode,
       });
     }
-    return OpResult(true, 'Status for "${project.name}" / flavor "${f.name}".',
-        <String, dynamic>{'flavor': f.name, 'locales': rows},);
+    return OpResult(
+      true,
+      'Status for "${project.name}" / flavor "${f.name}" '
+      '(platforms: ${project.platforms.join(', ')}).',
+      <String, dynamic>{
+        'flavor': f.name,
+        'platforms': project.platforms,
+        'locales': rows,
+      },
+    );
   }
 }
 
@@ -1387,6 +1432,55 @@ extension ArbExport on Operations {
       '${dryRun ? 'DRY RUN: would write' : 'Wrote'} ${written.length} ARB '
       'file(s) to $dir (template: ${base['file']}).',
       <String, dynamic>{'files': written, 'template': base['file'], 'dir': dir},
+    );
+  }
+
+  /// Write the flavor's String Catalogs into [dir], bytes as the backend
+  /// serves them.
+  ///
+  /// `Localizable.xcstrings` always; `InfoPlist.xcstrings` only when the
+  /// project has Info.plist keys, because an empty catalog still makes Xcode
+  /// look for one. A string the backend cannot express (an ICU `select`)
+  /// comes back as a 422 whose details name the keys; that is the whole
+  /// message, so it is passed through unchanged.
+  Future<OpResult> exportCatalogs(
+    final String dir, {
+    final bool dryRun = false,
+  }) async {
+    final ProjectData project = await client.getProject(projectId);
+    final FlavorData f = project.flavor(flavor);
+    final List<Map<String, dynamic>> written = <Map<String, dynamic>>[];
+    for (final String table in <String>['Localizable', 'InfoPlist']) {
+      final String body;
+      try {
+        body = await client.downloadCatalog(projectId, f.id, table: table);
+      } on ApiException catch (e) {
+        if (e.statusCode != 422) rethrow;
+        final List<String> details = <String>[
+          for (final Object? d in (e.body?['details'] as List?) ?? const <Object?>[])
+            '$d',
+        ];
+        return OpResult(
+          false,
+          '${e.message}\n${details.map((final String d) => '  $d').join('\n')}',
+          <String, dynamic>{'details': details},
+        );
+      }
+      final int keys = catalogKeys(jsonDecode(body)).length;
+      if (table == 'InfoPlist' && keys == 0) continue;
+      final String file = '$table.xcstrings';
+      written.add(<String, dynamic>{'file': file, 'keys': keys});
+      if (dryRun) continue;
+      final File out = File('$dir/$file');
+      out.parent.createSync(recursive: true);
+      out.writeAsStringSync(body);
+    }
+    return OpResult(
+      true,
+      '${dryRun ? 'DRY RUN: would write' : 'Wrote'} ${written.length} '
+      'String Catalog(s) to $dir '
+      '(${written.map((final Map<String, dynamic> w) => w['file']).join(', ')}).',
+      <String, dynamic>{'files': written, 'dir': dir},
     );
   }
 
