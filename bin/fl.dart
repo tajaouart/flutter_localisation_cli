@@ -23,6 +23,7 @@ import 'package:flutter_localisation_cli/src/arb_sync.dart';
 import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/guard.dart';
+import 'package:flutter_localisation_cli/src/init_detect.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/native_sync.dart';
@@ -56,6 +57,7 @@ Future<void> main(final List<String> args) async {
     );
 
   runner.addCommand(LoginCommand());
+  runner.addCommand(InitCommand());
   runner.addCommand(ProjectsCommand());
   runner.addCommand(AddCommand());
   runner.addCommand(ImportCommand());
@@ -250,6 +252,238 @@ class LoginCommand extends Command<int> {
     Credentials.save(token, baseUrl: baseUrl);
     stdout.writeln('✓ Token saved for $baseUrl.');
     return 0;
+  }
+}
+
+const String kDashboardUrl = 'https://app.flutterlocalisation.com';
+
+/// First run on a repository: token, project, folders, then the first pull.
+///
+/// Everything it does exists as its own command (`login`, `projects`,
+/// `pull`, `guard`, `native`, `status`); the wizard only strings them
+/// together and writes `flutterlocalisation.json` so none of them needs
+/// `--project` afterwards. Every question has a default, so `--yes` (or a
+/// pipe for stdin) runs it without a human; what cannot be defaulted, like
+/// which of several projects, must then come from a flag.
+class InitCommand extends Command<int> with _ApiCommand {
+  InitCommand() {
+    argParser
+      ..addOption('base-url',
+          defaultsTo: kDefaultBaseUrl, help: 'API base URL.')
+      ..addOption('arb-dir',
+          help: 'Where the ARBs go (default: l10n.yaml arb-dir, else '
+              'arbs/<flavor>).')
+      ..addOption('xcstrings-dir',
+          help: 'Where the String Catalogs go (default: the folder of an '
+              'existing Localizable.xcstrings, else beside Info.plist).')
+      ..addFlag('yes',
+          abbr: 'y',
+          negatable: false,
+          help: 'Take every default without asking.')
+      ..addFlag('pull',
+          defaultsTo: true,
+          help: 'Pull the strings (and regenerate the Dart) once configured.')
+      ..addFlag('guard',
+          negatable: false,
+          help: 'Also write the AI guard rules (asked for when interactive).')
+      ..addFlag('force',
+          negatable: false,
+          help: 'Overwrite an existing flutterlocalisation.json.');
+  }
+
+  @override
+  String get name => 'init';
+  @override
+  String get description =>
+      'Set up this repository: store the token, pick the project and '
+      'folders, write flutterlocalisation.json, then pull the strings.';
+  @override
+  String get invocation =>
+      'fl init [--project <name|id>] [--flavor <name>] [-y]';
+
+  @override
+  Future<int> run() async {
+    final bool yes = argResults!['yes'] as bool;
+    final Prompter ask = Prompter(interactive: !yes && stdin.hasTerminal);
+    final String baseUrl = (argResults!['base-url'] as String).trimRight();
+    final Directory root = Directory.current;
+    final File configFile = File('${root.path}/$kProjectConfigName');
+
+    if (configFile.existsSync() && !(argResults!['force'] as bool)) {
+      if (!ask.confirm('$kProjectConfigName already exists here. Overwrite it?',
+          fallback: false)) {
+        stderr.writeln('Nothing changed. Pass --force to overwrite it.');
+        return 1;
+      }
+    }
+
+    // 1. Token: whatever `fl` already resolves, else ask for a paste.
+    Credentials creds;
+    try {
+      creds = Credentials.resolve(
+        explicit: globalResults?['token'] as String?,
+        baseUrl: baseUrl,
+      );
+    } on AuthConfigException {
+      if (!ask.interactive) rethrow;
+      stdout.writeln('No API token stored yet. Create one in the dashboard:\n'
+          '  $kDashboardUrl  →  workspace  →  API keys\n'
+          'then paste it here (it is kept in ~/.config, chmod 600).');
+      final String pasted = ask.secret('flk_live_ token');
+      if (pasted.isEmpty) {
+        stderr.writeln('No token given.');
+        return 1;
+      }
+      creds = Credentials(pasted, source: 'the prompt');
+    }
+    _tokenSource = creds.source;
+    final ManagementClient client =
+        ManagementClient(baseUrl: baseUrl, token: creds.token);
+
+    try {
+      // 2. Project, then flavor.
+      final List<ProjectSummary> projects = await client.listProjects();
+      if (creds.source == 'the prompt') {
+        Credentials.save(creds.token, baseUrl: baseUrl);
+        stdout.writeln('✓ Token saved for $baseUrl.');
+      }
+      if (projects.isEmpty) {
+        stderr.writeln('This token sees no project. Create one in the '
+            'dashboard ($kDashboardUrl/projects), then run `fl init` again.');
+        return 1;
+      }
+      final ProjectSummary project = _pickProject(ask, projects);
+      final FlavorSummary flavor = _pickFlavor(ask, project);
+      final bool flutter = project.platforms.contains('flutter');
+      final bool ios = project.platforms.contains('ios');
+      stdout
+          .writeln('Project: ${project.name} (${project.platforms.join(' + ')})'
+              '${project.flavors.length > 1 ? ', flavor ${flavor.name}' : ''}');
+
+      // 3. Folders, prefilled from the repository.
+      String? arbDir;
+      if (flutter) {
+        arbDir = (argResults!['arb-dir'] as String?) ??
+            ask.ask('ARB folder', l10nArbDir(root) ?? 'arbs/${flavor.name}');
+      }
+      String? catalogDir;
+      if (ios) {
+        catalogDir = (argResults!['xcstrings-dir'] as String?) ??
+            ask.ask('String Catalog folder',
+                existingCatalogDir(root) ?? defaultCatalogDir(root));
+      }
+
+      // 4. The config every later command reads.
+      final Map<String, dynamic> cfg = <String, dynamic>{
+        if (baseUrl != kDefaultBaseUrl) 'base_url': baseUrl,
+        'project': project.name,
+        'project_id': project.id,
+        if (project.flavors.length > 1) 'flavor': flavor.name,
+        if (arbDir != null) 'arb_dir': arbDir,
+        if (catalogDir != null) 'xcstrings_dir': catalogDir,
+      };
+      configFile.writeAsStringSync(
+          '${const JsonEncoder.withIndent('  ').convert(cfg)}\n');
+      stdout.writeln('✓ Wrote $kProjectConfigName.');
+      if (jsonOut) {
+        stdout.writeln(const JsonEncoder.withIndent('  ').convert(
+            <String, dynamic>{'ok': true, 'config': configFile.path, ...cfg}));
+      }
+      if (dryRun || !(argResults!['pull'] as bool)) return 0;
+    } finally {
+      client.close();
+    }
+
+    // 5. First pull. A key that exists only on disk stops `pull`; the wizard
+    // is the one place where "import it" is the obvious answer, so offer it.
+    final List<String> passthrough = <String>[
+      if (globalResults?['token'] != null) ...<String>[
+        '--token',
+        globalResults!['token'] as String,
+      ],
+    ];
+    int code = await runner!.run(<String>[...passthrough, 'pull']) ?? 0;
+    if (code != 0 &&
+        ask.confirm('Import the keys that exist only on disk, then pull?')) {
+      code =
+          await runner!.run(<String>[...passthrough, 'pull', '--adopt']) ?? 0;
+    }
+    if (code != 0) return code;
+
+    final ProjectConfig written = ProjectConfig.load(path: configFile.path);
+    if (written.arbDir != null && looksLikeFlutterApp(root)) {
+      final int gen = await _regenerateDart(written);
+      if (gen != 0) return gen;
+    }
+
+    // 6. The optional extras, each its own command.
+    // Enter means yes at the prompt; `--yes` means no unless --guard says so.
+    final bool guard = (argResults!['guard'] as bool) ||
+        ask.confirm(
+            'Write Claude Code rules so AI edits go through fl, '
+            'not the ARBs (fl guard)?',
+            fallback: ask.interactive);
+    if (guard) await runner!.run(<String>['guard']);
+    if (findIosTargetDir(root) != null &&
+        ask.confirm('Declare the locales to iOS and Android now (fl native)?',
+            fallback: false)) {
+      await runner!.run(<String>['native']);
+    }
+
+    stdout.writeln();
+    return await runner!.run(<String>[...passthrough, 'status']) ?? 0;
+  }
+
+  ProjectSummary _pickProject(
+      final Prompter ask, final List<ProjectSummary> projects) {
+    final String? wanted = globalResults?['project'] as String?;
+    if (wanted != null) {
+      final int? id = int.tryParse(wanted);
+      return projects.firstWhere(
+        (final ProjectSummary p) =>
+            p.id == id || p.name.toLowerCase() == wanted.toLowerCase(),
+        orElse: () => throw UsageException(
+            'No project "$wanted". `fl projects` lists them.', usage),
+      );
+    }
+    final int? i = ask.choose(
+      'Which project?',
+      <String>[
+        for (final ProjectSummary p in projects)
+          '${p.name}  (${p.platforms.join(' + ')}, ${p.workspace})',
+      ],
+    );
+    if (i == null) {
+      throw UsageException(
+          '${projects.length} projects are reachable; pass --project <name|id>.',
+          usage);
+    }
+    return projects[i];
+  }
+
+  FlavorSummary _pickFlavor(final Prompter ask, final ProjectSummary project) {
+    final String? wanted = globalResults?['flavor'] as String?;
+    if (wanted != null) {
+      return project.flavors.firstWhere(
+        (final FlavorSummary f) => f.name.toLowerCase() == wanted.toLowerCase(),
+        orElse: () => throw UsageException(
+            'Project "${project.name}" has no flavor "$wanted".', usage),
+      );
+    }
+    if (project.flavors.isEmpty) {
+      return FlavorSummary(
+          name: 'Default', baseLanguage: null, languages: const <String>[]);
+    }
+    final int i = ask.choose(
+          'Which flavor?',
+          <String>[
+            for (final FlavorSummary f in project.flavors)
+              '${f.name}  (${f.languages.join(', ')})',
+          ],
+          fallback: 0,
+        ) ??
+        0;
+    return project.flavors[i];
   }
 }
 
@@ -1152,8 +1386,9 @@ Future<int> _pullArbs(
     // imported would disappear. Stop, name them, and offer both answers.
     // Each platform's file is checked on its own; the catalog is the only
     // place an iOS developer's new key can be.
-    final List<String> orphans =
-        project.shipsFlutter ? localOnlyKeys(template, serviceKeys) : <String>[];
+    final List<String> orphans = project.shipsFlutter
+        ? localOnlyKeys(template, serviceKeys)
+        : <String>[];
     final List<String> catalogOrphans = project.shipsIos
         ? localOnlyCatalogKeys(catalog, serviceKeys)
         : <String>[];
@@ -1251,7 +1486,9 @@ Future<int> _pullArbs(
                 'method': ArbSyncMethod.git.name,
                 'dir': dir,
                 'upstream': outcome.upstream,
-                'adopted': adopt ? <String>[...orphans, ...catalogOrphans] : <String>[],
+                'adopted': adopt
+                    ? <String>[...orphans, ...catalogOrphans]
+                    : <String>[],
               },
             ),
           );
@@ -1276,7 +1513,8 @@ Future<int> _pullArbs(
           <String, dynamic>{
             ...r.data,
             'method': ArbSyncMethod.api.name,
-            'adopted': adopt ? <String>[...orphans, ...catalogOrphans] : <String>[],
+            'adopted':
+                adopt ? <String>[...orphans, ...catalogOrphans] : <String>[],
           },
         ),
       );
@@ -1301,15 +1539,17 @@ Future<OpResult> _exportFromApi(
     if (project.shipsFlutter) await ops.exportArbs(arbDir, dryRun: dryRun),
     if (project.shipsIos) await ops.exportCatalogs(catalogDir, dryRun: dryRun),
   ];
-  final OpResult? failed =
-      results.cast<OpResult?>().firstWhere((final OpResult? r) => !r!.ok, orElse: () => null);
+  final OpResult? failed = results
+      .cast<OpResult?>()
+      .firstWhere((final OpResult? r) => !r!.ok, orElse: () => null);
   if (failed != null) return failed;
   return OpResult(
     true,
     results.map((final OpResult r) => r.message).join('\n'),
     <String, dynamic>{
       'files': <dynamic>[
-        for (final OpResult r in results) ...?(r.data['files'] as List<dynamic>?),
+        for (final OpResult r in results)
+          ...?(r.data['files'] as List<dynamic>?),
       ],
       if (project.shipsFlutter) 'template': results.first.data['template'],
       if (project.shipsFlutter) 'dir': arbDir,
@@ -1413,30 +1653,39 @@ class SyncCommand extends Command<int> with _ApiCommand {
       target.client.close();
     }
 
-    final String dir = cfg.arbDir ?? 'arbs';
-    // `arb_dir` points at the flavor folder (arbs/Default); the generator
-    // takes the root and the flavor as two arguments.
-    final List<String> parts = dir.split('/')
-      ..removeWhere((final String p) => p.isEmpty);
-    final String root =
-        parts.length > 1 ? parts.sublist(0, parts.length - 1).join('/') : dir;
-    final String flavorDir = parts.length > 1 ? parts.last : 'Default';
-    stdout.writeln('Regenerating Dart from $root/$flavorDir …');
-    final ProcessResult gen = await Process.run(
-      'dart',
-      <String>['run', 'flutter_localisation', root, flavorDir],
-    );
-    stdout.write(gen.stdout);
-    if (gen.exitCode != 0) {
-      stderr.write(gen.stderr);
-      stderr.writeln(
-          'Codegen failed. Is flutter_localisation a dependency of this app? '
-          'Re-run with --no-codegen to skip it.');
-      return gen.exitCode;
-    }
+    final int gen = await _regenerateDart(cfg);
+    if (gen != 0) return gen;
     stdout.writeln('✓ In sync: service → ARBs → Dart.');
     return 0;
   }
+}
+
+/// Run the flutter_localisation generator over `arb_dir`.
+///
+/// Shared by `fl sync` and `fl init`; both end with the Dart matching the ARBs.
+Future<int> _regenerateDart(final ProjectConfig cfg) async {
+  final String dir = cfg.arbDir ?? 'arbs';
+  // `arb_dir` points at the flavor folder (arbs/Default); the generator
+  // takes the root and the flavor as two arguments.
+  final List<String> parts = dir.split('/')
+    ..removeWhere((final String p) => p.isEmpty);
+  final String root =
+      parts.length > 1 ? parts.sublist(0, parts.length - 1).join('/') : dir;
+  final String flavorDir = parts.length > 1 ? parts.last : 'Default';
+  stdout.writeln('Regenerating Dart from $root/$flavorDir …');
+  final ProcessResult gen = await Process.run(
+    'dart',
+    <String>['run', 'flutter_localisation', root, flavorDir],
+  );
+  stdout.write(gen.stdout);
+  if (gen.exitCode != 0) {
+    stderr.write(gen.stderr);
+    stderr.writeln(
+        'Codegen failed. Is flutter_localisation a dependency of this app? '
+        'Re-run with --no-codegen to skip it.');
+    return gen.exitCode;
+  }
+  return 0;
 }
 
 /// Install a Claude Code guard so AI agents cannot hand-edit the
@@ -1685,10 +1934,12 @@ String _requireKey(final Command<int> cmd) {
 /// dashboard's Export, from the terminal.
 class ExportCommand extends Command<int> with _ApiCommand {
   ExportCommand() {
-    argParser.addFlag('discard-local',
-        negatable: false,
-        help: 'Write even though the template holds keys the service does '
-            'not have (they are lost).',);
+    argParser.addFlag(
+      'discard-local',
+      negatable: false,
+      help: 'Write even though the template holds keys the service does '
+          'not have (they are lost).',
+    );
   }
 
   @override
@@ -1718,7 +1969,9 @@ class ExportCommand extends Command<int> with _ApiCommand {
       // without one each kind has its own configured home.
       final String arbDir = positional ?? cfg.arbDir ?? 'arbs/Default';
       final String catalogDir = positional ??
-          (project.shipsFlutter ? cfg.catalogDir : cfg.xcstringsDir ?? cfg.arbDir ?? '.');
+          (project.shipsFlutter
+              ? cfg.catalogDir
+              : cfg.xcstringsDir ?? cfg.arbDir ?? '.');
       // The same hazard `pull` guards: this rewrites the files from the
       // service, so a key staged on disk and never imported disappears. That
       // is how eight onboarding keys were lost once, and why this command
@@ -1731,8 +1984,7 @@ class ExportCommand extends Command<int> with _ApiCommand {
             for (final TranslationEntry t in base.translations)
               if (t.key.isNotEmpty) t.key,
           };
-          final String template =
-              'app_${base.code.replaceAll('-', '_')}.arb';
+          final String template = 'app_${base.code.replaceAll('-', '_')}.arb';
           final List<({String file, List<String> keys})> staged =
               <({String file, List<String> keys})>[
             if (project.shipsFlutter)
@@ -1753,8 +2005,7 @@ class ExportCommand extends Command<int> with _ApiCommand {
                 '${entry.file} holds ${entry.keys.length} key(s) the service '
                 'does not have: ${entry.keys.take(10).join(', ')}'
                 '${entry.keys.length > 10 ? ', …' : ''}');
-            stderr.writeln(
-                'Exporting would overwrite them. Import them first '
+            stderr.writeln('Exporting would overwrite them. Import them first '
                 '(`fl import ${entry.file} --translate`), or run '
                 '`fl pull --adopt`, or force with `--discard-local`.');
             return 1;

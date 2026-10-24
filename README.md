@@ -29,9 +29,26 @@ fl login --token flk_live_xxx      # stored in ~/.config/flutterlocalisation (ch
 
 The token is **workspace-scoped**, so you pick projects by name — no numeric ids.
 
+## First run: `fl init`
+
+```bash
+cd my_app
+fl init
+```
+
+One wizard for a fresh checkout. It asks for the token if none is stored, lists the projects
+the token sees (and the flavors, when there are several), prefills the folders from the
+repository (`l10n.yaml` `arb-dir` for ARBs, an existing `Localizable.xcstrings` or the iOS
+target folder for catalogs), writes `flutterlocalisation.json`, pulls the strings, regenerates
+the Dart for a Flutter app, then offers `fl guard` and `fl native`. Every question has a
+default; `fl init -y` takes them all, and `--project`, `--flavor`, `--arb-dir`,
+`--xcstrings-dir` answer the ones that have no default. `--no-pull` only writes the config.
+The project itself is still created in the dashboard: the token cannot do that.
+
 ## CLI
 
 ```bash
+fl init                                  # first run: token, project, folders, first pull
 fl projects                              # list your projects (name, flavors, locales)
 fl status --project "Chat Bot"           # completion % per locale
 fl add greeting --value "Hello" -t       # add key + AI-translate every other locale

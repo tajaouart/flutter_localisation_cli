@@ -77,6 +77,46 @@ void main() {
     expect(r.out, isNot(contains('regenerate the Dart')), reason: 'no gen_l10n step for iOS');
   });
 
+  test('init --yes writes the config from what is on disk and pulls', () async {
+    File(p.join(tmp.path, 'flutterlocalisation.json')).deleteSync();
+    File(p.join(tmp.path, 'App', 'Localizable.xcstrings'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync(kServedCatalog);
+
+    final Run r = await fl(<String>['init', '--yes', '--base-url', backend.url]);
+    expect(r.code, 0, reason: '${r.out}\n${r.err}');
+    final Map<String, dynamic> cfg = jsonDecode(
+            File(p.join(tmp.path, 'flutterlocalisation.json')).readAsStringSync())
+        as Map<String, dynamic>;
+    expect(cfg['project'], 'Gush');
+    expect(cfg['project_id'], 7);
+    expect(cfg['xcstrings_dir'], 'App');
+    expect(cfg.containsKey('arb_dir'), isFalse, reason: 'iOS-only project');
+    expect(cfg.containsKey('flavor'), isFalse, reason: 'a single flavor needs no key');
+    expect(r.out, contains('Wrote flutterlocalisation.json'));
+    expect(r.out, contains('String Catalog'), reason: 'the first pull ran');
+    expect(File(p.join(tmp.path, '.claude', 'settings.json')).existsSync(), isFalse,
+        reason: '--yes does not write the guard unless asked');
+  });
+
+  test('init refuses to overwrite a config without --force when not interactive', () async {
+    final Run r = await fl(<String>['init', '--yes', '--base-url', backend.url]);
+    expect(r.code, 1);
+    expect(r.err, contains('--force'));
+  });
+
+  test('init --no-pull on a Flutter project prefills arb_dir from l10n.yaml', () async {
+    backend.platforms = <String>['flutter'];
+    File(p.join(tmp.path, 'l10n.yaml')).writeAsStringSync('arb-dir: lib/l10n\n');
+    final Run r = await fl(<String>['init', '--yes', '--force', '--no-pull', '--base-url', backend.url]);
+    expect(r.code, 0, reason: r.err);
+    final Map<String, dynamic> cfg = jsonDecode(
+            File(p.join(tmp.path, 'flutterlocalisation.json')).readAsStringSync())
+        as Map<String, dynamic>;
+    expect(cfg['arb_dir'], 'lib/l10n');
+    expect(cfg.containsKey('xcstrings_dir'), isFalse);
+  });
+
   test('login refuses a token the API rejects and saves one it accepts', () async {
     final File creds = File(p.join(tmp.path, '.config', 'flutterlocalisation', 'credentials.json'));
 
