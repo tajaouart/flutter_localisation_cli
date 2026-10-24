@@ -61,6 +61,16 @@ String canonicalizeOrKeep(final String code) {
   }
 }
 
+/// Split locale arguments that arrived glued together.
+///
+/// `fl languages add "fr de es"` and `fl languages add fr,de,es` both reach
+/// the command as one argument. Sent as-is the backend echoes the whole
+/// string back as "not a valid locale code", which hides the actual cause.
+List<String> splitLocaleArgs(final Iterable<String> args) => args
+    .expand((final String a) => a.split(RegExp(r'[\s,]+')))
+    .where((final String a) => a.isNotEmpty)
+    .toList();
+
 /// Filename suffix `gen_l10n` expects: `pt-BR` -> `pt_BR`, for `app_pt_BR.arb`.
 ///
 /// Hyphens are what BCP-47 uses and underscores are what the Dart tooling

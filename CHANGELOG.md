@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.11.1] - 2026-10-24
+### Fixed
+- `fl languages add` accepts codes glued into one argument (`"fr de es"`, `fr,de,es`) instead of forwarding the whole string and getting "is not a valid locale code" back.
+
 ## [1.11.0] - 2026-10-22
 ### Changed
 - **`fl login` checks the token before saving it.** A token the API rejects

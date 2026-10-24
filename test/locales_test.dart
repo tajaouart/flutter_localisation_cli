@@ -34,6 +34,16 @@ void main() {
     });
   });
 
+  group('splitLocaleArgs', () {
+    test('splits one space- or comma-joined argument into codes', () {
+      expect(splitLocaleArgs(<String>['fr de,es', 'ja']),
+          <String>['fr', 'de', 'es', 'ja']);
+    });
+    test('drops empty pieces', () {
+      expect(splitLocaleArgs(<String>['fr, ', ' ']), <String>['fr']);
+    });
+  });
+
   group('canonicalizeOrKeep', () {
     test('passes junk through so the API can name the field', () {
       expect(canonicalizeOrKeep('not a locale'), 'not a locale');

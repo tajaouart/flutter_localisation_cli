@@ -902,7 +902,7 @@ class LanguagesAddCommand extends Command<int> with _ApiCommand {
     }) built = await build(loadProject());
     try {
       final OpResult r = await built.ops.addLanguages(
-        _locales(rest),
+        _locales(splitLocaleArgs(rest)),
         autoTranslate: argResults!['auto-translate'] as bool,
         dryRun: dryRun,
       );
