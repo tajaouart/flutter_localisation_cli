@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.12.1] - 2026-10-26
+### Changed
+- Shorter package description and an `example/` for pub.dev.
+
 ## [1.12.0] - 2026-10-24
 ### Added
 - `fl init`: first-run wizard. Stores the token if none is there, picks the project and flavor, prefills `arb_dir` from `l10n.yaml` and `xcstrings_dir` from an existing catalog or the iOS target, writes `flutterlocalisation.json`, pulls, regenerates the Dart, offers `fl guard` and `fl native`. `-y` and `--project/--flavor/--arb-dir/--xcstrings-dir` run it without a terminal.
