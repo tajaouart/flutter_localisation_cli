@@ -909,6 +909,67 @@ class Operations {
   /// project (that is the whole point — the rows never come back), but it is
   /// not something to run casually, and a bulk `is_checked` endpoint would
   /// remove the cost entirely.
+  /// Re-translate every value whose key's base text [matches], in every
+  /// locale but the base, whatever state it is in.
+  ///
+  /// What `fl glossary apply` runs: a glossary term or a language style only
+  /// reaches the strings sent to the translator after it was set, so strings
+  /// translated before keep the old wording until they are sent again.
+  Future<OpResult> retranslateWhere(
+    final bool Function(String base) matches, {
+    final List<String>? locales,
+    final bool dryRun = false,
+  }) async {
+    final ProjectData project = await client.getProject(projectId);
+    final FlavorData f = project.flavor(flavor);
+    final String? baseCode = project.baseLanguage(flavor)?.code;
+    if (baseCode == null) {
+      return OpResult(false, 'No base language on flavor "${f.name}".');
+    }
+    final Set<String> keys = <String>{
+      for (final LanguageData l in f.languages)
+        if (l.code == baseCode)
+          for (final TranslationEntry t in l.translations)
+            if (t.value.trim().isNotEmpty && matches(t.value)) t.key,
+    };
+    final List<int> ids = <int>[
+      for (final LanguageData l in f.languages)
+        if (l.code != baseCode &&
+            (locales == null || locales.isEmpty || locales.contains(l.code)))
+          for (final TranslationEntry t in l.translations)
+            if (keys.contains(t.key)) t.id,
+    ];
+    if (ids.isEmpty) {
+      return OpResult(true, 'No translated string uses these terms.',
+          <String, dynamic>{'strings': 0, 'values': 0});
+    }
+    if (dryRun) {
+      return OpResult(
+        true,
+        'DRY RUN: would re-translate ${ids.length} value(s) of '
+        '${keys.length} string(s).',
+        <String, dynamic>{'strings': keys.length, 'values': ids.length},
+      );
+    }
+    final VerifyOutcome out = await _translateAndVerify(ids);
+    return OpResult(
+      out.failed.isEmpty,
+      'Re-translated ${out.translated} value(s) of ${keys.length} string(s)'
+      '${out.unchanged.isEmpty ? '' : ', ${out.unchanged.length} unchanged'}'
+      '${out.failed.isEmpty ? '' : ', ${out.failed.length} failed'}.',
+      <String, dynamic>{
+        'strings': keys.length,
+        'values': ids.length,
+        'translated': out.translated,
+        'unchanged': out.unchanged.length,
+        'failed': <Map<String, dynamic>>[
+          for (final ({int id, String reason}) f in out.failed)
+            <String, dynamic>{'id': f.id, 'reason': f.reason},
+        ],
+      },
+    );
+  }
+
   Future<OpResult> retranslate({
     final List<String>? locales,
     final bool dryRun = false,

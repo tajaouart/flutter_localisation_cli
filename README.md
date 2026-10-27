@@ -67,7 +67,39 @@ fl sync app_en.arb                       # import, pull and regenerate the Dart,
 fl guard                                 # stop AI agents editing ARBs + generated Dart
 fl native                                # tell iOS + Android about the locales, translate
                                          # the iOS permission alerts
+fl glossary add Dictee --keep            # never translate the app's name
+fl glossary add Snippets --as de=Schnipsel --as fr=Extraits
+fl style set de --formal                 # Sie, never du (de-AT, de-CH follow)
+fl glossary apply                        # re-translate strings that use glossary terms
+fl lock support_url                      # this key keeps the base text in every locale
 ```
+
+### Glossary and voice
+
+The translator sees one batch of strings at a time. Without guidance it translates your
+product's name like any other word, says "du" in one batch and "Sie" in the next, and calls the
+same feature two different things. Three settings fix that for every later translation:
+
+- **Glossary terms.** `--keep` keeps a term exactly as written in every locale (brand and
+  product names); a translation that changes it is refused and the string stays as it was.
+  `--as <locale>=<text>` pins the translation of a term; a translation that does not use it is
+  saved but marked for review. A term's `--note` tells the translator what it means.
+  `fl glossary suggest` proposes terms from your strings (project name, recurring names,
+  acronyms), `fl glossary import glossary.csv` loads a whole list
+  (`term,keep,note,de,fr,...` or the JSON `fl glossary export` writes).
+- **Language style.** `fl style set <locale> --formal|--informal [--instructions "..."]`.
+  A regional variant (de-AT, pt-BR) follows its language unless it has its own style.
+- **Locked keys.** `fl lock <key>` copies the base text into every locale and never sends the
+  key for translation: URLs, code samples, names. It is the same flag as Xcode's
+  `"shouldTranslate": false`, and both directions round-trip (`@key.x-translate: false` in ARBs).
+
+These apply to what is translated from then on. `fl glossary apply` re-translates the strings
+that contain glossary terms (`--term` narrows it, `--all` covers every string after a style
+change; preview with `--dry-run`).
+
+Two more things happen without a setting: a string that quotes another string of your app
+("Tap “Tap to speak”") gets that string's existing translation, and a regional variant (de-CH)
+is written from its language's translation (de) instead of from the source on its own.
 
 `fl import <file.arb>` bulk-creates every key in an ARB in **one** request (instead of many
 `fl add` calls) — the right tool for large migrations. `--overwrite` replaces existing values;
@@ -304,7 +336,8 @@ claude mcp add flutter-localisation --env FL_API_TOKEN=flk_live_xxx -- fl_mcp
 Then ask: *"list my projects"*, then *"in Chat Bot, add `checkout_button` = 'Buy now' and
 translate it to all locales."* Tools: `list_projects`, `list_status`, `list_languages`,
 `add_language`, `project_repo`, `add_string`, `edit_string`, `delete_string`, `translate_key`,
-`retranslate`, `import_arb`, `pull_arbs` (each takes an optional `project`/`flavor`), and
+`retranslate`, `import_arb`, `pull_arbs`, `glossary`, `language_style`, `lock_keys` (each
+takes an optional `project`/`flavor`), and
 `sync_native_locales` — the MCP face of `fl native`, which needs no token and takes an optional
 `project_root`. `project_repo` returns the linked ARB git repo so the agent can clone it before
 codegen; `pull_arbs` writes the ARBs into `arb_dir` (and the String Catalogs into

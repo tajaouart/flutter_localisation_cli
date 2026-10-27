@@ -26,6 +26,8 @@ import 'dart:io';
 import 'package:flutter_localisation_cli/src/arb_sync.dart';
 import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
+import 'package:flutter_localisation_cli/src/glossary.dart';
+import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/native_sync.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
@@ -468,6 +470,93 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
         },
       },
       <String, dynamic>{
+        'name': 'glossary',
+        'description':
+            'The project glossary: terms the translator must handle the same way in '
+                'every string. A term is either kept exactly as written in every locale '
+                '(keep=true: brand and product names, which are otherwise translated '
+                'like ordinary words) or pinned to one translation per locale '
+                '(translations={"de": "Schnipsel"}). action=list shows the glossary; '
+                'add creates or updates one term; remove deletes one; suggest lists '
+                'likely terms (project name, recurring names, acronyms); apply '
+                're-translates the strings containing glossary terms so translations '
+                'made before a term existed follow it. Writes need apply=true.',
+        'inputSchema': <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'action': <String, dynamic>{
+              'type': 'string',
+              'enum': <String>['list', 'add', 'remove', 'suggest', 'apply'],
+            },
+            'term': <String, dynamic>{'type': 'string'},
+            'keep': <String, dynamic>{'type': 'boolean', 'default': false},
+            'translations': <String, dynamic>{
+              'type': 'object',
+              'additionalProperties': <String, dynamic>{'type': 'string'},
+              'description': 'Locale code -> pinned translation.',
+            },
+            'note': <String, dynamic>{'type': 'string'},
+            'terms': <String, dynamic>{
+              'type': 'array',
+              'items': <String, dynamic>{'type': 'string'},
+              'description': 'apply: only strings containing these terms.',
+            },
+            'apply': <String, dynamic>{'type': 'boolean', 'default': false},
+            ..._projectProps,
+          },
+          'required': <String>['action'],
+        },
+      },
+      <String, dynamic>{
+        'name': 'language_style',
+        'description':
+            'How translations address the reader per locale: formal (Sie, vous, usted, '
+                'Lei...) or informal (du, tu, tú...), plus free instructions. Regional '
+                'variants (de-AT, de-CH) follow their language unless set themselves. '
+                'action=list shows every locale and where its style comes from; set '
+                'changes one; clear removes one. Existing translations keep their '
+                'wording until re-translated (glossary action=apply with all).',
+        'inputSchema': <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'action': <String, dynamic>{
+              'type': 'string',
+              'enum': <String>['list', 'set', 'clear'],
+            },
+            'locale': <String, dynamic>{'type': 'string'},
+            'formality': <String, dynamic>{
+              'type': 'string',
+              'enum': <String>['', 'formal', 'informal'],
+            },
+            'instructions': <String, dynamic>{'type': 'string'},
+            'apply': <String, dynamic>{'type': 'boolean', 'default': false},
+            ..._projectProps,
+          },
+          'required': <String>['action'],
+        },
+      },
+      <String, dynamic>{
+        'name': 'lock_keys',
+        'description':
+            'Mark keys as never translated (lock=true): every locale shows the base '
+                'text as written and the key is never sent to the translator. For URLs, '
+                'code samples, names that are a whole string. lock=false makes them '
+                'translatable again. Writes need apply=true.',
+        'inputSchema': <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'keys': <String, dynamic>{
+              'type': 'array',
+              'items': <String, dynamic>{'type': 'string'},
+            },
+            'lock': <String, dynamic>{'type': 'boolean', 'default': true},
+            'apply': <String, dynamic>{'type': 'boolean', 'default': false},
+            ..._projectProps,
+          },
+          'required': <String>['keys'],
+        },
+      },
+      <String, dynamic>{
         'name': 'list_languages',
         'description':
             'List the locales on the flavor with how many keys each has filled. Use this '
@@ -904,6 +993,69 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
         );
       case 'list_languages':
         r = await ops.listLanguages();
+      case 'glossary':
+        {
+          final GlossaryOperations g = GlossaryOperations(_client, target.projectId);
+          final String term = (a['term'] as String?) ?? '';
+          switch (a['action']) {
+            case 'list':
+              r = await g.list();
+            case 'add':
+              r = await g.add(
+                term,
+                keep: (a['keep'] ?? false) as bool,
+                translations: <String, String>{
+                  for (final MapEntry<String, dynamic> e
+                      in ((a['translations'] as Map<String, dynamic>?) ??
+                              const <String, dynamic>{})
+                          .entries)
+                    canonicalizeOrKeep(e.key): e.value.toString(),
+                },
+                note: a['note'] as String?,
+                dryRun: !apply,
+              );
+            case 'remove':
+              r = await g.remove(term, dryRun: !apply);
+            case 'suggest':
+              r = await g.suggest();
+            case 'apply':
+              r = await g.apply(
+                ops,
+                only: (a['terms'] as List<dynamic>?)?.cast<String>() ?? const <String>[],
+                dryRun: !apply,
+              );
+            default:
+              _error(id, -32602, 'Unknown glossary action: ${a['action']}');
+              return;
+          }
+        }
+      case 'language_style':
+        {
+          final GlossaryOperations g = GlossaryOperations(_client, target.projectId);
+          final String locale = (a['locale'] as String?) ?? '';
+          switch (a['action']) {
+            case 'list':
+              r = await g.styles();
+            case 'set':
+              r = await g.setStyle(
+                locale,
+                formality: (a['formality'] as String?) ?? '',
+                instructions: (a['instructions'] as String?) ?? '',
+                dryRun: !apply,
+              );
+            case 'clear':
+              r = await g.clearStyle(locale, dryRun: !apply);
+            default:
+              _error(id, -32602, 'Unknown language_style action: ${a['action']}');
+              return;
+          }
+        }
+      case 'lock_keys':
+        r = await GlossaryOperations(_client, target.projectId).lock(
+          ((a['keys'] as List<dynamic>?) ?? const <dynamic>[]).cast<String>(),
+          on: (a['lock'] ?? true) as bool,
+          dryRun: !apply,
+        );
       case 'translate_key':
         r = await ops.translate(
           a['key'] as String,

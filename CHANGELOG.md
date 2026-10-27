@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.13.0] - 2026-10-27
+### Added
+- **Glossary.** `fl glossary list|add|remove|import|export|suggest|apply`. A term is kept as
+  written in every locale (`--keep`, for brand names) or pinned to a translation per locale
+  (`--as de=Schnipsel`). The backend sends the terms of each batch to the translator, refuses a
+  translation that changes a kept term, and marks for review one that skips a pinned term.
+  `apply` re-translates the strings that use glossary terms.
+- **Language style.** `fl style list|set|clear`: formal or informal address per locale, plus
+  instructions. Regional variants follow their language.
+- **Locked keys.** `fl lock <key>` / `fl unlock <key>`: the key keeps the base text in every
+  locale and is never sent for translation (Xcode's `shouldTranslate: false`).
+- MCP tools `glossary`, `language_style` and `lock_keys`.
+
 ## [1.12.1] - 2026-10-26
 ### Changed
 - Shorter package description and an `example/` for pub.dev.

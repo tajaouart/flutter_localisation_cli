@@ -720,6 +720,97 @@ class ManagementClient {
   }
 
   // ------------------------------------------------------------------------- //
+  // Glossary, language styles, never-translate keys
+  // ------------------------------------------------------------------------- //
+
+  /// The project glossary: `{terms: [{id, term, do_not_translate,
+  /// case_sensitive, translations, note, string_count}], count}`.
+  Future<Map<String, dynamic>> listGlossary(final int projectId) async =>
+      _json(await _send('GET', '/api/projects/$projectId/glossary/'));
+
+  /// Create or update terms in ONE request, matched by term (case-insensitive).
+  /// Returns `{created: [...], updated: [...]}`.
+  Future<Map<String, dynamic>> upsertGlossary(
+    final int projectId,
+    final List<Map<String, dynamic>> terms,
+  ) async =>
+      _json(await _send(
+        'POST',
+        '/api/projects/$projectId/glossary/',
+        body: <String, dynamic>{'terms': terms},
+      ));
+
+  Future<Map<String, dynamic>> updateGlossaryTerm(
+    final int projectId,
+    final int termId,
+    final Map<String, dynamic> fields,
+  ) async =>
+      _json(await _send(
+        'PATCH',
+        '/api/projects/$projectId/glossary/$termId/',
+        body: fields,
+      ));
+
+  Future<void> deleteGlossaryTerm(final int projectId, final int termId) async {
+    await _send('DELETE', '/api/projects/$projectId/glossary/$termId/');
+  }
+
+  /// Terms worth adding (project name, recurring names, acronyms); nothing saved.
+  Future<List<Map<String, dynamic>>> glossarySuggestions(
+    final int projectId,
+  ) async {
+    final Map<String, dynamic> j = _json(
+      await _send('GET', '/api/projects/$projectId/glossary/suggestions/'),
+    );
+    return ((j['suggestions'] ?? const <dynamic>[]) as List<dynamic>)
+        .cast<Map<String, dynamic>>();
+  }
+
+  /// `{styles: [...], languages: [{code, formality, instructions,
+  /// inherited_from}], formality_choices}`.
+  Future<Map<String, dynamic>> listLanguageStyles(final int projectId) async =>
+      _json(await _send('GET', '/api/projects/$projectId/language-styles/'));
+
+  Future<Map<String, dynamic>> setLanguageStyle(
+    final int projectId,
+    final String code, {
+    final String formality = '',
+    final String instructions = '',
+  }) async =>
+      _json(await _send(
+        'PUT',
+        '/api/projects/$projectId/language-styles/',
+        body: <String, dynamic>{
+          'code': code,
+          'formality': formality,
+          'instructions': instructions,
+        },
+      ));
+
+  Future<void> deleteLanguageStyle(final int projectId, final String code) async {
+    await _send(
+      'DELETE',
+      '/api/projects/$projectId/language-styles/${Uri.encodeComponent(code)}/',
+    );
+  }
+
+  /// Mark keys as never translated (every locale keeps the base text), or
+  /// unmark them. Returns `{updated, do_not_translate, values_copied}`.
+  Future<Map<String, dynamic>> setDoNotTranslate(
+    final int projectId,
+    final List<String> keys, {
+    final bool doNotTranslate = true,
+  }) async =>
+      _json(await _send(
+        'POST',
+        '/api/projects/$projectId/translation_keys/do-not-translate/',
+        body: <String, dynamic>{
+          'keys': keys,
+          'do_not_translate': doNotTranslate,
+        },
+      ));
+
+  // ------------------------------------------------------------------------- //
   // HTTP plumbing: retries + error mapping
   // ------------------------------------------------------------------------- //
 

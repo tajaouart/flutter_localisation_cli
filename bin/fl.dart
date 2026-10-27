@@ -22,6 +22,7 @@ import 'package:args/command_runner.dart';
 import 'package:flutter_localisation_cli/src/arb_sync.dart';
 import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
+import 'package:flutter_localisation_cli/src/glossary.dart';
 import 'package:flutter_localisation_cli/src/guard.dart';
 import 'package:flutter_localisation_cli/src/init_detect.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
@@ -74,6 +75,10 @@ Future<void> main(final List<String> args) async {
   runner.addCommand(GuardCommand());
   runner.addCommand(NativeCommand());
   runner.addCommand(ExportCommand());
+  runner.addCommand(GlossaryCommand());
+  runner.addCommand(StyleCommand());
+  runner.addCommand(LockCommand(lock: true));
+  runner.addCommand(LockCommand(lock: false));
 
   try {
     final int? code = await runner.run(args);
@@ -2037,3 +2042,342 @@ class ExportCommand extends Command<int> with _ApiCommand {
     }
   }
 }
+
+
+// --------------------------------------------------------------------------- //
+// Glossary, language styles, locked keys
+// --------------------------------------------------------------------------- //
+
+/// Runs [body] with a [GlossaryOperations] for the resolved project, closing
+/// the client afterwards.
+mixin _GlossaryCommand on Command<int>, _ApiCommand {
+  Future<int> withGlossary(
+    final Future<int> Function(GlossaryOperations g, Operations ops) body,
+  ) async {
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
+    try {
+      return await body(
+          GlossaryOperations(built.client, built.ops.projectId), built.ops);
+    } finally {
+      built.client.close();
+    }
+  }
+}
+
+class GlossaryCommand extends Command<int> {
+  GlossaryCommand() {
+    addSubcommand(GlossaryListCommand());
+    addSubcommand(GlossaryAddCommand());
+    addSubcommand(GlossaryRemoveCommand());
+    addSubcommand(GlossaryImportCommand());
+    addSubcommand(GlossaryExportCommand());
+    addSubcommand(GlossarySuggestCommand());
+    addSubcommand(GlossaryApplyCommand());
+  }
+
+  @override
+  String get name => 'glossary';
+  @override
+  String get description =>
+      'Terms the translator must handle the same way everywhere: kept as '
+      'written (brand names) or pinned to one translation per locale.';
+}
+
+class GlossaryListCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+  @override
+  String get name => 'list';
+  @override
+  String get description => 'List the glossary and how many strings use each term.';
+
+  @override
+  Future<int> run() => withGlossary((final GlossaryOperations g, final _) async {
+        final OpResult r = await g.list();
+        if (jsonOut) return emit(r);
+        stdout.writeln(r.message);
+        for (final dynamic t in r.data['terms'] as List<dynamic>) {
+          stdout.writeln('  ${GlossaryOperations.describeTerm(t as Map<String, dynamic>)}');
+        }
+        return 0;
+      });
+}
+
+class GlossaryAddCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+  GlossaryAddCommand() {
+    argParser
+      ..addFlag('keep',
+          negatable: false,
+          help: 'Never translate it: every locale keeps it exactly as written '
+              '(brand and product names).')
+      ..addMultiOption('as',
+          help: 'Pinned translation, <locale>=<text>; repeatable. de-AT falls '
+              'back to de.',
+          valueHelp: 'de=Schnipsel')
+      ..addOption('note', help: 'What the term means, for the translator.')
+      ..addFlag('case-sensitive',
+          help: 'Match only this exact capitalisation.', defaultsTo: null);
+  }
+
+  @override
+  String get name => 'add';
+  @override
+  String get description =>
+      'Add a term, or update it if it exists. Pass every term of a big '
+      'glossary with `fl glossary import` instead of looping this.';
+  @override
+  String get invocation =>
+      'fl glossary add <term> (--keep | --as de=Schnipsel ...) [--note "..."]';
+
+  @override
+  Future<int> run() {
+    final List<String> rest = argResults!.rest;
+    if (rest.isEmpty) {
+      throw UsageException('Missing <term>, e.g. `fl glossary add Dictee --keep`.', usage);
+    }
+    return withGlossary((final GlossaryOperations g, final _) async => emit(await g.add(
+          rest.join(' '),
+          keep: argResults!['keep'] as bool,
+          translations: parseTermTranslations(argResults!['as'] as List<String>),
+          note: argResults!['note'] as String?,
+          caseSensitive: argResults!['case-sensitive'] as bool?,
+          dryRun: dryRun,
+        )));
+  }
+}
+
+class GlossaryRemoveCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+  @override
+  String get name => 'remove';
+  @override
+  String get description => 'Remove a term from the glossary.';
+  @override
+  String get invocation => 'fl glossary remove <term>';
+
+  @override
+  Future<int> run() {
+    final List<String> rest = argResults!.rest;
+    if (rest.isEmpty) throw UsageException('Missing <term>.', usage);
+    return withGlossary((final GlossaryOperations g, final _) async =>
+        emit(await g.remove(rest.join(' '), dryRun: dryRun)));
+  }
+}
+
+class GlossaryImportCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+  @override
+  String get name => 'import';
+  @override
+  String get description =>
+      'Add or update every term of a JSON file ({"terms": [...]}, as `fl '
+      'glossary export` writes) or a CSV (header: term,keep,note,de,fr,...).';
+  @override
+  String get invocation => 'fl glossary import <file.json|file.csv>';
+
+  @override
+  Future<int> run() {
+    final List<String> rest = argResults!.rest;
+    if (rest.isEmpty) throw UsageException('Missing <file>.', usage);
+    return withGlossary((final GlossaryOperations g, final _) async =>
+        emit(await g.importFile(rest.first, dryRun: dryRun)));
+  }
+}
+
+class GlossaryExportCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+  @override
+  String get name => 'export';
+  @override
+  String get description => 'Write the glossary to a JSON file `fl glossary import` reads.';
+  @override
+  String get invocation => 'fl glossary export [<file.json>]';
+
+  @override
+  Future<int> run() => withGlossary((final GlossaryOperations g, final _) async => emit(
+      await g.export(argResults!.rest.isEmpty ? 'glossary.json' : argResults!.rest.first)));
+}
+
+class GlossarySuggestCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+  GlossarySuggestCommand() {
+    argParser.addFlag('apply',
+        negatable: false,
+        help: 'Add every suggestion (acronyms and the project name kept as '
+            'written, other names without a fixed translation).');
+  }
+
+  @override
+  String get name => 'suggest';
+  @override
+  String get description =>
+      'Terms worth adding: the project name, names that recur capitalised '
+      'mid-sentence, acronyms.';
+
+  @override
+  Future<int> run() => withGlossary((final GlossaryOperations g, final _) async {
+        final OpResult r =
+            await g.suggest(apply: argResults!['apply'] as bool, dryRun: dryRun);
+        if (jsonOut) return emit(r);
+        stdout.writeln(r.message);
+        for (final dynamic s
+            in (r.data['suggestions'] as List<dynamic>?) ?? const <dynamic>[]) {
+          final Map<String, dynamic> m = s as Map<String, dynamic>;
+          stdout.writeln('  ${m['term']}  (${m['reason']}, ${m['string_count']} '
+              'string(s)${m['do_not_translate'] == true ? ', keep' : ''})');
+        }
+        return 0;
+      });
+}
+
+class GlossaryApplyCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+  GlossaryApplyCommand() {
+    argParser
+      ..addMultiOption('term', help: 'Only strings containing this term; repeatable.')
+      ..addMultiOption('locale', help: 'Only these locales; repeatable.')
+      ..addFlag('all',
+          negatable: false,
+          help: 'Every string, not only those with glossary terms: after '
+              'changing a language style.');
+  }
+
+  @override
+  String get name => 'apply';
+  @override
+  String get description =>
+      'Re-translate the strings that contain glossary terms, in every locale, '
+      'so translations made before a term was added follow it.';
+  @override
+  String get invocation =>
+      'fl glossary apply [--term Dictee] [--locale de] [--all] [--dry-run]';
+
+  @override
+  Future<int> run() =>
+      withGlossary((final GlossaryOperations g, final Operations ops) async => emit(await g.apply(
+            ops,
+            only: argResults!['term'] as List<String>,
+            all: argResults!['all'] as bool,
+            locales: _locales(argResults!['locale'] as List<String>),
+            dryRun: dryRun,
+          )));
+}
+
+class StyleCommand extends Command<int> {
+  StyleCommand() {
+    addSubcommand(StyleListCommand());
+    addSubcommand(StyleSetCommand());
+    addSubcommand(StyleClearCommand());
+  }
+
+  @override
+  String get name => 'style';
+  @override
+  String get description =>
+      'How translations address the reader per language: formal (Sie, vous, '
+      'usted) or informal (du, tu, tú), plus instructions of your own.';
+}
+
+class StyleListCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+  @override
+  String get name => 'list';
+  @override
+  String get description => 'Show the style each locale is translated in.';
+
+  @override
+  Future<int> run() => withGlossary((final GlossaryOperations g, final _) async {
+        final OpResult r = await g.styles();
+        if (jsonOut) return emit(r);
+        for (final dynamic row in r.data['languages'] as List<dynamic>) {
+          final Map<String, dynamic> m = row as Map<String, dynamic>;
+          final String f = (m['formality'] as String? ?? '').isEmpty
+              ? "translator's choice"
+              : m['formality'] as String;
+          final String from =
+              m['inherited_from'] == null ? '' : ' (from ${m['inherited_from']})';
+          final String extra = (m['instructions'] as String? ?? '').isEmpty
+              ? ''
+              : ' + instructions';
+          stdout.writeln('  ${m['code']}: $f$extra$from');
+        }
+        return 0;
+      });
+}
+
+class StyleSetCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+  StyleSetCommand() {
+    argParser
+      ..addFlag('formal', negatable: false, help: 'Formal address (Sie, vous, usted, Lei...).')
+      ..addFlag('informal', negatable: false, help: 'Informal address (du, tu, tú...).')
+      ..addOption('instructions',
+          help: 'Anything else the translator should follow for this locale.');
+  }
+
+  @override
+  String get name => 'set';
+  @override
+  String get description =>
+      'Set the style of a locale. Regional variants (de-AT) follow their '
+      'language (de) unless they have their own.';
+  @override
+  String get invocation =>
+      'fl style set <locale> (--formal | --informal) [--instructions "..."]';
+
+  @override
+  Future<int> run() {
+    final List<String> rest = argResults!.rest;
+    if (rest.isEmpty) throw UsageException('Missing <locale>.', usage);
+    final bool formal = argResults!['formal'] as bool;
+    final bool informal = argResults!['informal'] as bool;
+    if (formal && informal) {
+      throw UsageException('Pass --formal or --informal, not both.', usage);
+    }
+    return withGlossary((final GlossaryOperations g, final _) async => emit(await g.setStyle(
+          rest.first,
+          formality: formal ? 'formal' : (informal ? 'informal' : ''),
+          instructions: (argResults!['instructions'] as String?) ?? '',
+          dryRun: dryRun,
+        )));
+  }
+}
+
+class StyleClearCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+  @override
+  String get name => 'clear';
+  @override
+  String get description => "Remove a locale's style; it then follows its parent, if any.";
+  @override
+  String get invocation => 'fl style clear <locale>';
+
+  @override
+  Future<int> run() {
+    final List<String> rest = argResults!.rest;
+    if (rest.isEmpty) throw UsageException('Missing <locale>.', usage);
+    return withGlossary((final GlossaryOperations g, final _) async =>
+        emit(await g.clearStyle(rest.first, dryRun: dryRun)));
+  }
+}
+
+/// `fl lock` / `fl unlock`: keys that are never translated.
+class LockCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+  LockCommand({required this.lock});
+
+  final bool lock;
+
+  @override
+  String get name => lock ? 'lock' : 'unlock';
+  @override
+  String get description => lock
+      ? 'Never translate these keys: every locale shows the base text as '
+          'written (a URL, a code sample, a name). Same as Xcode\'s '
+          '"shouldTranslate": false.'
+      : 'Translate these keys again (then run `fl retranslate`).';
+  @override
+  String get invocation => 'fl $name <key> [<key> ...]';
+
+  @override
+  Future<int> run() {
+    final List<String> rest = argResults!.rest;
+    if (rest.isEmpty) throw UsageException('Missing <key>.', usage);
+    return withGlossary((final GlossaryOperations g, final _) async =>
+        emit(await g.lock(rest, on: lock, dryRun: dryRun)));
+  }
+}
+
