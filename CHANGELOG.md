@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.14.3] - 2026-11-01
+### Changed
+- `fl edit` sends a String Catalog value as typed (`%@`, `%1$lld`) and lets the service convert it,
+  plural forms included, so the CLI, the dashboard and the API share one conversion.
+
 ## [1.14.2] - 2026-11-01
 ### Fixed
 - `fl edit` on a String Catalog key takes the value as written in Xcode (`%@`, `%1$lld`) and stores

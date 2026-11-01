@@ -277,13 +277,6 @@ void main() {
     dir.deleteSync(recursive: true);
   });
 
-  test('printf in an iOS edit becomes the service argument names', () {
-    expect(printfToArgs('Ouvrir %@ épuré'), 'Ouvrir {arg1} épuré');
-    expect(printfToArgs('%2\$@ à %1\$lld, 100%%'), '{arg2} à {arg1}, 100%');
-    expect(printfToArgs('%lld de %lld'), '{arg1} de {arg2}');
-    expect(printfToArgs('Sans argument'), 'Sans argument');
-  });
-
   test('fl edit accepts %@ on a key whose base speaks {arg1}', () async {
     final List<Map<String, dynamic>> bodies = <Map<String, dynamic>>[];
     final MockClient mock = MockClient((final http.Request req) async {
@@ -323,12 +316,14 @@ void main() {
       bodies.add(jsonDecode(req.body) as Map<String, dynamic>);
       return http.Response(jsonEncode(<String, dynamic>{'id': 2, 'value': 'x'}), 200);
     });
+    // Sent as typed: the service is the one place that converts it.
     final OpResult r = await _ops(mock, <String>[]).edit('Clean %@', 'fr', value: 'Ouvrir %@ épuré');
     expect(r.ok, isTrue, reason: r.message);
-    expect(bodies.single['value'], 'Ouvrir {arg1} épuré');
+    expect(bodies.single['value'], 'Ouvrir %@ épuré');
 
-    await _ops(mock, <String>[]).edit('Clean %@', 'fr', value: '50% off {arg1}');
-    expect(bodies.last['value'], '50% off {arg1}');
+    final OpResult dropped = await _ops(mock, <String>[]).edit('Clean %@', 'fr', value: 'Ouvrir épuré');
+    expect(dropped.ok, isFalse);
+    expect(dropped.message, contains('must keep {arg1} (%@ in Xcode)'));
 
     await _ops(mock, <String>[]).edit('Clean %@', 'en', description: '', clearDescription: true);
     expect(bodies.last['description'], '');

@@ -780,13 +780,21 @@ class Operations {
     return (phrase: phrase, hint: hint, data: data);
   }
 
-  static bool _isArgName(final String name) => RegExp(r'^arg\d+$').hasMatch(name);
+  /// Whether [value] carries catalog argument [name] in Xcode's form: its
+  /// spec plain (`%@`) or numbered (`%2$@` for `arg2`).
+  static bool _keepsSpec(final String value, final String name, final Object? meta) {
+    final RegExpMatch? arg = RegExp(r'^arg(\d+)$').firstMatch(name);
+    final Object? spec = meta is Map ? meta['spec'] : null;
+    if (arg == null || spec is! String || !spec.startsWith('%')) return false;
+    final String text = value.replaceAll('%%', '');
+    return text.contains(spec) || text.contains('%${arg.group(1)}\$${spec.substring(1)}');
+  }
 
   /// Edit one locale's value (or plural/placeholder fields) of an existing key.
   Future<OpResult> edit(
     final String key,
     final String locale, {
-    String? value,
+    final String? value,
     final bool? isPluralEnabled,
     final String? zeroCase,
     final String? singularCase,
@@ -806,22 +814,16 @@ class Operations {
     final int id = project.resolveId(key, locale, flavorName: flavor);
     final String full = project.canonicalKey(key, flavorName: flavor);
     final TranslationEntry? base = project.baseEntry(full, flavorName: flavor);
-    // An iOS developer writes `%@`, as in the catalog; the service stores the
-    // same argument as `{arg1}`. Refusing `%@` asked them to learn the
-    // internal form.
-    if (value != null && base != null && base.placeholders.keys.any(_isArgName)) {
-      final ({String text, List<String> specs}) c = printfToArgsWithSpecs(value);
-      // Only the key's own specifiers: "50% off" reads as `% o` to printf.
-      final List<String> wanted = <String>[
-        for (final Object? meta in base.placeholders.values)
-          if (meta is Map && meta['spec'] is String) meta['spec'] as String,
-      ]..sort();
-      if ((List<String>.of(c.specs)..sort()).join() == wanted.join()) value = c.text;
-    }
     if (value != null && base != null && !base.isPluralEnabled) {
+      // A String Catalog key's arguments are `{argN}` on the service and `%@`
+      // in Xcode. Either form keeps the argument; the service converts the
+      // Xcode one, so it is sent as typed.
       final List<String> dropped = <String>[
-        for (final String name in base.placeholders.keys)
-          if (!value.contains('{$name}')) '{$name}',
+        for (final MapEntry<String, dynamic> p in base.placeholders.entries)
+          if (!value.contains('{${p.key}}') && !_keepsSpec(value, p.key, p.value))
+            p.value is Map && (p.value as Map)['spec'] is String
+                ? '{${p.key}} (${(p.value as Map)['spec']} in Xcode)'
+                : '{${p.key}}',
       ];
       if (dropped.isNotEmpty) {
         return OpResult(
