@@ -156,6 +156,9 @@ void main() {
 
     expect(r.message, contains('The 2 new key(s) hold the base text in the 2 other locale(s)'));
     expect(r.message, contains('(empty key)'));
+
+    final OpResult overwritten = await _ops(mock, <String>[]).importArb(_arb, overwrite: true);
+    expect(overwritten.message, isNot(contains('hold the base text')));
   });
 
   test('languages add reports each locale as it lands', () async {

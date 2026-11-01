@@ -493,7 +493,9 @@ class Operations {
     if (!translate) {
       final int written = (outcome.data['written'] as int?) ?? 0;
       final int others = fl.languages.length - 1;
-      final String untranslated = written > 0 && others > 0 && targetsBaseLanguage
+      // Only an import that creates keys leaves base text in other locales;
+      // --overwrite rewrites the base row and leaves translations alone.
+      final String untranslated = written > 0 && others > 0 && targetsBaseLanguage && !overwrite
           ? ' The $written new key(s) hold the base text in the $others other '
               'locale(s) until translated: run this import again with --translate.'
           : '';

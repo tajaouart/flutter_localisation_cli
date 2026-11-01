@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.14.1] - 2026-11-01
+### Fixed
+- An import with `--overwrite` no longer says its keys still hold the base text in other locales;
+  overwriting the base text leaves translations alone.
+
 ## [1.14.0] - 2026-11-01
 ### Changed
 - **`fl import --translate` no longer waits on the request.** The server queues the translation
