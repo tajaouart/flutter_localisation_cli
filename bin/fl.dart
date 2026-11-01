@@ -757,6 +757,9 @@ class EditCommand extends Command<int> with _ApiCommand {
         isPlaceholdersEnabled: placeholders == null ? null : true,
         placeholders: placeholders,
         description: argResults!['description'] as String?,
+        // `--description ""` typed on purpose clears it.
+        clearDescription: argResults!.wasParsed('description') &&
+            (argResults!['description'] as String).isEmpty,
         isPluralEnabled: argResults!['plural'] as bool?,
         singularCase: argResults!['singular-case'] as String?,
         pluralCase: argResults!['plural-case'] as String?,

@@ -780,11 +780,13 @@ class Operations {
     return (phrase: phrase, hint: hint, data: data);
   }
 
+  static bool _isArgName(final String name) => RegExp(r'^arg\d+$').hasMatch(name);
+
   /// Edit one locale's value (or plural/placeholder fields) of an existing key.
   Future<OpResult> edit(
     final String key,
     final String locale, {
-    final String? value,
+    String? value,
     final bool? isPluralEnabled,
     final String? zeroCase,
     final String? singularCase,
@@ -796,6 +798,7 @@ class Operations {
     final bool? isPlaceholdersEnabled,
     final Map<String, dynamic>? placeholders,
     final String? description,
+    final bool clearDescription = false,
     final bool? isChecked,
     final bool dryRun = false,
   }) async {
@@ -803,6 +806,18 @@ class Operations {
     final int id = project.resolveId(key, locale, flavorName: flavor);
     final String full = project.canonicalKey(key, flavorName: flavor);
     final TranslationEntry? base = project.baseEntry(full, flavorName: flavor);
+    // An iOS developer writes `%@`, as in the catalog; the service stores the
+    // same argument as `{arg1}`. Refusing `%@` asked them to learn the
+    // internal form.
+    if (value != null && base != null && base.placeholders.keys.any(_isArgName)) {
+      final ({String text, List<String> specs}) c = printfToArgsWithSpecs(value);
+      // Only the key's own specifiers: "50% off" reads as `% o` to printf.
+      final List<String> wanted = <String>[
+        for (final Object? meta in base.placeholders.values)
+          if (meta is Map && meta['spec'] is String) meta['spec'] as String,
+      ]..sort();
+      if ((List<String>.of(c.specs)..sort()).join() == wanted.join()) value = c.text;
+    }
     if (value != null && base != null && !base.isPluralEnabled) {
       final List<String> dropped = <String>[
         for (final String name in base.placeholders.keys)
@@ -835,6 +850,7 @@ class Operations {
       isPlaceholdersEnabled: isPlaceholdersEnabled,
       placeholders: placeholders,
       description: description,
+      clearDescription: clearDescription,
       isChecked: isChecked,
     );
     return OpResult(true, 'Updated "$full" [$locale].', <String, dynamic>{'key': full, 'locale': locale});

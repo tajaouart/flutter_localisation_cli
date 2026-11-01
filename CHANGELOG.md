@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.2] - 2026-11-01
+### Fixed
+- `fl edit` on a String Catalog key takes the value as written in Xcode (`%@`, `%1$lld`) and stores
+  it with the service's argument names, instead of refusing anything but `{arg1}`.
+- `fl edit --description ""` clears the description. An empty value from a tool call is still
+  ignored, so an agent filling unused arguments cannot wipe descriptions.
+
 ## [1.14.1] - 2026-11-01
 ### Fixed
 - An import with `--overwrite` no longer says its keys still hold the base text in other locales;

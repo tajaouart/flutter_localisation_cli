@@ -276,4 +276,63 @@ void main() {
             contains('"flavor" must be a string'))));
     dir.deleteSync(recursive: true);
   });
+
+  test('printf in an iOS edit becomes the service argument names', () {
+    expect(printfToArgs('Ouvrir %@ épuré'), 'Ouvrir {arg1} épuré');
+    expect(printfToArgs('%2\$@ à %1\$lld, 100%%'), '{arg2} à {arg1}, 100%');
+    expect(printfToArgs('%lld de %lld'), '{arg1} de {arg2}');
+    expect(printfToArgs('Sans argument'), 'Sans argument');
+  });
+
+  test('fl edit accepts %@ on a key whose base speaks {arg1}', () async {
+    final List<Map<String, dynamic>> bodies = <Map<String, dynamic>>[];
+    final MockClient mock = MockClient((final http.Request req) async {
+      if (req.url.path == '/api/projects/7/') {
+        return http.Response(
+            jsonEncode(<String, dynamic>{
+              'id': 7,
+              'name': 'P',
+              'flavors': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'id': 3,
+                  'name': 'default',
+                  'languages': <Map<String, dynamic>>[
+                    <String, dynamic>{
+                      'code': 'en',
+                      'is_base_language': true,
+                      'translations': <Map<String, dynamic>>[
+                        <String, dynamic>{
+                          'id': 1, 'key': 'Clean %@', 'value': 'Clean {arg1}',
+                          'placeholders': <String, dynamic>{'arg1': <String, dynamic>{'type': 'String', 'spec': '%@'}},
+                        },
+                      ],
+                    },
+                    <String, dynamic>{
+                      'code': 'fr',
+                      'is_base_language': false,
+                      'translations': <Map<String, dynamic>>[
+                        <String, dynamic>{'id': 2, 'key': 'Clean %@', 'value': 'Épuré {arg1}'},
+                      ],
+                    },
+                  ],
+                },
+              ],
+            }),
+            200);
+      }
+      bodies.add(jsonDecode(req.body) as Map<String, dynamic>);
+      return http.Response(jsonEncode(<String, dynamic>{'id': 2, 'value': 'x'}), 200);
+    });
+    final OpResult r = await _ops(mock, <String>[]).edit('Clean %@', 'fr', value: 'Ouvrir %@ épuré');
+    expect(r.ok, isTrue, reason: r.message);
+    expect(bodies.single['value'], 'Ouvrir {arg1} épuré');
+
+    await _ops(mock, <String>[]).edit('Clean %@', 'fr', value: '50% off {arg1}');
+    expect(bodies.last['value'], '50% off {arg1}');
+
+    await _ops(mock, <String>[]).edit('Clean %@', 'en', description: '', clearDescription: true);
+    expect(bodies.last['description'], '');
+    await _ops(mock, <String>[]).edit('Clean %@', 'en', description: '');
+    expect(bodies.last.containsKey('description'), isFalse);
+  });
 }

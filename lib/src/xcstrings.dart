@@ -70,3 +70,27 @@ List<String> localOnlyCatalogKeys(
       if (key.isNotEmpty && !serviceKeys.contains(key)) key,
   ]..sort();
 }
+
+final RegExp _printfSpec = RegExp(
+    r'%(?:(\d+)\$)?[-+ 0#]*(?:\d+|\*)?(?:\.(?:\d+|\*))?(?:hh|h|ll|l|q|z|t|L)?([@diouxXfFeEgGaAcsSpC%])');
+
+/// `{argN}` for every printf specifier, numbered the way the service numbers
+/// a catalog on import: a positional `%2$@` is `{arg2}`, an unnumbered one
+/// takes the next free slot. `%%` becomes `%`.
+String printfToArgs(final String text) => printfToArgsWithSpecs(text).text;
+
+/// [printfToArgs], plus the specifiers it replaced (`%@`, `%lld`), unnumbered.
+({String text, List<String> specs}) printfToArgsWithSpecs(final String text) {
+  final List<int> seen = <int>[];
+  final List<String> specs = <String>[];
+  final String out = text.replaceAllMapped(_printfSpec, (final Match m) {
+    if (m.group(2) == '%') return '%';
+    specs.add(m.group(0)!.replaceFirst(RegExp(r'^%\d+\$'), '%'));
+    final int index = m.group(1) != null
+        ? int.parse(m.group(1)!)
+        : (seen.isEmpty ? 0 : seen.reduce((final int a, final int b) => a > b ? a : b)) + 1;
+    seen.add(index);
+    return '{arg$index}';
+  });
+  return (text: out, specs: specs);
+}

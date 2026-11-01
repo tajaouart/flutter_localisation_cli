@@ -550,6 +550,7 @@ class ManagementClient {
     final bool? isPlaceholdersEnabled,
     final Map<String, dynamic>? placeholders,
     final String? description,
+    final bool clearDescription = false,
     final bool? isChecked,
   }) async {
     final Map<String, dynamic> body = <String, dynamic>{
@@ -569,7 +570,10 @@ class ManagementClient {
       if (isPlaceholdersEnabled != null)
         'is_placeholders_enabled': isPlaceholdersEnabled,
       if (placeholders != null) 'placeholders': placeholders,
-      if (description != null && description.isNotEmpty) 'description': description,
+      // An empty one is dropped: tool callers send "" for arguments they do not
+      // use. Clearing is its own flag.
+      if (clearDescription) 'description': ''
+      else if (description != null && description.isNotEmpty) 'description': description,
       if (isChecked != null) 'is_checked': isChecked,
     };
     final http.Response res =
