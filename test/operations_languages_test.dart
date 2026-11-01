@@ -56,6 +56,8 @@ void main() {
     String? body;
     var call = 0;
     final MockClient mock = MockClient((final http.Request req) async {
+      // A server from before the bulk endpoint: the CLI walks the list.
+      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
       hits.add('${req.method} ${req.url.path}');
       if (req.url.path == '/api/projects/7/') {
         call++;
@@ -91,6 +93,8 @@ void main() {
   test('addLanguage FAILS when auto-translate back-filled nothing', () async {
     var call = 0;
     final MockClient mock = MockClient((final http.Request req) async {
+      // A server from before the bulk endpoint: the CLI walks the list.
+      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
       if (req.url.path == '/api/projects/7/') {
         call++;
         return http.Response(
@@ -121,6 +125,8 @@ void main() {
   test('addLanguage refuses a locale the flavor already has', () async {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
+      // A server from before the bulk endpoint: the CLI walks the list.
+      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
       hits.add('${req.method} ${req.url.path}');
       return http.Response(
         _project(keys: 1, extra: <String, List<String>>{'id': <String>['x']}),
@@ -144,6 +150,8 @@ void main() {
     String? body;
     var call = 0;
     final MockClient mock = MockClient((final http.Request req) async {
+      // A server from before the bulk endpoint: the CLI walks the list.
+      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
       hits.add('${req.method} ${req.url.path}');
       if (req.url.path == '/api/projects/7/') {
         call++;
@@ -176,6 +184,8 @@ void main() {
       () async {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
+      // A server from before the bulk endpoint: the CLI walks the list.
+      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
       hits.add('${req.method} ${req.url.path}');
       return http.Response(
         _project(keys: 1, extra: <String, List<String>>{'pt-BR': <String>['x']}),
@@ -198,6 +208,8 @@ void main() {
       () async {
     var call = 0;
     final MockClient mock = MockClient((final http.Request req) async {
+      // A server from before the bulk endpoint: the CLI walks the list.
+      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
       if (req.url.path == '/api/projects/7/') {
         call++;
         return http.Response(
@@ -231,6 +243,8 @@ void main() {
   test('addLanguage dry run resolves but writes nothing', () async {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
+      // A server from before the bulk endpoint: the CLI walks the list.
+      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
       hits.add('${req.method} ${req.url.path}');
       return http.Response(_project(keys: 5), 200);
     });
@@ -249,6 +263,8 @@ void main() {
   test('removeLanguage refuses to delete the base language', () async {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
+      // A server from before the bulk endpoint: the CLI walks the list.
+      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
       hits.add('${req.method} ${req.url.path}');
       return http.Response(_project(keys: 1), 200);
     });
@@ -266,6 +282,8 @@ void main() {
   test('removeLanguage deletes by the language row id', () async {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
+      // A server from before the bulk endpoint: the CLI walks the list.
+      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
       hits.add('${req.method} ${req.url.path}');
       if (req.url.path == '/api/projects/7/') {
         return http.Response(
@@ -295,6 +313,8 @@ void main() {
     final List<String> posted = <String>[];
     final Map<String, List<String>> present = <String, List<String>>{};
     final MockClient mock = MockClient((final http.Request req) async {
+      // A server from before the bulk endpoint: the CLI walks the list.
+      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
       if (req.url.path == '/api/projects/7/') {
         return http.Response(_project(keys: 1, extra: present), 200);
       }
@@ -324,6 +344,8 @@ void main() {
     final List<String> posted = <String>[];
     final Map<String, List<String>> present = <String, List<String>>{};
     final MockClient mock = MockClient((final http.Request req) async {
+      // A server from before the bulk endpoint: the CLI walks the list.
+      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
       if (req.url.path == '/api/projects/7/') {
         return http.Response(_project(keys: 1, extra: present), 200);
       }
@@ -348,6 +370,8 @@ void main() {
     // is the exact behaviour the bulk form exists to prevent.
     final List<String> posted = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
+      // A server from before the bulk endpoint: the CLI walks the list.
+      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
       if (req.url.path == '/api/projects/7/') {
         return http.Response(_project(keys: 1), 200);
       }

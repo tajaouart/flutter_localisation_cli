@@ -64,7 +64,9 @@ List<String> localOnlyCatalogKeys(
     return const <String>[];
   }
   return <String>[
+    // Xcode extracts Text("") as an empty key, which the service never
+    // stores. Counting it blocked every export with an unnamed "1 key".
     for (final String key in catalogKeys(decoded))
-      if (!serviceKeys.contains(key)) key,
+      if (key.isNotEmpty && !serviceKeys.contains(key)) key,
   ]..sort();
 }

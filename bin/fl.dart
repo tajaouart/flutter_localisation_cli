@@ -167,6 +167,10 @@ mixin _ApiCommand on Command<int> {
     return ManagementClient(baseUrl: cfg.baseUrl, token: creds.token);
   }
 
+  /// Live progress goes to stderr, so `--json` output on stdout stays clean.
+  void Function(String)? get _progressSink =>
+      jsonOut ? null : (final String line) => stderr.writeln(line);
+
   /// Resolve the target project (by id/name, or the sole project) and build [Operations].
   Future<({ManagementClient client, Operations ops, String projectName})> build(
     final ProjectConfig cfg,
@@ -179,7 +183,8 @@ mixin _ApiCommand on Command<int> {
     if (projectArg == null && cfg.projectId != null) {
       return (
         client: client,
-        ops: Operations(client, cfg.projectId!, flavor: flavor),
+        ops: Operations(client, cfg.projectId!, flavor: flavor)
+          ..onProgress = _progressSink,
         projectName: cfg.project ?? 'project ${cfg.projectId}',
       );
     }
@@ -193,7 +198,8 @@ mixin _ApiCommand on Command<int> {
         await resolver.resolve(project: projectArg, flavor: flavor);
     return (
       client: client,
-      ops: Operations(client, target.projectId, flavor: target.flavor),
+      ops: Operations(client, target.projectId, flavor: target.flavor)
+        ..onProgress = _progressSink,
       projectName: target.projectName,
     );
   }
@@ -1112,7 +1118,8 @@ class LanguagesAddCommand extends Command<int> with _ApiCommand {
       abbr: 't',
       negatable: false,
       help: 'AI-fill every existing key for the new locale, server-side, in '
-          'this same request — and keep translating keys added later.',
+          'this same request. Keys added later are not translated by '
+          'themselves: import them with `fl import <file> --translate`.',
     );
   }
 
@@ -1146,13 +1153,16 @@ class LanguagesAddCommand extends Command<int> with _ApiCommand {
         dryRun: dryRun,
       );
       if (jsonOut) return emit(r);
-      stdout.writeln(r.message);
-      for (final dynamic row
-          in (r.data['results'] as List<dynamic>?) ?? const <dynamic>[]) {
-        final Map<String, dynamic> m = row as Map<String, dynamic>;
-        stdout.writeln('  ${m['ok'] == true ? '✓' : '✗'} ${m['locale']}  '
-            '${m['message'] ?? ''}');
+      // A real run already printed each locale as it landed.
+      if (dryRun) {
+        for (final dynamic row
+            in (r.data['results'] as List<dynamic>?) ?? const <dynamic>[]) {
+          final Map<String, dynamic> m = row as Map<String, dynamic>;
+          stdout.writeln('  ${m['ok'] == true ? '✓' : '✗'} ${m['locale']}  '
+              '${m['message'] ?? ''}');
+        }
       }
+      stdout.writeln(r.message);
       return r.ok ? 0 : 1;
     } finally {
       built.client.close();

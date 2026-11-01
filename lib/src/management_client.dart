@@ -595,7 +595,8 @@ class ManagementClient {
   /// Add a language to a flavor.
   ///
   /// With [autoTranslate] the backend AI-fills every EXISTING key for the new
-  /// locale in one server-side pass, and keeps translating keys added later.
+  /// locale in one server-side pass. Keys added later are not translated by
+  /// themselves; the import that adds them has to ask.
   /// That single call is what replaces walking the key list client-side, so it
   /// is the only sane way to populate a new locale.
   Future<Map<String, dynamic>> addLanguage(
@@ -616,6 +617,26 @@ class ManagementClient {
     );
     return _json(res);
   }
+
+  /// Add many locales in ONE request: `{added, results: [{code, status:
+  /// added|exists|error, message?}], translation?: {status: queued, job_id,
+  /// status_url, pending}}`. Servers before 2026-11-01 answer 404.
+  Future<Map<String, dynamic>> addLanguages(
+    final int projectId,
+    final int flavorId,
+    final List<String> languageCodes, {
+    final bool autoTranslate = false,
+  }) async =>
+      _json(await _send(
+        'POST',
+        '/api/add-languages/',
+        body: <String, dynamic>{
+          'project': projectId,
+          'flavor': flavorId,
+          'languageCodes': languageCodes,
+          'autoTranslate': autoTranslate,
+        },
+      ));
 
   /// Remove a language (and its translations) from a flavor.
   Future<void> deleteLanguage(final int languageId) async {
@@ -668,6 +689,7 @@ class ManagementClient {
     final bool overwriteExisting = false,
     final bool applyToAllLanguages = true,
     final bool autoTranslate = false,
+    final bool translateAsync = false,
     final String? fileName,
   }) async {
     final Uri uri = _uri('/api/project/$projectId/import-arb/');
@@ -687,6 +709,9 @@ class ManagementClient {
           // Server-side fill, so importing and translating are ONE round trip
           // and the client never has to rediscover which rows it just made.
           ..fields['auto_translate'] = autoTranslate.toString()
+          // Queued on the server instead of filled inside this request, which
+          // the gateway cut at 120s while the import had in fact landed.
+          ..fields['translate_async'] = translateAsync.toString()
           ..files.add(http.MultipartFile.fromString(
             'arb_file',
             arbContent,
@@ -718,6 +743,11 @@ class ManagementClient {
       throw _errorFor('POST', path, res);
     }
   }
+
+  /// A queued translation job: `{state: queued|running|done|failed|cancelled,
+  /// progress?: {done, total}, results?: {...}, error?}`.
+  Future<Map<String, dynamic>> translationJob(final String statusUrl) async =>
+      _json(await _send('GET', statusUrl));
 
   // ------------------------------------------------------------------------- //
   // Glossary, language styles, never-translate keys

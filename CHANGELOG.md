@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.14.0] - 2026-11-01
+### Changed
+- **`fl import --translate` no longer waits on the request.** The server queues the translation
+  and the CLI follows the job, printing how far it is. Large imports used to end on "Gateway
+  Time-out" while the keys had in fact landed. Older servers keep the previous behaviour.
+- **`fl languages add` adds every locale in one request** and follows the translation as a job
+  with progress. 36 locales were 36 requests, eleven silent minutes with `--auto-translate`, and
+  without it the API throttle refused everything past twenty. A single locale, and servers
+  without the bulk endpoint, keep the per-locale call, now printed as each one lands.
+- Strings that come back identical to the source (names, loanwords) are reported apart from real
+  failures, with what to do about them.
+- An import without `--translate` says when its new keys still hold the base text in other
+  locales.
+### Fixed
+- `"project": 129` in `flutterlocalisation.json` is read as the project id instead of crashing
+  with a cast error; a value of the wrong type names the field.
+- `fl translate` no longer lists en-GB, en-US and the other variants of the base language as
+  "came back identical to the source"; reading like the base is their correct translation.
+- `fl export` no longer refuses to run because of the empty key Xcode extracts from `Text("")`.
+- `fl languages add --auto-translate` no longer claims that keys added later are translated by
+  themselves; they are translated by the import that adds them.
+
 ## [1.13.0] - 2026-10-27
 ### Added
 - **Glossary.** `fl glossary list|add|remove|import|export|suggest|apply`. A term is kept as

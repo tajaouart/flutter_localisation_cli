@@ -97,4 +97,33 @@ void main() {
     expect(r.data['failed'], isEmpty);
     expect(r.message, contains('3/3'));
   });
+
+  test('an English variant that reads like English is translated, not unchanged', () async {
+    final Map<String, dynamic> project = _project(esValue: 'Hola');
+    ((project['flavors'] as List<dynamic>).first['languages'] as List<dynamic>).add(<String, dynamic>{
+      'code': 'en-GB',
+      'is_base_language': false,
+      'translations': <Map<String, dynamic>>[
+        <String, dynamic>{'id': 5, 'key': 'greeting', 'value': 'Hello'},
+      ],
+    });
+    final MockClient mock = MockClient((final http.Request req) async {
+      if (req.url.path == '/api/ai_batch_translate/') {
+        return http.Response(
+            jsonEncode(<String, dynamic>{
+              'status': 'success',
+              'results': <String, dynamic>{'success_count': 4, 'failed_count': 0, 'failed': <dynamic>[]},
+            }),
+            200);
+      }
+      return http.Response(jsonEncode(project), 200);
+    });
+    final OpResult r = await Operations(
+            ManagementClient(baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock), 9,
+            flavor: 'default')
+        .translate('greeting', all: true);
+    expect(r.data['translated'], 4);
+    expect(r.data['unchanged'], isEmpty);
+    expect(r.message, isNot(contains('unchanged')));
+  });
 }

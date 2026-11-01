@@ -84,6 +84,13 @@ class Operations {
   /// as a way around it.
   final CallBudget budget;
 
+  /// Where a long run reports how far it is. Adding 35 locales took eleven
+  /// minutes with nothing on screen until the very end.
+  void Function(String line)? onProgress;
+
+  /// Between two polls of a queued translation job.
+  Duration jobPollInterval = const Duration(seconds: 3);
+
   /// Rows per AI batch request — one full parallel round on the server.
   ///
   /// Sized against what the endpoint actually does rather than guessed.
@@ -477,13 +484,20 @@ class Operations {
         // which is what the fallback below keys off — so this stays correct
         // against a deployment that predates it.
         autoTranslate: translate,
+        translateAsync: translate,
         fileName: fileName);
 
     final ({String phrase, String hint, Map<String, dynamic> data}) outcome =
         _importOutcome(importResponse, keyCount);
 
     if (!translate) {
-      return OpResult(true, '${outcome.phrase} into "${fl.name}".${outcome.hint}',
+      final int written = (outcome.data['written'] as int?) ?? 0;
+      final int others = fl.languages.length - 1;
+      final String untranslated = written > 0 && others > 0 && targetsBaseLanguage
+          ? ' The $written new key(s) hold the base text in the $others other '
+              'locale(s) until translated: run this import again with --translate.'
+          : '';
+      return OpResult(true, '${outcome.phrase} into "${fl.name}".${outcome.hint}$untranslated',
           <String, dynamic>{
             'imported': keyCount,
             ...outcome.data,
@@ -496,17 +510,29 @@ class Operations {
     // which rows were new. It declines only when the job is too big to finish
     // inside a request, in which case the chunked client-side path below is
     // exactly the right fallback.
-    final Object? serverSide = importResponse['translation'];
+    Object? serverSide = importResponse['translation'];
+    if (serverSide is Map<String, dynamic> && serverSide['status'] == 'queued') {
+      serverSide = await _awaitTranslationJob(serverSide);
+    }
     if (serverSide is Map<String, dynamic> &&
         serverSide['status'] != 'too_large') {
       final int filled = (serverSide['translated'] as int?) ?? 0;
       final int failedRows = (serverSide['failed'] as int?) ?? 0;
+      final int identical = (serverSide['identical'] as int?) ?? 0;
+      final int realFailures = failedRows - identical;
       final bool ok = serverSide['status'] != 'error';
+      final List<String> notes = <String>[
+        if (identical > 0)
+          '$identical came back identical to the source and were left for '
+              'review (names and loanwords read the same; lock or add them to '
+              'the glossary so they are not sent again)',
+        if (realFailures > 0) '$realFailures failed',
+      ];
       return OpResult(
         ok,
         ok
             ? '${outcome.phrase} and translated $filled locale-string(s)'
-                '${failedRows > 0 ? ' ($failedRows failed)' : ''}.${outcome.hint}'
+                '${notes.isEmpty ? '' : '; ${notes.join('; ')}'}.${outcome.hint}'
             : (serverSide['message'] as String?) ??
                 '${outcome.phrase}; translating them failed.',
         <String, dynamic>{
@@ -514,6 +540,7 @@ class Operations {
           ...outcome.data,
           'translated': filled,
           'failed_count': failedRows,
+          'identical_count': identical,
           'server_side': true,
         },
       );
@@ -642,6 +669,48 @@ class Operations {
         'unchanged': _unchangedJson(result.unchanged),
       },
     );
+  }
+
+  /// Poll a translation the import queued until it ends, reporting progress,
+  /// and answer in the shape of the synchronous `translation` block.
+  Future<Map<String, dynamic>> _awaitTranslationJob(
+      final Map<String, dynamic> queued) async {
+    final String url = queued['status_url'] as String;
+    final int pending = (queued['pending'] as num?)?.toInt() ?? 0;
+    onProgress?.call('Translating $pending locale-string(s) on the server...');
+    String last = '';
+    while (true) {
+      final Map<String, dynamic> job = await client.translationJob(url);
+      final String state = '${job['state']}';
+      if (state == 'done') {
+        final Map<String, dynamic> r =
+            (job['results'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+        final int failed = (r['failed_count'] as num?)?.toInt() ?? 0;
+        return <String, dynamic>{
+          'status': failed == 0 ? 'success' : 'partial',
+          'translated': (r['success_count'] as num?)?.toInt() ?? 0,
+          'failed': failed,
+          'identical': (r['identical_count'] as num?)?.toInt() ?? 0,
+          'pending': pending,
+        };
+      }
+      if (state == 'failed' || state == 'cancelled') {
+        return <String, dynamic>{
+          'status': 'error',
+          'pending': pending,
+          'message': 'Imported the keys, but the translation job $state'
+              '${job['error'] != null ? ': ${job['error']}' : ''}. The keys are '
+              'created; run the import again with --translate to fill them.',
+        };
+      }
+      final Object? progress = job['progress'];
+      final String line = progress is Map<String, dynamic>
+          ? 'Translating: ${progress['done']}/${progress['total']}'
+          : 'Translation job $state...';
+      if (line != last) onProgress?.call(line);
+      last = line;
+      await Future<void>.delayed(jobPollInterval);
+    }
   }
 
   /// What an import actually changed, from the server's `import` block.
@@ -853,7 +922,21 @@ class Operations {
     if (dryRun) {
       return OpResult(true, 'DRY RUN: would translate ${ids.length} locale(s) for "$key".');
     }
-    final VerifyOutcome result = await _translateAndVerify(ids);
+    final VerifyOutcome raw = await _translateAndVerify(ids);
+    // en-GB of an en string is meant to read the same; listing it as
+    // "identical to the source" told the caller something was wrong.
+    final List<({int id, String key, String locale})> variants = <({int id, String key, String locale})>[
+      for (final ({int id, String key, String locale}) u in raw.unchanged)
+        if (baseCode != null && isVariantOf(u.locale, baseCode)) u,
+    ];
+    final VerifyOutcome result = (
+      translated: raw.translated + variants.length,
+      failed: raw.failed,
+      unchanged: <({int id, String key, String locale})>[
+        for (final ({int id, String key, String locale}) u in raw.unchanged)
+          if (!variants.contains(u)) u,
+      ],
+    );
     return OpResult(
       result.failed.isEmpty,
       'Translated ${result.translated}/${ids.length} locale(s) for "$key"'
@@ -1173,12 +1256,25 @@ class Operations {
         },
       );
 
+    if (!dryRun && ordered.length > 1) {
+      final OpResult? bulk = await _addLanguagesInOneRequest(ordered, autoTranslate);
+      if (bulk != null) return bulk;
+    }
+
     final List<Map<String, dynamic>> results = <Map<String, dynamic>>[];
     final List<String> failures = <String>[];
+    if (!dryRun && ordered.length > 1) {
+      onProgress?.call('Adding ${ordered.length} locale(s)'
+          '${autoTranslate ? ', each translated as it is added' : ''}...');
+    }
     for (final String code in ordered) {
       try {
         final OpResult r = await _addOneLanguage(code,
             autoTranslate: autoTranslate, dryRun: dryRun);
+        if (!dryRun) {
+          onProgress?.call('  [${results.length + 1}/${ordered.length}] '
+              '${r.ok ? '✓' : '✗'} ${r.message}');
+        }
         results.add(<String, dynamic>{
           'locale': canonicalizeOrKeep(code),
           'ok': r.ok,
@@ -1212,6 +1308,62 @@ class Operations {
       '${dryRun ? 'DRY RUN: would add' : 'Added'} $ok/${ordered.length} locale(s).',
       <String, dynamic>{'results': results, if (failures.isNotEmpty) 'failures': failures},
     );
+  }
+
+  /// Every locale in one request, its translation followed as a job. Null when
+  /// the server predates the bulk endpoint, so the caller walks the list.
+  Future<OpResult?> _addLanguagesInOneRequest(
+      final List<String> ordered, final bool autoTranslate) async {
+    final ProjectData project = await client.getProject(projectId);
+    final FlavorData f = project.flavor(flavor);
+    final Map<String, dynamic> response;
+    try {
+      response = await client.addLanguages(projectId, f.id,
+          ordered.map(canonicalizeOrKeep).toList(), autoTranslate: autoTranslate);
+    } on ApiException catch (e) {
+      if (e.statusCode == 404 || e.statusCode == 405) return null;
+      rethrow;
+    }
+    final List<Map<String, dynamic>> results = <Map<String, dynamic>>[
+      for (final Object? r in (response['results'] as List?) ?? const <Object?>[])
+        if (r is Map<String, dynamic>)
+          <String, dynamic>{
+            'locale': r['code'],
+            'ok': r['status'] != 'error',
+            'message': switch (r['status']) {
+              'added' => 'Added "${r['code']}" to "${f.name}".',
+              'exists' => 'Locale "${r['code']}" is already on flavor "${f.name}".',
+              _ => '${r['message'] ?? 'refused'}',
+            },
+          },
+    ];
+    for (final Map<String, dynamic> r in results) {
+      onProgress?.call('  ${r['ok'] == true ? '✓' : '✗'} ${r['message']}');
+    }
+    final List<String> failures = <String>[
+      for (final Map<String, dynamic> r in results)
+        if (r['ok'] != true) '${r['locale']}: ${r['message']}',
+    ];
+    final int added = (response['added'] as num?)?.toInt() ?? 0;
+    String tail = '';
+    final Map<String, dynamic> data = <String, dynamic>{'results': results};
+    final Object? queued = response['translation'];
+    if (queued is Map<String, dynamic> && queued['status'] == 'queued') {
+      final Map<String, dynamic> t = await _awaitTranslationJob(queued);
+      if (t['status'] == 'error') {
+        failures.add('${t['message']}');
+      } else {
+        final int identical = (t['identical'] as int?) ?? 0;
+        final int failed = ((t['failed'] as int?) ?? 0) - identical;
+        tail = ' Translated ${t['translated']} locale-string(s)'
+            '${identical > 0 ? ', $identical identical to the source left for review' : ''}'
+            '${failed > 0 ? ', $failed failed' : ''}.';
+        data['translation'] = t;
+      }
+    }
+    if (failures.isNotEmpty) data['failures'] = failures;
+    return OpResult(failures.isEmpty,
+        'Added $added/${ordered.length} locale(s).$tail', data);
   }
 
   /// Backwards-compatible single-locale form. Prefer [addLanguages].

@@ -78,13 +78,22 @@ class ProjectConfig {
     } catch (e) {
       throw ConfigException('Could not parse ${file.path}: $e');
     }
-    final Object? pid = json['project_id'];
+    // `"project": 129` is the natural thing to write; it used to crash with a
+    // cast error. A number there is the project id.
+    final Object? rawProject = json['project'];
+    final Object? pid = json['project_id'] ?? (rawProject is int ? rawProject : null);
+    String? text(final String key) {
+      final Object? v = json[key];
+      if (v == null || v is String) return v as String?;
+      throw ConfigException('${file.path}: "$key" must be a string, not $v.');
+    }
+
     // `arb_dir` is written relative to the config file, which is how every
     // other project-local config in the ecosystem reads (l10n.yaml, pubspec).
     // Resolving it against the shell's cwd wrote 74 ARBs into whatever folder
     // the user happened to be in when they ran `fl pull --config …`.
     String? relativeToConfig(final String key) {
-      final String? raw = json[key] as String?;
+      final String? raw = text(key);
       if (raw == null) return null;
       return p.isAbsolute(raw)
           ? raw
@@ -92,10 +101,10 @@ class ProjectConfig {
     }
 
     return ProjectConfig(
-      baseUrl: (json['base_url'] as String?)?.trimRight() ?? kDefaultBaseUrl,
+      baseUrl: text('base_url')?.trimRight() ?? kDefaultBaseUrl,
       projectId: pid is int ? pid : null,
-      project: json['project'] as String?,
-      flavor: json['flavor'] as String?,
+      project: rawProject is int ? null : text('project'),
+      flavor: text('flavor'),
       arbDir: relativeToConfig('arb_dir'),
       xcstringsDir: relativeToConfig('xcstrings_dir'),
     );
