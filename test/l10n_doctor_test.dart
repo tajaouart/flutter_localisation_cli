@@ -137,4 +137,68 @@ void main() {
     write('l10n.yaml', 'arb-dir: lib/l10n\nsynthetic-package: false\n');
     expect(checkL10nSetup(tmp).issues, isEmpty);
   });
+
+  group('material_ui', () {
+    final String withMaterialUi = '${pubspec.replaceFirst(
+      '  intl: any\n',
+      '  intl: any\n  material_ui: ^1.11.0\n',
+    )}  generate: true\n';
+
+    test('flags the gen-l10n delegate list once material_ui is a dependency',
+        () {
+      write('pubspec.yaml', withMaterialUi);
+      write('l10n.yaml', 'arb-dir: lib/l10n\n');
+      write(
+        'lib/main.dart',
+        'MaterialApp(localizationsDelegates: '
+            'AppLocalizations.localizationsDelegates);\n',
+      );
+      write(
+        'lib/l10n/app_localizations.dart',
+        "import 'package:flutter_localizations/flutter_localizations.dart';\n",
+      );
+      final L10nDoctorReport r = checkL10nSetup(tmp, fix: true);
+      expect(codes(r), <String>['material-ui-delegates']);
+      expect(r.issues.single.file, 'lib/main.dart');
+      expect(r.issues.single.fixable, isFalse);
+      expect(r.ok, isFalse);
+    });
+
+    test('a comment naming the old list is not a use', () {
+      write('pubspec.yaml', withMaterialUi);
+      write('l10n.yaml', 'arb-dir: lib/l10n\n');
+      write(
+        'lib/main.dart',
+        '// Not AppLocalizations.localizationsDelegates: see above.\n'
+            '[AppLocalizations.delegate, ...GlobalMaterialLocalizations.delegates]\n',
+      );
+      expect(checkL10nSetup(tmp).issues, isEmpty);
+    });
+
+    test('quiet with the material_ui delegates', () {
+      write('pubspec.yaml', withMaterialUi);
+      write('l10n.yaml', 'arb-dir: lib/l10n\n');
+      write(
+        'lib/main.dart',
+        '[AppLocalizations.delegate, ...GlobalMaterialLocalizations.delegates]\n',
+      );
+      expect(checkL10nSetup(tmp).issues, isEmpty);
+    });
+
+    test('quiet without material_ui', () {
+      write('pubspec.yaml', '$pubspec  generate: true\n');
+      write('l10n.yaml', 'arb-dir: lib/l10n\n');
+      write('lib/main.dart', 'AppLocalizations.localizationsDelegates\n');
+      expect(checkL10nSetup(tmp).issues, isEmpty);
+    });
+  });
+
+  test('a flutter_gen string that is not an import is ignored', () {
+    write('pubspec.yaml', 'name: tool\n');
+    write(
+      'lib/doc.dart',
+      "const String old = 'package:flutter_gen/gen_l10n/';\n",
+    );
+    expect(checkL10nSetup(tmp).applicable, isFalse);
+  });
 }

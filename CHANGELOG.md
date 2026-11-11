@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.16.0] - 2026-11-11
+### Added
+- `fl doctor` warns when an app depends on `material_ui` but still passes the gen-l10n
+  `localizationsDelegates` list: those are the `flutter_localizations` delegates, which
+  `material_ui` widgets do not read, so they get no Material strings.
+
+### Fixed
+- `fl doctor` only counts `package:flutter_gen` in import and export lines, so a mention in a
+  string or a comment no longer marks the project as needing a fix.
+
 ## [1.15.0] - 2026-11-11
 ### Added
 - `fl doctor [--fix]` and the MCP tool `check_l10n_setup`: find and fix a gen-l10n setup current

@@ -1835,7 +1835,9 @@ class DoctorCommand extends Command<int> {
       stdout.writeln('Run flutter gen-l10n (or flutter pub get) to regenerate.');
       return 0;
     }
-    if (!fix) stdout.writeln('Run fl doctor --fix to apply.');
+    if (!fix && r.issues.any((final L10nIssue i) => i.fixable)) {
+      stdout.writeln('Run fl doctor --fix to apply the fixable ones.');
+    }
     return 1;
   }
 }

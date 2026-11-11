@@ -11,19 +11,29 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 class L10nIssue {
-  L10nIssue(this.code, this.message, {this.file, this.fixed = false});
+  L10nIssue(
+    this.code,
+    this.message, {
+    this.file,
+    this.fixable = true,
+    this.fixed = false,
+  });
 
-  /// `synthetic-package`, `generate-flag`, `dependencies` or
-  /// `flutter-gen-import`.
+  /// `synthetic-package`, `generate-flag`, `dependencies`,
+  /// `flutter-gen-import` or `material-ui-delegates`.
   final String code;
   final String message;
   final String? file;
+
+  /// Whether `--fix` can rewrite it; the rest needs a human.
+  final bool fixable;
   bool fixed;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'code': code,
         'message': message,
         if (file != null) 'file': file,
+        'fixable': fixable,
         'fixed': fixed,
       };
 }
@@ -44,7 +54,12 @@ class L10nDoctorReport {
       };
 }
 
-const String _flutterGenPrefix = 'package:flutter_gen/gen_l10n/';
+/// Only import and export directives: the prefix inside a string or a comment is
+/// not a dependency.
+final RegExp _flutterGenDirective = RegExp(
+  r"""^(\s*(?:import|export)\s+['"])package:flutter_gen/gen_l10n/""",
+  multiLine: true,
+);
 
 /// Runs every check under [root]; with [fix] it also rewrites the files.
 L10nDoctorReport checkL10nSetup(final Directory root,
@@ -124,6 +139,7 @@ L10nDoctorReport checkL10nSetup(final Directory root,
             if (missing.contains('intl')) 'flutter pub add intl:any',
           ].join(' && ')}',
           file: 'pubspec.yaml',
+          fixable: false,
         ),
       );
     }
@@ -148,18 +164,53 @@ L10nDoctorReport checkL10nSetup(final Directory root,
           : 'imports package:flutter_gen, which no longer exists. Use '
               '$replacement<file> instead.',
       file: rel,
+      fixable: replacement != null,
     );
     if (fix && replacement != null) {
       f.writeAsStringSync(
-        f.readAsStringSync().replaceAll(_flutterGenPrefix, replacement),
+        f.readAsStringSync().replaceAllMapped(
+              _flutterGenDirective,
+              (final Match m) => '${m[1]}$replacement',
+            ),
       );
       issue.fixed = true;
     }
     issues.add(issue);
   }
 
+  if (pubspec.existsSync() &&
+      RegExp(r'^\s+material_ui:', multiLine: true)
+          .hasMatch(pubspec.readAsStringSync())) {
+    for (final File f in _dartFiles(root, <String>['lib'])) {
+      final String rel = p.relative(f.path, from: root.path);
+      if (p.isWithin(genDir, rel) || p.dirname(rel) == genDir) continue;
+      if (_legacyDelegates.hasMatch(_withoutComments(f.readAsStringSync()))) {
+        issues.add(
+          L10nIssue(
+            'material-ui-delegates',
+            'uses the gen-l10n localizationsDelegates list, which registers '
+                'the flutter_localizations Material delegates. material_ui '
+                'widgets do not read those, so they get no Material strings. '
+                'Use [AppLocalizations.delegate, '
+                '...GlobalMaterialLocalizations.delegates] from material_ui.',
+            file: rel,
+            fixable: false,
+          ),
+        );
+      }
+    }
+  }
+
   return L10nDoctorReport(issues, applicable: true);
 }
+
+String _withoutComments(final String dart) =>
+    dart.replaceAll(RegExp(r'^\s*//.*$', multiLine: true), '');
+
+final RegExp _legacyDelegates = RegExp(
+  r'\b\w+\.localizationsDelegates\b|'
+  r"package:flutter_localizations/flutter_localizations\.dart",
+);
 
 /// [pubspec] with `flutter: generate: true` set, or null when it already is.
 String? _withGenerateFlag(final String pubspec) {
@@ -198,14 +249,21 @@ String? _packageName(final List<String> lines) {
   return null;
 }
 
-List<File> _dartFilesImportingFlutterGen(final Directory root) {
+List<File> _dartFilesImportingFlutterGen(final Directory root) => _dartFiles(
+      root,
+      <String>['lib', 'test', 'integration_test'],
+    )
+        .where((final File f) =>
+            _flutterGenDirective.hasMatch(f.readAsStringSync()))
+        .toList();
+
+List<File> _dartFiles(final Directory root, final List<String> dirs) {
   final List<File> out = <File>[];
-  for (final String dir in <String>['lib', 'test', 'integration_test']) {
+  for (final String dir in dirs) {
     final Directory d = Directory(p.join(root.path, dir));
     if (!d.existsSync()) continue;
     for (final FileSystemEntity e in d.listSync(recursive: true)) {
-      if (e is! File || !e.path.endsWith('.dart')) continue;
-      if (e.readAsStringSync().contains(_flutterGenPrefix)) out.add(e);
+      if (e is File && e.path.endsWith('.dart')) out.add(e);
     }
   }
   out.sort((final File a, final File b) => a.path.compareTo(b.path));

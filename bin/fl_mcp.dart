@@ -234,7 +234,9 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
                 'synthetic-package: true in l10n.yaml (a hard error since '
                 'Flutter 3.47), a missing `generate: true` in pubspec.yaml, and '
                 'imports of package:flutter_gen/gen_l10n, which no longer '
-                'exists. Use it when the build says AppLocalizations or '
+                'exists, and, once the app depends on material_ui, the gen-l10n '
+                'localizationsDelegates list that leaves Material widgets '
+                'without strings. Use it when the build says AppLocalizations or '
                 'package:flutter_gen is not found, or after a Flutter upgrade. '
                 'Offline, no token. Call with apply=false first.',
         'inputSchema': <String, dynamic>{
