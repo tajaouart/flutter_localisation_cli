@@ -15,7 +15,8 @@ class ManagementException implements Exception {
 
 /// The API responded with a non-2xx status.
 class ApiException extends ManagementException {
-  ApiException(this.statusCode, final String message, {this.body}) : super(message);
+  ApiException(this.statusCode, final String message, {this.body})
+      : super(message);
 
   final int statusCode;
   final Map<String, dynamic>? body;

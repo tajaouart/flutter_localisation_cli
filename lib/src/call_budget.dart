@@ -103,7 +103,8 @@ class CallBudget {
       for (final Object? t
           in (recent[command] as List<dynamic>?) ?? const <dynamic>[])
         if (t is int) t,
-    ]..removeWhere((final int t) => now
+    ]..removeWhere((final int t) =>
+        now
             .difference(DateTime.fromMillisecondsSinceEpoch(t))
             .compareTo(_window) >
         0);

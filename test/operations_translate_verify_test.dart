@@ -27,7 +27,11 @@ Map<String, dynamic> _project({required String esValue}) => <String, dynamic>{
               'code': 'fr',
               'is_base_language': false,
               'translations': <Map<String, dynamic>>[
-                <String, dynamic>{'id': 2, 'key': 'greeting', 'value': 'Bonjour'},
+                <String, dynamic>{
+                  'id': 2,
+                  'key': 'greeting',
+                  'value': 'Bonjour'
+                },
               ],
             },
             <String, dynamic>{
@@ -67,7 +71,8 @@ ManagementClient _client(String esValue) {
     }
     return http.Response(jsonEncode(_project(esValue: esValue)), 200);
   });
-  return ManagementClient(baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock);
+  return ManagementClient(
+      baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock);
 }
 
 void main() {
@@ -98,9 +103,12 @@ void main() {
     expect(r.message, contains('3/3'));
   });
 
-  test('an English variant that reads like English is translated, not unchanged', () async {
+  test(
+      'an English variant that reads like English is translated, not unchanged',
+      () async {
     final Map<String, dynamic> project = _project(esValue: 'Hola');
-    ((project['flavors'] as List<dynamic>).first['languages'] as List<dynamic>).add(<String, dynamic>{
+    ((project['flavors'] as List<dynamic>).first['languages'] as List<dynamic>)
+        .add(<String, dynamic>{
       'code': 'en-GB',
       'is_base_language': false,
       'translations': <Map<String, dynamic>>[
@@ -112,14 +120,20 @@ void main() {
         return http.Response(
             jsonEncode(<String, dynamic>{
               'status': 'success',
-              'results': <String, dynamic>{'success_count': 4, 'failed_count': 0, 'failed': <dynamic>[]},
+              'results': <String, dynamic>{
+                'success_count': 4,
+                'failed_count': 0,
+                'failed': <dynamic>[]
+              },
             }),
             200);
       }
       return http.Response(jsonEncode(project), 200);
     });
     final OpResult r = await Operations(
-            ManagementClient(baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock), 9,
+            ManagementClient(
+                baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock),
+            9,
             flavor: 'default')
         .translate('greeting', all: true);
     expect(r.data['translated'], 4);

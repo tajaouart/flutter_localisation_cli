@@ -28,7 +28,8 @@ void main() {
     });
 
     test('rejects anything that is not a locale', () {
-      expect(() => canonicalize('not a locale'), throwsA(isA<InvalidLocaleCode>()));
+      expect(() => canonicalize('not a locale'),
+          throwsA(isA<InvalidLocaleCode>()));
       expect(() => canonicalize(''), throwsA(isA<InvalidLocaleCode>()));
       expect(() => canonicalize('e'), throwsA(isA<InvalidLocaleCode>()));
     });

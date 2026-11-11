@@ -22,7 +22,11 @@ ProjectData sample() => ProjectData.fromJson(<String, dynamic>{
               'code': 'fr',
               'is_base_language': false,
               'translations': <Map<String, dynamic>>[
-                <String, dynamic>{'id': 3, 'key': 'greeting', 'value': 'Bonjour'},
+                <String, dynamic>{
+                  'id': 3,
+                  'key': 'greeting',
+                  'value': 'Bonjour'
+                },
                 <String, dynamic>{'id': 4, 'key': 'bye', 'value': ''},
               ],
             },
@@ -47,7 +51,9 @@ void main() {
     expect(p.resolveId('bye', 'de'), 6);
   });
 
-  test('canonicalKey accepts a catalog key by its stem and refuses a shared stem', () {
+  test(
+      'canonicalKey accepts a catalog key by its stem and refuses a shared stem',
+      () {
     final ProjectData p = ProjectData.fromJson(<String, dynamic>{
       'id': 7,
       'name': 'Gush',
@@ -59,11 +65,31 @@ void main() {
               'code': 'en',
               'is_base_language': true,
               'translations': <Map<String, dynamic>>[
-                <String, dynamic>{'id': 1, 'key': 'done_body %@ %lld', 'value': '{arg1} in {arg2} s'},
-                <String, dynamic>{'id': 2, 'key': 'paywall_buy %@', 'value': 'Buy {arg1}'},
-                <String, dynamic>{'id': 3, 'key': 'paywall_buy', 'value': 'Buy'},
-                <String, dynamic>{'id': 4, 'key': 'title %@', 'value': '{arg1}'},
-                <String, dynamic>{'id': 5, 'key': 'title %lld', 'value': '{arg1}'},
+                <String, dynamic>{
+                  'id': 1,
+                  'key': 'done_body %@ %lld',
+                  'value': '{arg1} in {arg2} s'
+                },
+                <String, dynamic>{
+                  'id': 2,
+                  'key': 'paywall_buy %@',
+                  'value': 'Buy {arg1}'
+                },
+                <String, dynamic>{
+                  'id': 3,
+                  'key': 'paywall_buy',
+                  'value': 'Buy'
+                },
+                <String, dynamic>{
+                  'id': 4,
+                  'key': 'title %@',
+                  'value': '{arg1}'
+                },
+                <String, dynamic>{
+                  'id': 5,
+                  'key': 'title %lld',
+                  'value': '{arg1}'
+                },
               ],
             },
           ],
@@ -73,17 +99,23 @@ void main() {
     expect(p.canonicalKey('done_body'), 'done_body %@ %lld');
     expect(p.canonicalKey('done_body %@ %lld'), 'done_body %@ %lld');
     expect(p.resolveId('done_body', 'en'), 1);
-    expect(p.canonicalKey('paywall_buy'), 'paywall_buy', reason: 'an exact key wins over a stem');
+    expect(p.canonicalKey('paywall_buy'), 'paywall_buy',
+        reason: 'an exact key wins over a stem');
     expect(p.baseEntry('done_body')?.id, 1);
     expect(p.entriesForKey('done_body').single.id, 1);
     expect(
       () => p.canonicalKey('title'),
-      throwsA(isA<ResolveException>().having((final ResolveException e) => e.message, 'message',
-          allOf(contains('ambiguous'), contains('"title %@"'), contains('"title %lld"')))),
+      throwsA(isA<ResolveException>().having(
+          (final ResolveException e) => e.message,
+          'message',
+          allOf(contains('ambiguous'), contains('"title %@"'),
+              contains('"title %lld"')))),
     );
     expect(
       () => p.canonicalKey('done'),
-      throwsA(isA<ResolveException>().having((final ResolveException e) => e.message, 'message',
+      throwsA(isA<ResolveException>().having(
+          (final ResolveException e) => e.message,
+          'message',
           contains('Did you mean "done_body %@ %lld"?'))),
     );
     expect(p.entriesForKey('nothing'), isEmpty);
@@ -91,8 +123,10 @@ void main() {
 
   test('resolveId throws for unknown key or locale', () {
     final ProjectData p = sample();
-    expect(() => p.resolveId('missing', 'fr'), throwsA(isA<ResolveException>()));
-    expect(() => p.resolveId('greeting', 'es'), throwsA(isA<ResolveException>()));
+    expect(
+        () => p.resolveId('missing', 'fr'), throwsA(isA<ResolveException>()));
+    expect(
+        () => p.resolveId('greeting', 'es'), throwsA(isA<ResolveException>()));
   });
 
   test('baseLanguage picks the flagged base', () {
@@ -124,7 +158,10 @@ void main() {
         'success_count': 2,
         'failed_count': 1,
         'failed': <Map<String, dynamic>>[
-          <String, dynamic>{'translation_id': 9, 'error': 'Base translation not found.'},
+          <String, dynamic>{
+            'translation_id': 9,
+            'error': 'Base translation not found.'
+          },
         ],
       },
     });

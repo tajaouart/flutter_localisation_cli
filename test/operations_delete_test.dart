@@ -12,12 +12,14 @@ void main() {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
       hits.add('${req.method} ${req.url.path}');
-      return http.Response(jsonEncode(<String, dynamic>{'status': 'success'}), 200);
+      return http.Response(
+          jsonEncode(<String, dynamic>{'status': 'success'}), 200);
     });
-    final ManagementClient client =
-        ManagementClient(baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock);
-    final OpResult r =
-        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).delete('greeting');
+    final ManagementClient client = ManagementClient(
+        baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock);
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+        .delete('greeting');
     expect(r.ok, isTrue);
     expect(hits, contains('POST /api/projects/7/translation_keys/delete/'));
     // Must NOT fetch the project or hit per-translation delete for a whole-key delete.
@@ -41,7 +43,11 @@ void main() {
                     'code': 'fr',
                     'is_base_language': false,
                     'translations': <Map<String, dynamic>>[
-                      <String, dynamic>{'id': 42, 'key': 'greeting', 'value': 'Salut'},
+                      <String, dynamic>{
+                        'id': 42,
+                        'key': 'greeting',
+                        'value': 'Salut'
+                      },
                     ],
                   },
                 ],
@@ -51,14 +57,17 @@ void main() {
           200,
         );
       }
-      return http.Response(jsonEncode(<String, dynamic>{'status': 'success'}), 200);
+      return http.Response(
+          jsonEncode(<String, dynamic>{'status': 'success'}), 200);
     });
-    final ManagementClient client =
-        ManagementClient(baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock);
-    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
+    final ManagementClient client = ManagementClient(
+        baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock);
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
         .delete('greeting', locale: 'fr');
     expect(r.ok, isTrue);
     expect(hits, contains('DELETE /api/translations/42/delete/'));
-    expect(hits.any((final h) => h.contains('translation_keys/delete')), isFalse);
+    expect(
+        hits.any((final h) => h.contains('translation_keys/delete')), isFalse);
   });
 }

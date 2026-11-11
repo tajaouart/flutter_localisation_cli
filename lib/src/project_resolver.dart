@@ -99,7 +99,8 @@ class ProjectResolver {
 
   String? _pickFlavor(final ProjectSummary project, final String? flavor) {
     if (flavor != null) {
-      final bool exists = project.flavors.any((final FlavorSummary f) => f.name == flavor);
+      final bool exists =
+          project.flavors.any((final FlavorSummary f) => f.name == flavor);
       if (!exists && project.flavors.isNotEmpty) {
         throw ResolveException(
           'Flavor "$flavor" not found in "${project.name}". '

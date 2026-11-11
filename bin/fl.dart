@@ -1832,7 +1832,8 @@ class DoctorCommand extends Command<int> {
       stdout.writeln('${i.fixed ? '✓ fixed' : '✗'} ${i.file}: ${i.message}');
     }
     if (r.ok) {
-      stdout.writeln('Run flutter gen-l10n (or flutter pub get) to regenerate.');
+      stdout
+          .writeln('Run flutter gen-l10n (or flutter pub get) to regenerate.');
       return 0;
     }
     if (!fix && r.issues.any((final L10nIssue i) => i.fixable)) {
@@ -2109,7 +2110,6 @@ class ExportCommand extends Command<int> with _ApiCommand {
   }
 }
 
-
 // --------------------------------------------------------------------------- //
 // Glossary, language styles, locked keys
 // --------------------------------------------------------------------------- //
@@ -2153,25 +2153,30 @@ class GlossaryCommand extends Command<int> {
       'written (brand names) or pinned to one translation per locale.';
 }
 
-class GlossaryListCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+class GlossaryListCommand extends Command<int>
+    with _ApiCommand, _GlossaryCommand {
   @override
   String get name => 'list';
   @override
-  String get description => 'List the glossary and how many strings use each term.';
+  String get description =>
+      'List the glossary and how many strings use each term.';
 
   @override
-  Future<int> run() => withGlossary((final GlossaryOperations g, final _) async {
+  Future<int> run() =>
+      withGlossary((final GlossaryOperations g, final _) async {
         final OpResult r = await g.list();
         if (jsonOut) return emit(r);
         stdout.writeln(r.message);
         for (final dynamic t in r.data['terms'] as List<dynamic>) {
-          stdout.writeln('  ${GlossaryOperations.describeTerm(t as Map<String, dynamic>)}');
+          stdout.writeln(
+              '  ${GlossaryOperations.describeTerm(t as Map<String, dynamic>)}');
         }
         return 0;
       });
 }
 
-class GlossaryAddCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+class GlossaryAddCommand extends Command<int>
+    with _ApiCommand, _GlossaryCommand {
   GlossaryAddCommand() {
     argParser
       ..addFlag('keep',
@@ -2201,20 +2206,24 @@ class GlossaryAddCommand extends Command<int> with _ApiCommand, _GlossaryCommand
   Future<int> run() {
     final List<String> rest = argResults!.rest;
     if (rest.isEmpty) {
-      throw UsageException('Missing <term>, e.g. `fl glossary add Dictee --keep`.', usage);
+      throw UsageException(
+          'Missing <term>, e.g. `fl glossary add Dictee --keep`.', usage);
     }
-    return withGlossary((final GlossaryOperations g, final _) async => emit(await g.add(
-          rest.join(' '),
-          keep: argResults!['keep'] as bool,
-          translations: parseTermTranslations(argResults!['as'] as List<String>),
-          note: argResults!['note'] as String?,
-          caseSensitive: argResults!['case-sensitive'] as bool?,
-          dryRun: dryRun,
-        )));
+    return withGlossary(
+        (final GlossaryOperations g, final _) async => emit(await g.add(
+              rest.join(' '),
+              keep: argResults!['keep'] as bool,
+              translations:
+                  parseTermTranslations(argResults!['as'] as List<String>),
+              note: argResults!['note'] as String?,
+              caseSensitive: argResults!['case-sensitive'] as bool?,
+              dryRun: dryRun,
+            )));
   }
 }
 
-class GlossaryRemoveCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+class GlossaryRemoveCommand extends Command<int>
+    with _ApiCommand, _GlossaryCommand {
   @override
   String get name => 'remove';
   @override
@@ -2231,7 +2240,8 @@ class GlossaryRemoveCommand extends Command<int> with _ApiCommand, _GlossaryComm
   }
 }
 
-class GlossaryImportCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+class GlossaryImportCommand extends Command<int>
+    with _ApiCommand, _GlossaryCommand {
   @override
   String get name => 'import';
   @override
@@ -2250,20 +2260,26 @@ class GlossaryImportCommand extends Command<int> with _ApiCommand, _GlossaryComm
   }
 }
 
-class GlossaryExportCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+class GlossaryExportCommand extends Command<int>
+    with _ApiCommand, _GlossaryCommand {
   @override
   String get name => 'export';
   @override
-  String get description => 'Write the glossary to a JSON file `fl glossary import` reads.';
+  String get description =>
+      'Write the glossary to a JSON file `fl glossary import` reads.';
   @override
   String get invocation => 'fl glossary export [<file.json>]';
 
   @override
-  Future<int> run() => withGlossary((final GlossaryOperations g, final _) async => emit(
-      await g.export(argResults!.rest.isEmpty ? 'glossary.json' : argResults!.rest.first)));
+  Future<int> run() =>
+      withGlossary((final GlossaryOperations g, final _) async => emit(
+          await g.export(argResults!.rest.isEmpty
+              ? 'glossary.json'
+              : argResults!.rest.first)));
 }
 
-class GlossarySuggestCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+class GlossarySuggestCommand extends Command<int>
+    with _ApiCommand, _GlossaryCommand {
   GlossarySuggestCommand() {
     argParser.addFlag('apply',
         negatable: false,
@@ -2279,25 +2295,29 @@ class GlossarySuggestCommand extends Command<int> with _ApiCommand, _GlossaryCom
       'mid-sentence, acronyms.';
 
   @override
-  Future<int> run() => withGlossary((final GlossaryOperations g, final _) async {
-        final OpResult r =
-            await g.suggest(apply: argResults!['apply'] as bool, dryRun: dryRun);
+  Future<int> run() =>
+      withGlossary((final GlossaryOperations g, final _) async {
+        final OpResult r = await g.suggest(
+            apply: argResults!['apply'] as bool, dryRun: dryRun);
         if (jsonOut) return emit(r);
         stdout.writeln(r.message);
         for (final dynamic s
             in (r.data['suggestions'] as List<dynamic>?) ?? const <dynamic>[]) {
           final Map<String, dynamic> m = s as Map<String, dynamic>;
-          stdout.writeln('  ${m['term']}  (${m['reason']}, ${m['string_count']} '
-              'string(s)${m['do_not_translate'] == true ? ', keep' : ''})');
+          stdout
+              .writeln('  ${m['term']}  (${m['reason']}, ${m['string_count']} '
+                  'string(s)${m['do_not_translate'] == true ? ', keep' : ''})');
         }
         return 0;
       });
 }
 
-class GlossaryApplyCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+class GlossaryApplyCommand extends Command<int>
+    with _ApiCommand, _GlossaryCommand {
   GlossaryApplyCommand() {
     argParser
-      ..addMultiOption('term', help: 'Only strings containing this term; repeatable.')
+      ..addMultiOption('term',
+          help: 'Only strings containing this term; repeatable.')
       ..addMultiOption('locale', help: 'Only these locales; repeatable.')
       ..addFlag('all',
           negatable: false,
@@ -2317,7 +2337,8 @@ class GlossaryApplyCommand extends Command<int> with _ApiCommand, _GlossaryComma
 
   @override
   Future<int> run() =>
-      withGlossary((final GlossaryOperations g, final Operations ops) async => emit(await g.apply(
+      withGlossary((final GlossaryOperations g, final Operations ops) async =>
+          emit(await g.apply(
             ops,
             only: argResults!['term'] as List<String>,
             all: argResults!['all'] as bool,
@@ -2348,7 +2369,8 @@ class StyleListCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
   String get description => 'Show the style each locale is translated in.';
 
   @override
-  Future<int> run() => withGlossary((final GlossaryOperations g, final _) async {
+  Future<int> run() =>
+      withGlossary((final GlossaryOperations g, final _) async {
         final OpResult r = await g.styles();
         if (jsonOut) return emit(r);
         for (final dynamic row in r.data['languages'] as List<dynamic>) {
@@ -2356,8 +2378,9 @@ class StyleListCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
           final String f = (m['formality'] as String? ?? '').isEmpty
               ? "translator's choice"
               : m['formality'] as String;
-          final String from =
-              m['inherited_from'] == null ? '' : ' (from ${m['inherited_from']})';
+          final String from = m['inherited_from'] == null
+              ? ''
+              : ' (from ${m['inherited_from']})';
           final String extra = (m['instructions'] as String? ?? '').isEmpty
               ? ''
               : ' + instructions';
@@ -2370,8 +2393,10 @@ class StyleListCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
 class StyleSetCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
   StyleSetCommand() {
     argParser
-      ..addFlag('formal', negatable: false, help: 'Formal address (Sie, vous, usted, Lei...).')
-      ..addFlag('informal', negatable: false, help: 'Informal address (du, tu, tú...).')
+      ..addFlag('formal',
+          negatable: false, help: 'Formal address (Sie, vous, usted, Lei...).')
+      ..addFlag('informal',
+          negatable: false, help: 'Informal address (du, tu, tú...).')
       ..addOption('instructions',
           help: 'Anything else the translator should follow for this locale.');
   }
@@ -2395,20 +2420,23 @@ class StyleSetCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
     if (formal && informal) {
       throw UsageException('Pass --formal or --informal, not both.', usage);
     }
-    return withGlossary((final GlossaryOperations g, final _) async => emit(await g.setStyle(
-          rest.first,
-          formality: formal ? 'formal' : (informal ? 'informal' : ''),
-          instructions: (argResults!['instructions'] as String?) ?? '',
-          dryRun: dryRun,
-        )));
+    return withGlossary(
+        (final GlossaryOperations g, final _) async => emit(await g.setStyle(
+              rest.first,
+              formality: formal ? 'formal' : (informal ? 'informal' : ''),
+              instructions: (argResults!['instructions'] as String?) ?? '',
+              dryRun: dryRun,
+            )));
   }
 }
 
-class StyleClearCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
+class StyleClearCommand extends Command<int>
+    with _ApiCommand, _GlossaryCommand {
   @override
   String get name => 'clear';
   @override
-  String get description => "Remove a locale's style; it then follows its parent, if any.";
+  String get description =>
+      "Remove a locale's style; it then follows its parent, if any.";
   @override
   String get invocation => 'fl style clear <locale>';
 
@@ -2446,4 +2474,3 @@ class LockCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
         emit(await g.lock(rest, on: lock, dryRun: dryRun)));
   }
 }
-

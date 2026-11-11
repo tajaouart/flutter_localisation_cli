@@ -81,7 +81,8 @@ class ProjectConfig {
     // `"project": 129` is the natural thing to write; it used to crash with a
     // cast error. A number there is the project id.
     final Object? rawProject = json['project'];
-    final Object? pid = json['project_id'] ?? (rawProject is int ? rawProject : null);
+    final Object? pid =
+        json['project_id'] ?? (rawProject is int ? rawProject : null);
     String? text(final String key) {
       final Object? v = json[key];
       if (v == null || v is String) return v as String?;
@@ -158,8 +159,10 @@ class Credentials {
             jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
         // Prefer a base-url-specific token, else a default one.
         final Map<String, dynamic> byHost =
-            (data['tokens'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-        final String? scoped = baseUrl != null ? byHost[baseUrl] as String? : null;
+            (data['tokens'] as Map<String, dynamic>?) ??
+                const <String, dynamic>{};
+        final String? scoped =
+            baseUrl != null ? byHost[baseUrl] as String? : null;
         final String? token = scoped ?? data['token'] as String?;
         if (token != null && token.isNotEmpty) {
           return Credentials(token, source: file.path);

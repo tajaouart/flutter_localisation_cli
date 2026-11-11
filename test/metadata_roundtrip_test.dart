@@ -13,7 +13,8 @@ class _Capture {
 
 void main() {
   group('addKey metadata round-trip', () {
-    test('includes description, placeholders and is_placeholders_enabled when provided',
+    test(
+        'includes description, placeholders and is_placeholders_enabled when provided',
         () async {
       final _Capture cap = _Capture();
       final MockClient mock = MockClient((final http.Request req) async {

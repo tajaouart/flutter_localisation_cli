@@ -38,7 +38,8 @@ String _project() => jsonEncode(<String, dynamic>{
                 <String, dynamic>{
                   'id': 2,
                   'key': 'saved',
-                  'value': '{count, plural, one{{count} item} other{{count} items}}',
+                  'value':
+                      '{count, plural, one{{count} item} other{{count} items}}',
                   'is_plural_enabled': true,
                   'description': 'How many saved.',
                   'placeholders': <String, dynamic>{
@@ -77,8 +78,8 @@ String _project() => jsonEncode(<String, dynamic>{
     });
 
 Operations _ops() {
-  final MockClient mock = MockClient(
-      (final http.Request req) async => http.Response(
+  final MockClient mock =
+      MockClient((final http.Request req) async => http.Response(
             _project(),
             200,
             // Without the charset, http decodes the body as latin-1 and every
@@ -108,8 +109,9 @@ void main() {
 
   test('every file carries @@locale so the locale is never guessed', () async {
     await _ops().exportArbs(tmp.path);
-    final Map<String, dynamic> zh = jsonDecode(
-        File('${tmp.path}/app_zh_Hant.arb').readAsStringSync()) as Map<String, dynamic>;
+    final Map<String, dynamic> zh =
+        jsonDecode(File('${tmp.path}/app_zh_Hant.arb').readAsStringSync())
+            as Map<String, dynamic>;
     // Underscores in both the name and @@locale: gen_l10n compares them and
     // fails the build when they disagree.
     expect(zh['@@locale'], 'zh_Hant');
@@ -118,40 +120,47 @@ void main() {
 
   test('plural values keep their assembled ICU', () async {
     await _ops().exportArbs(tmp.path);
-    final Map<String, dynamic> en = jsonDecode(
-        File('${tmp.path}/app_en_US.arb').readAsStringSync()) as Map<String, dynamic>;
+    final Map<String, dynamic> en =
+        jsonDecode(File('${tmp.path}/app_en_US.arb').readAsStringSync())
+            as Map<String, dynamic>;
     expect(en['saved'], contains('plural'));
     expect(en['saved'], contains('other{'));
   });
 
-  test('@key metadata lands in every locale, like the backend writes it', () async {
+  test('@key metadata lands in every locale, like the backend writes it',
+      () async {
     // Not a style choice: `fl pull` falls back to this writer when the git
     // mirror is unusable, so anything it does differently from the backend
     // shows up as a diff across all 36 files the first time a credential
     // goes stale.
     await _ops().exportArbs(tmp.path);
-    final Map<String, dynamic> en = jsonDecode(
-        File('${tmp.path}/app_en_US.arb').readAsStringSync()) as Map<String, dynamic>;
-    final Map<String, dynamic> zh = jsonDecode(
-        File('${tmp.path}/app_zh_Hant.arb').readAsStringSync()) as Map<String, dynamic>;
+    final Map<String, dynamic> en =
+        jsonDecode(File('${tmp.path}/app_en_US.arb').readAsStringSync())
+            as Map<String, dynamic>;
+    final Map<String, dynamic> zh =
+        jsonDecode(File('${tmp.path}/app_zh_Hant.arb').readAsStringSync())
+            as Map<String, dynamic>;
     expect((en['@saved'] as Map<String, dynamic>)['placeholders'], isNotNull);
     expect(en['@hello'], isNotNull);
     expect((zh['@saved'] as Map<String, dynamic>)['placeholders'], isNotNull);
-    expect((zh['@hello'] as Map<String, dynamic>)['description'], 'A greeting.');
+    expect(
+        (zh['@hello'] as Map<String, dynamic>)['description'], 'A greeting.');
   });
 
   test('every file carries an @@last_modified stamp', () async {
     await _ops().exportArbs(tmp.path);
     for (final String name in <String>['app_en_US.arb', 'app_zh_Hant.arb']) {
-      final Map<String, dynamic> arb = jsonDecode(
-          File('${tmp.path}/$name').readAsStringSync()) as Map<String, dynamic>;
+      final Map<String, dynamic> arb =
+          jsonDecode(File('${tmp.path}/$name').readAsStringSync())
+              as Map<String, dynamic>;
       expect(arb['@@last_modified'], isA<String>());
       expect(arb['@@last_modified'], endsWith('+00:00'),
           reason: 'the backend writes Python isoformat; this must match');
     }
   });
 
-  test('re-exporting unchanged content leaves the files byte-identical', () async {
+  test('re-exporting unchanged content leaves the files byte-identical',
+      () async {
     // A fresh timestamp on an otherwise identical file would dirty the ARB
     // repo on every run, which is how a fallback export turns into a
     // 36-file diff that nobody can read.
@@ -171,10 +180,12 @@ void main() {
     final File en = File('${tmp.path}/app_en_US.arb');
     final Map<String, dynamic> before =
         jsonDecode(en.readAsStringSync()) as Map<String, dynamic>;
-    en.writeAsStringSync(jsonEncode(<String, dynamic>{
-      ...before,
-      'hello': 'Stale value',
-    }),);
+    en.writeAsStringSync(
+      jsonEncode(<String, dynamic>{
+        ...before,
+        'hello': 'Stale value',
+      }),
+    );
     await _ops().exportArbs(tmp.path);
     final Map<String, dynamic> after =
         jsonDecode(en.readAsStringSync()) as Map<String, dynamic>;

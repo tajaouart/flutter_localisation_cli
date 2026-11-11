@@ -15,7 +15,8 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
-http.Response _project({final List<String> locales = const <String>['en', 'fr']}) =>
+http.Response _project(
+        {final List<String> locales = const <String>['en', 'fr']}) =>
     http.Response(
       jsonEncode(<String, dynamic>{
         'id': 7,
@@ -40,7 +41,8 @@ http.Response _project({final List<String> locales = const <String>['en', 'fr']}
 
 Operations _ops(final MockClient mock, final List<String> progress) =>
     Operations(
-      ManagementClient(baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock),
+      ManagementClient(
+          baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock),
       7,
       flavor: 'default',
       budget: CallBudget.disabled(),
@@ -48,10 +50,12 @@ Operations _ops(final MockClient mock, final List<String> progress) =>
       ..onProgress = progress.add
       ..jobPollInterval = Duration.zero;
 
-final String _arb = jsonEncode(<String, dynamic>{'@@locale': 'en', 'a': 'A', 'b': 'B'});
+final String _arb =
+    jsonEncode(<String, dynamic>{'@@locale': 'en', 'a': 'A', 'b': 'B'});
 
 void main() {
-  test('import --translate asks for a queued job and polls it to the end', () async {
+  test('import --translate asks for a queued job and polls it to the end',
+      () async {
     final List<String> progress = <String>[];
     final List<Map<String, String>> posted = <Map<String, String>>[];
     int polls = 0;
@@ -60,12 +64,18 @@ void main() {
       if (req.url.path == '/api/project/7/import-arb/') {
         final String body = req.body;
         posted.add(<String, String>{
-          'translate_async': RegExp(r'name="translate_async"\r\n\r\n(\w+)').firstMatch(body)!.group(1)!,
+          'translate_async': RegExp(r'name="translate_async"\r\n\r\n(\w+)')
+              .firstMatch(body)!
+              .group(1)!,
         });
         return http.Response(
             jsonEncode(<String, dynamic>{
               'import': <String, dynamic>{
-                'keys': <String, dynamic>{'written': 2, 'skipped': 0, 'unchanged': 0},
+                'keys': <String, dynamic>{
+                  'written': 2,
+                  'skipped': 0,
+                  'unchanged': 0
+                },
               },
               'translation': <String, dynamic>{
                 'status': 'queued',
@@ -79,7 +89,8 @@ void main() {
       if (req.url.path == '/api/ai_batch_translate_async/j1/') {
         polls++;
         if (polls == 1) {
-          return http.Response(jsonEncode(<String, dynamic>{'state': 'queued'}), 200);
+          return http.Response(
+              jsonEncode(<String, dynamic>{'state': 'queued'}), 200);
         }
         if (polls == 2) {
           return http.Response(
@@ -92,14 +103,19 @@ void main() {
         return http.Response(
             jsonEncode(<String, dynamic>{
               'state': 'done',
-              'results': <String, dynamic>{'success_count': 1, 'failed_count': 1, 'identical_count': 1},
+              'results': <String, dynamic>{
+                'success_count': 1,
+                'failed_count': 1,
+                'identical_count': 1
+              },
             }),
             200);
       }
       return http.Response('not found', 404);
     });
 
-    final OpResult r = await _ops(mock, progress).importArb(_arb, translate: true);
+    final OpResult r =
+        await _ops(mock, progress).importArb(_arb, translate: true);
 
     expect(posted.single['translate_async'], 'true');
     expect(r.ok, isTrue);
@@ -115,7 +131,8 @@ void main() {
     ]);
   });
 
-  test('a failed translation job keeps the import and says how to finish', () async {
+  test('a failed translation job keeps the import and says how to finish',
+      () async {
     final MockClient mock = MockClient((final http.Request req) async {
       if (req.url.path == '/api/projects/7/') return _project();
       if (req.url.path == '/api/project/7/import-arb/') {
@@ -129,24 +146,36 @@ void main() {
             }),
             200);
       }
-      return http.Response(jsonEncode(<String, dynamic>{'state': 'failed', 'error': 'quota'}), 200);
+      return http.Response(
+          jsonEncode(<String, dynamic>{'state': 'failed', 'error': 'quota'}),
+          200);
     });
 
-    final OpResult r = await _ops(mock, <String>[]).importArb(_arb, translate: true);
+    final OpResult r =
+        await _ops(mock, <String>[]).importArb(_arb, translate: true);
 
     expect(r.ok, isFalse);
     expect(r.message, contains('translation job failed: quota'));
     expect(r.message, contains('run the import again with --translate'));
   });
 
-  test('an import without --translate says the new keys are still untranslated', () async {
+  test('an import without --translate says the new keys are still untranslated',
+      () async {
     final MockClient mock = MockClient((final http.Request req) async {
-      if (req.url.path == '/api/projects/7/') return _project(locales: <String>['en', 'fr', 'de']);
+      if (req.url.path == '/api/projects/7/') {
+        return _project(locales: <String>['en', 'fr', 'de']);
+      }
       return http.Response(
           jsonEncode(<String, dynamic>{
             'import': <String, dynamic>{
-              'keys': <String, dynamic>{'written': 2, 'skipped': 0, 'unchanged': 0},
-              'problems': <String>['"" (empty key): skipped, there is nothing to translate'],
+              'keys': <String, dynamic>{
+                'written': 2,
+                'skipped': 0,
+                'unchanged': 0
+              },
+              'problems': <String>[
+                '"" (empty key): skipped, there is nothing to translate'
+              ],
             },
           }),
           200);
@@ -154,10 +183,14 @@ void main() {
 
     final OpResult r = await _ops(mock, <String>[]).importArb(_arb);
 
-    expect(r.message, contains('The 2 new key(s) hold the base text in the 2 other locale(s)'));
+    expect(
+        r.message,
+        contains(
+            'The 2 new key(s) hold the base text in the 2 other locale(s)'));
     expect(r.message, contains('(empty key)'));
 
-    final OpResult overwritten = await _ops(mock, <String>[]).importArb(_arb, overwrite: true);
+    final OpResult overwritten =
+        await _ops(mock, <String>[]).importArb(_arb, overwrite: true);
     expect(overwritten.message, isNot(contains('hold the base text')));
   });
 
@@ -169,13 +202,15 @@ void main() {
         return _project(locales: <String>['en', ...added]);
       }
       if (req.url.path == '/api/add-language/') {
-        added.add((jsonDecode(req.body) as Map<String, dynamic>)['languageCode'] as String);
+        added.add((jsonDecode(req.body) as Map<String, dynamic>)['languageCode']
+            as String);
         return http.Response('{"status": "success"}', 201);
       }
       return http.Response('not found', 404);
     });
 
-    final OpResult r = await _ops(mock, progress).addLanguages(<String>['de', 'fr']);
+    final OpResult r =
+        await _ops(mock, progress).addLanguages(<String>['de', 'fr']);
 
     expect(r.ok, isTrue);
     expect(progress.first, 'Adding 2 locale(s)...');
@@ -188,14 +223,20 @@ void main() {
     final File catalog = File('${dir.path}/Localizable.xcstrings')
       ..writeAsStringSync(jsonEncode(<String, dynamic>{
         'sourceLanguage': 'en',
-        'strings': <String, dynamic>{'': <String, dynamic>{}, 'Close': <String, dynamic>{}, 'New': <String, dynamic>{}},
+        'strings': <String, dynamic>{
+          '': <String, dynamic>{},
+          'Close': <String, dynamic>{},
+          'New': <String, dynamic>{}
+        },
         'version': '1.0',
       }));
     expect(localOnlyCatalogKeys(catalog, <String>{'Close'}), <String>['New']);
     dir.deleteSync(recursive: true);
   });
 
-  test('languages add sends every locale in one request and follows the translation job', () async {
+  test(
+      'languages add sends every locale in one request and follows the translation job',
+      () async {
     final List<String> progress = <String>[];
     final List<String> hits = <String>[];
     Map<String, dynamic>? sent;
@@ -211,7 +252,11 @@ void main() {
                 <String, dynamic>{'code': 'de', 'status': 'added'},
                 <String, dynamic>{'code': 'fr', 'status': 'exists'},
                 <String, dynamic>{'code': 'de-AT', 'status': 'added'},
-                <String, dynamic>{'code': 'xx', 'status': 'error', 'message': "'xx' does not name a known language."},
+                <String, dynamic>{
+                  'code': 'xx',
+                  'status': 'error',
+                  'message': "'xx' does not name a known language."
+                },
               ],
               'translation': <String, dynamic>{
                 'status': 'queued',
@@ -225,7 +270,11 @@ void main() {
         return http.Response(
             jsonEncode(<String, dynamic>{
               'state': 'done',
-              'results': <String, dynamic>{'success_count': 3, 'failed_count': 1, 'identical_count': 1},
+              'results': <String, dynamic>{
+                'success_count': 3,
+                'failed_count': 1,
+                'identical_count': 1
+              },
             }),
             200);
       }
@@ -242,20 +291,25 @@ void main() {
     expect(r.ok, isFalse);
     expect(r.message,
         'Added 2/4 locale(s). Translated 3 locale-string(s), 1 identical to the source left for review.');
-    expect(r.data['failures'], <String>["xx: 'xx' does not name a known language."]);
-    expect(progress, containsAllInOrder(<String>[
-      '  ✓ Added "de" to "default".',
-      '  ✓ Locale "fr" is already on flavor "default".',
-      "  ✗ 'xx' does not name a known language.",
-      'Translating 4 locale-string(s) on the server...',
-    ]));
+    expect(r.data['failures'],
+        <String>["xx: 'xx' does not name a known language."]);
+    expect(
+        progress,
+        containsAllInOrder(<String>[
+          '  ✓ Added "de" to "default".',
+          '  ✓ Locale "fr" is already on flavor "default".',
+          "  ✗ 'xx' does not name a known language.",
+          'Translating 4 locale-string(s) on the server...',
+        ]));
   });
 
   test('a single locale keeps the per-locale call and its checks', () async {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
       hits.add('${req.method} ${req.url.path}');
-      if (req.url.path == '/api/projects/7/') return _project(locales: <String>['en', if (hits.length > 2) 'de']);
+      if (req.url.path == '/api/projects/7/') {
+        return _project(locales: <String>['en', if (hits.length > 2) 'de']);
+      }
       return http.Response('{"status": "success"}', 201);
     });
     await _ops(mock, <String>[]).addLanguages(<String>['de']);
@@ -263,16 +317,23 @@ void main() {
     expect(hits, isNot(contains('POST /api/add-languages/')));
   });
 
-  test('a numeric project in the config is the project id, a wrong type a clear error', () {
+  test(
+      'a numeric project in the config is the project id, a wrong type a clear error',
+      () {
     final Directory dir = Directory.systemTemp.createTempSync('fl_cfg');
     final File cfg = File('${dir.path}/flutterlocalisation.json')
-      ..writeAsStringSync(jsonEncode(<String, dynamic>{'project': 129, 'xcstrings_dir': '.'}));
+      ..writeAsStringSync(
+          jsonEncode(<String, dynamic>{'project': 129, 'xcstrings_dir': '.'}));
     final ProjectConfig loaded = ProjectConfig.load(path: cfg.path);
     expect(loaded.projectId, 129);
     expect(loaded.project, isNull);
-    cfg.writeAsStringSync(jsonEncode(<String, dynamic>{'project': 'P', 'flavor': 3}));
-    expect(() => ProjectConfig.load(path: cfg.path),
-        throwsA(isA<ConfigException>().having((final ConfigException e) => e.message, 'message',
+    cfg.writeAsStringSync(
+        jsonEncode(<String, dynamic>{'project': 'P', 'flavor': 3}));
+    expect(
+        () => ProjectConfig.load(path: cfg.path),
+        throwsA(isA<ConfigException>().having(
+            (final ConfigException e) => e.message,
+            'message',
             contains('"flavor" must be a string'))));
     dir.deleteSync(recursive: true);
   });
@@ -295,8 +356,15 @@ void main() {
                       'is_base_language': true,
                       'translations': <Map<String, dynamic>>[
                         <String, dynamic>{
-                          'id': 1, 'key': 'Clean %@', 'value': 'Clean {arg1}',
-                          'placeholders': <String, dynamic>{'arg1': <String, dynamic>{'type': 'String', 'spec': '%@'}},
+                          'id': 1,
+                          'key': 'Clean %@',
+                          'value': 'Clean {arg1}',
+                          'placeholders': <String, dynamic>{
+                            'arg1': <String, dynamic>{
+                              'type': 'String',
+                              'spec': '%@'
+                            }
+                          },
                         },
                       ],
                     },
@@ -304,7 +372,11 @@ void main() {
                       'code': 'fr',
                       'is_base_language': false,
                       'translations': <Map<String, dynamic>>[
-                        <String, dynamic>{'id': 2, 'key': 'Clean %@', 'value': 'Épuré {arg1}'},
+                        <String, dynamic>{
+                          'id': 2,
+                          'key': 'Clean %@',
+                          'value': 'Épuré {arg1}'
+                        },
                       ],
                     },
                   ],
@@ -314,18 +386,22 @@ void main() {
             200);
       }
       bodies.add(jsonDecode(req.body) as Map<String, dynamic>);
-      return http.Response(jsonEncode(<String, dynamic>{'id': 2, 'value': 'x'}), 200);
+      return http.Response(
+          jsonEncode(<String, dynamic>{'id': 2, 'value': 'x'}), 200);
     });
     // Sent as typed: the service is the one place that converts it.
-    final OpResult r = await _ops(mock, <String>[]).edit('Clean %@', 'fr', value: 'Ouvrir %@ épuré');
+    final OpResult r = await _ops(mock, <String>[])
+        .edit('Clean %@', 'fr', value: 'Ouvrir %@ épuré');
     expect(r.ok, isTrue, reason: r.message);
     expect(bodies.single['value'], 'Ouvrir %@ épuré');
 
-    final OpResult dropped = await _ops(mock, <String>[]).edit('Clean %@', 'fr', value: 'Ouvrir épuré');
+    final OpResult dropped = await _ops(mock, <String>[])
+        .edit('Clean %@', 'fr', value: 'Ouvrir épuré');
     expect(dropped.ok, isFalse);
     expect(dropped.message, contains('must keep {arg1} (%@ in Xcode)'));
 
-    await _ops(mock, <String>[]).edit('Clean %@', 'en', description: '', clearDescription: true);
+    await _ops(mock, <String>[])
+        .edit('Clean %@', 'en', description: '', clearDescription: true);
     expect(bodies.last['description'], '');
     await _ops(mock, <String>[]).edit('Clean %@', 'en', description: '');
     expect(bodies.last.containsKey('description'), isFalse);

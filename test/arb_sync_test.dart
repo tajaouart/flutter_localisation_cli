@@ -54,7 +54,8 @@ void main() {
       expect(out.ok, isTrue);
       expect(out.upstream, 'origin/main');
       expect(git.ran('reset --hard origin/main'), isTrue);
-      expect(git.ran('pull'), isFalse, reason: 'a pull can conflict; a reset cannot');
+      expect(git.ran('pull'), isFalse,
+          reason: 'a pull can conflict; a reset cannot');
       expect(out.discardedAnything, isFalse);
     });
 
@@ -100,17 +101,20 @@ void main() {
       final FakeGit git = FakeGit(<String, ProcessResult>{
         'rev-parse --is-inside-work-tree': ok('true\n'),
         'remote': ok('origin\n'),
-        'fetch': fail('remote: Repository not found.\nfatal: repository not found'),
+        'fetch':
+            fail('remote: Repository not found.\nfatal: repository not found'),
       });
       final GitSyncOutcome out = await mirror(git).hardSync();
 
       expect(out.ok, isFalse);
       expect(out.skip, GitSkipReason.unreachable);
       expect(out.detail, contains('Repository not found'));
-      expect(git.ran('reset'), isFalse, reason: 'nothing was fetched to reset onto');
+      expect(git.ran('reset'), isFalse,
+          reason: 'nothing was fetched to reset onto');
     });
 
-    test('a plain directory is a skip, so the caller can use the API', () async {
+    test('a plain directory is a skip, so the caller can use the API',
+        () async {
       final FakeGit git = FakeGit(<String, ProcessResult>{
         'rev-parse --is-inside-work-tree': fail('not a git repository'),
       });
@@ -146,7 +150,8 @@ void main() {
       expect(out.upstream, 'origin/main');
     });
 
-    test('only stale ARBs are cleaned, never the rest of the directory', () async {
+    test('only stale ARBs are cleaned, never the rest of the directory',
+        () async {
       final FakeGit git = FakeGit(<String, ProcessResult>{
         'rev-parse --is-inside-work-tree': ok('true\n'),
         'remote': ok('origin\n'),

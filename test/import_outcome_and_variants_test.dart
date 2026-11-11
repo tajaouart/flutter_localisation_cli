@@ -76,7 +76,8 @@ Operations _ops(
     }
     if (req.url.path == '/api/project/7/import-arb/') {
       return http.Response(
-        jsonEncode(importResponse ?? <String, dynamic>{'import_status': 'success'}),
+        jsonEncode(
+            importResponse ?? <String, dynamic>{'import_status': 'success'}),
         200,
       );
     }
@@ -120,11 +121,15 @@ void main() {
       jsonEncode(<String, dynamic>{'a': 'A', 'b': 'B', 'c': 'C'});
 
   group('import reports what the server actually wrote', () {
-    test('an import that skipped everything says nothing was written', () async {
+    test('an import that skipped everything says nothing was written',
+        () async {
       final OpResult r = await _ops(
         const <Map<String, dynamic>>[],
         importResponse: _summary(
-            written: 0, skipped: 3, unchanged: 0, skippedKeys: <String>['a', 'b', 'c']),
+            written: 0,
+            skipped: 3,
+            unchanged: 0,
+            skippedKeys: <String>['a', 'b', 'c']),
       ).importArb(threeKeys, languageCode: 'fr');
 
       expect(r.message, startsWith('Nothing written: 3 of 3 key(s) skipped'));
@@ -156,7 +161,8 @@ void main() {
           'Imported 3 key(s) (2 written, 1 already identical) into "default".');
     });
 
-    test('an older backend without the summary keeps the old wording', () async {
+    test('an older backend without the summary keeps the old wording',
+        () async {
       final OpResult r =
           await _ops(const <Map<String, dynamic>>[]).importArb(threeKeys);
 
@@ -264,10 +270,11 @@ void main() {
       final Operations ops = _ops(
         <Map<String, dynamic>>[
           _lang('fr', <Map<String, dynamic>>[
-            _row(20, 'mins', '{minutes} mn {who}', placeholders: <String, dynamic>{
-              'minutes': <String, dynamic>{'type': 'String'},
-              'who': <String, dynamic>{'type': 'String'},
-            }),
+            _row(20, 'mins', '{minutes} mn {who}',
+                placeholders: <String, dynamic>{
+                  'minutes': <String, dynamic>{'type': 'String'},
+                  'who': <String, dynamic>{'type': 'String'},
+                }),
           ]),
         ],
         base: <Map<String, dynamic>>[
@@ -279,9 +286,9 @@ void main() {
 
       await ops.exportArbs(tmp.path);
 
-      final Map<String, dynamic> fr = jsonDecode(
-              File('${tmp.path}/app_fr.arb').readAsStringSync())
-          as Map<String, dynamic>;
+      final Map<String, dynamic> fr =
+          jsonDecode(File('${tmp.path}/app_fr.arb').readAsStringSync())
+              as Map<String, dynamic>;
       expect(
         (fr['@mins'] as Map<String, dynamic>)['placeholders'],
         <String, dynamic>{
@@ -289,9 +296,9 @@ void main() {
           'who': <String, dynamic>{'type': 'String'},
         },
       );
-      final Map<String, dynamic> en = jsonDecode(
-              File('${tmp.path}/app_en.arb').readAsStringSync())
-          as Map<String, dynamic>;
+      final Map<String, dynamic> en =
+          jsonDecode(File('${tmp.path}/app_en.arb').readAsStringSync())
+              as Map<String, dynamic>;
       expect(
         (en['@mins'] as Map<String, dynamic>)['placeholders'],
         <String, dynamic>{
@@ -304,7 +311,8 @@ void main() {
   group('resolver', () {
     ProjectResolver resolver(final List<Map<String, dynamic>> projects) {
       final MockClient mock = MockClient((final http.Request req) async =>
-          http.Response(jsonEncode(<String, dynamic>{'projects': projects}), 200));
+          http.Response(
+              jsonEncode(<String, dynamic>{'projects': projects}), 200));
       return ProjectResolver(
           ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock));
     }

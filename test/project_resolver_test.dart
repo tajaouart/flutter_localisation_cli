@@ -29,10 +29,19 @@ Map<String, dynamic> project(
   final String name,
   final List<Map<String, dynamic>> flavors,
 ) =>
-    <String, dynamic>{'id': id, 'name': name, 'workspace': 'WS', 'flavors': flavors};
+    <String, dynamic>{
+      'id': id,
+      'name': name,
+      'workspace': 'WS',
+      'flavors': flavors
+    };
 
 Map<String, dynamic> flavor(final String name, final List<String> locales) =>
-    <String, dynamic>{'name': name, 'base_language': locales.first, 'languages': locales};
+    <String, dynamic>{
+      'name': name,
+      'base_language': locales.first,
+      'languages': locales
+    };
 
 void main() {
   test('single project + single flavor resolves with no selectors', () async {
@@ -49,8 +58,12 @@ void main() {
 
   test('resolves by name (case-insensitive)', () async {
     final ProjectResolver r = ProjectResolver(clientWith(<Map<String, dynamic>>[
-      project(1, 'Alpha', <Map<String, dynamic>>[flavor('default', <String>['en'])]),
-      project(2, 'Beta', <Map<String, dynamic>>[flavor('default', <String>['en'])]),
+      project(1, 'Alpha', <Map<String, dynamic>>[
+        flavor('default', <String>['en'])
+      ]),
+      project(2, 'Beta', <Map<String, dynamic>>[
+        flavor('default', <String>['en'])
+      ]),
     ]));
     final ResolvedTarget t = await r.resolve(project: 'beta');
     expect(t.projectId, 2);
@@ -58,8 +71,12 @@ void main() {
 
   test('resolves by numeric id', () async {
     final ProjectResolver r = ProjectResolver(clientWith(<Map<String, dynamic>>[
-      project(1, 'Alpha', <Map<String, dynamic>>[flavor('default', <String>['en'])]),
-      project(2, 'Beta', <Map<String, dynamic>>[flavor('default', <String>['en'])]),
+      project(1, 'Alpha', <Map<String, dynamic>>[
+        flavor('default', <String>['en'])
+      ]),
+      project(2, 'Beta', <Map<String, dynamic>>[
+        flavor('default', <String>['en'])
+      ]),
     ]));
     final ResolvedTarget t = await r.resolve(project: '1');
     expect(t.projectName, 'Alpha');
@@ -67,7 +84,9 @@ void main() {
 
   test('unknown project throws with the available list', () async {
     final ProjectResolver r = ProjectResolver(clientWith(<Map<String, dynamic>>[
-      project(1, 'Alpha', <Map<String, dynamic>>[flavor('default', <String>['en'])]),
+      project(1, 'Alpha', <Map<String, dynamic>>[
+        flavor('default', <String>['en'])
+      ]),
     ]));
     expect(
       () => r.resolve(project: 'Nope'),
@@ -77,13 +96,18 @@ void main() {
 
   test('multiple projects without a selector throws', () async {
     final ProjectResolver r = ProjectResolver(clientWith(<Map<String, dynamic>>[
-      project(1, 'Alpha', <Map<String, dynamic>>[flavor('default', <String>['en'])]),
-      project(2, 'Beta', <Map<String, dynamic>>[flavor('default', <String>['en'])]),
+      project(1, 'Alpha', <Map<String, dynamic>>[
+        flavor('default', <String>['en'])
+      ]),
+      project(2, 'Beta', <Map<String, dynamic>>[
+        flavor('default', <String>['en'])
+      ]),
     ]));
     expect(() => r.resolve(), throwsA(isA<ResolveException>()));
   });
 
-  test('multiple flavors without a flavor throws; specifying one works', () async {
+  test('multiple flavors without a flavor throws; specifying one works',
+      () async {
     final ProjectResolver r = ProjectResolver(clientWith(<Map<String, dynamic>>[
       project(3, 'Multi', <Map<String, dynamic>>[
         flavor('production', <String>['en', 'fr']),
@@ -91,15 +115,20 @@ void main() {
       ]),
     ]));
     expect(() => r.resolve(project: 'Multi'), throwsA(isA<ResolveException>()));
-    final ResolvedTarget t = await r.resolve(project: 'Multi', flavor: 'staging');
+    final ResolvedTarget t =
+        await r.resolve(project: 'Multi', flavor: 'staging');
     expect(t.flavor, 'staging');
   });
 
   test('default project selector is used when no arg passed', () async {
     final ProjectResolver r = ProjectResolver(
       clientWith(<Map<String, dynamic>>[
-        project(1, 'Alpha', <Map<String, dynamic>>[flavor('default', <String>['en'])]),
-        project(2, 'Beta', <Map<String, dynamic>>[flavor('default', <String>['en'])]),
+        project(1, 'Alpha', <Map<String, dynamic>>[
+          flavor('default', <String>['en'])
+        ]),
+        project(2, 'Beta', <Map<String, dynamic>>[
+          flavor('default', <String>['en'])
+        ]),
       ]),
       defaultProject: 'Beta',
     );

@@ -47,7 +47,8 @@ class TranslationEntry {
 
   bool get isEmpty => value.trim().isEmpty && !isPluralEnabled;
 
-  factory TranslationEntry.fromJson(final Map<String, dynamic> j) => TranslationEntry(
+  factory TranslationEntry.fromJson(final Map<String, dynamic> j) =>
+      TranslationEntry(
         id: j['id'] as int,
         key: (j['key'] ?? '') as String,
         value: (j['value'] ?? '') as String,
@@ -55,8 +56,8 @@ class TranslationEntry {
         isPluralEnabled: (j['is_plural_enabled'] ?? false) as bool,
         isAiTranslated: (j['is_ai_translated'] ?? false) as bool,
         description: (j['description'] ?? '') as String,
-        placeholders:
-            (j['placeholders'] ?? const <String, dynamic>{}) as Map<String, dynamic>,
+        placeholders: (j['placeholders'] ?? const <String, dynamic>{})
+            as Map<String, dynamic>,
       );
 }
 
@@ -80,7 +81,8 @@ class LanguageData {
         code: (j['code'] ?? '') as String,
         isBase: (j['is_base_language'] ?? false) as bool,
         translations: ((j['translations'] ?? const <dynamic>[]) as List)
-            .map((final e) => TranslationEntry.fromJson(e as Map<String, dynamic>))
+            .map((final e) =>
+                TranslationEntry.fromJson(e as Map<String, dynamic>))
             .toList(),
       );
 }
@@ -261,7 +263,8 @@ class ProjectData {
   }
 
   /// Resolve `(key, locale) → translation id` within a flavor.
-  int resolveId(final String key, final String locale, {final String? flavorName}) {
+  int resolveId(final String key, final String locale,
+      {final String? flavorName}) {
     final FlavorData f = flavor(flavorName);
     final String full = canonicalKey(key, flavorName: flavorName);
     final LanguageData lang = f.languages.firstWhere(
@@ -296,7 +299,8 @@ class ProjectData {
   }) {
     final FlavorData f = flavor(flavorName);
     final String? full = matchKey(key, flavorName: flavorName);
-    final List<({String locale, int id, bool empty})> out = <({bool empty, int id, String locale})>[];
+    final List<({String locale, int id, bool empty})> out =
+        <({bool empty, int id, String locale})>[];
     for (final LanguageData l in f.languages) {
       for (final TranslationEntry t in l.translations) {
         if (t.key == full) {
@@ -329,13 +333,18 @@ List<({int? id, String error})> batchRowErrorsFrom(
   final Map<String, dynamic>? body,
 ) {
   final Object? results = body?['results'];
-  if (results is! Map<String, dynamic>) return const <({int? id, String error})>[];
+  if (results is! Map<String, dynamic>) {
+    return const <({int? id, String error})>[];
+  }
   final Object? failed = results['failed'];
   if (failed is! List) return const <({int? id, String error})>[];
   return <({int? id, String error})>[
     for (final Object? row in failed)
       if (row is Map<String, dynamic>)
-        (id: row['translation_id'] as int?, error: (row['error'] ?? '') as String),
+        (
+          id: row['translation_id'] as int?,
+          error: (row['error'] ?? '') as String
+        ),
   ];
 }
 
@@ -360,10 +369,12 @@ class BatchTranslateResult {
       successCount: (r['success_count'] ?? 0) as int,
       failedCount: (r['failed_count'] ?? 0) as int,
       failed: ((r['failed'] ?? const <dynamic>[]) as List)
-          .map((final e) => (
-                id: (e['translation_id'] ?? 0) as int,
-                error: (e['error'] ?? '') as String,
-              ),)
+          .map(
+            (final e) => (
+              id: (e['translation_id'] ?? 0) as int,
+              error: (e['error'] ?? '') as String,
+            ),
+          )
           .toList(),
     );
   }
@@ -400,8 +411,9 @@ class ProjectSummary {
         gitNeedsReauth: (j['git_needs_reauth'] ?? false) as bool,
         platforms: platformsFromJson(j['platforms']),
         flavors: ((j['flavors'] ?? const <dynamic>[]) as List)
-            .map((final e) =>
-                FlavorSummary.fromJson(e as Map<String, dynamic>),)
+            .map(
+              (final e) => FlavorSummary.fromJson(e as Map<String, dynamic>),
+            )
             .toList(),
       );
 }
@@ -463,15 +475,16 @@ class ManagementClient {
     final List<dynamic> raw =
         (_json(res)['projects'] ?? const <dynamic>[]) as List<dynamic>;
     return raw
-        .map((final dynamic e) =>
-            ProjectSummary.fromJson(e as Map<String, dynamic>),)
+        .map(
+          (final dynamic e) =>
+              ProjectSummary.fromJson(e as Map<String, dynamic>),
+        )
         .toList();
   }
 
   /// GET the full project (structure + translation ids).
   Future<ProjectData> getProject(final int projectId) async {
-    final http.Response res =
-        await _send('GET', '/api/projects/$projectId/');
+    final http.Response res = await _send('GET', '/api/projects/$projectId/');
     return ProjectData.fromJson(_json(res));
   }
 
@@ -496,7 +509,8 @@ class ManagementClient {
         'placeholders': placeholders,
       if (isPlaceholdersEnabled != null)
         'is_placeholders_enabled': isPlaceholdersEnabled,
-      if (description != null && description.isNotEmpty) 'description': description,
+      if (description != null && description.isNotEmpty)
+        'description': description,
     };
     await _send(
       'POST',
@@ -572,12 +586,15 @@ class ManagementClient {
       if (placeholders != null) 'placeholders': placeholders,
       // An empty one is dropped: tool callers send "" for arguments they do not
       // use. Clearing is its own flag.
-      if (clearDescription) 'description': ''
-      else if (description != null && description.isNotEmpty) 'description': description,
+      if (clearDescription)
+        'description': ''
+      else if (description != null && description.isNotEmpty)
+        'description': description,
       if (isChecked != null) 'is_checked': isChecked,
     };
-    final http.Response res =
-        await _send('POST', '/api/update_translation/$translationId/', body: body);
+    final http.Response res = await _send(
+        'POST', '/api/update_translation/$translationId/',
+        body: body);
     return _json(res);
   }
 
@@ -673,7 +690,7 @@ class ManagementClient {
     final http.Response res = await _send(
       'GET',
       '/api/project/$projectId/export/?flavor_id=$flavorId&format=xcstrings'
-      '&table=$table',
+          '&table=$table',
     );
     return utf8.decode(res.bodyBytes);
   }
@@ -821,7 +838,8 @@ class ManagementClient {
         },
       ));
 
-  Future<void> deleteLanguageStyle(final int projectId, final String code) async {
+  Future<void> deleteLanguageStyle(
+      final int projectId, final String code) async {
     await _send(
       'DELETE',
       '/api/projects/$projectId/language-styles/${Uri.encodeComponent(code)}/',
@@ -888,7 +906,8 @@ class ManagementClient {
     }
   }
 
-  ApiException _errorFor(final String method, final String path, final http.Response res) {
+  ApiException _errorFor(
+      final String method, final String path, final http.Response res) {
     Map<String, dynamic>? parsed;
     String message;
     try {

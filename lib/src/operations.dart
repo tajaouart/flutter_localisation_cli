@@ -40,7 +40,8 @@ class OpResult {
   final String message;
   final Map<String, dynamic> data;
 
-  Map<String, dynamic> toJson() => <String, dynamic>{'ok': ok, 'message': message, ...data};
+  Map<String, dynamic> toJson() =>
+      <String, dynamic>{'ok': ok, 'message': message, ...data};
 }
 
 /// What a translate run actually did, split three ways.
@@ -72,7 +73,8 @@ typedef VerifyOutcome = ({
 });
 
 class Operations {
-  Operations(this.client, this.projectId, {this.flavor, final CallBudget? budget})
+  Operations(this.client, this.projectId,
+      {this.flavor, final CallBudget? budget})
       : budget = budget ?? CallBudget();
 
   final ManagementClient client;
@@ -267,7 +269,8 @@ class Operations {
     };
 
     var translated = 0;
-    final List<({int id, String reason})> failed = <({int id, String reason})>[];
+    final List<({int id, String reason})> failed =
+        <({int id, String reason})>[];
     final List<({int id, String key, String locale})> unchanged =
         <({int id, String key, String locale})>[];
     for (final int id in ids) {
@@ -362,7 +365,9 @@ class Operations {
     final bool dryRun = false,
   }) async {
     if (dryRun) {
-      return OpResult(true, 'DRY RUN: would add "$key" = "$baseValue"'
+      return OpResult(
+          true,
+          'DRY RUN: would add "$key" = "$baseValue"'
           '${translate ? ' and AI-translate all other locales' : ''}.');
     }
     await client.addKey(
@@ -382,13 +387,17 @@ class Operations {
     final String? baseCode = project.baseLanguage(flavor)?.code;
     final List<int> targets = project
         .entriesForKey(key, flavorName: flavor)
-        .where((final ({bool empty, int id, String locale}) e) => e.locale != baseCode)
+        .where((final ({bool empty, int id, String locale}) e) =>
+            e.locale != baseCode)
         .map((final ({bool empty, int id, String locale}) e) => e.id)
         .toList();
 
     if (targets.isEmpty) {
-      return OpResult(true, 'Added "$key" (no other locales to translate).',
-          <String, dynamic>{'key': key},);
+      return OpResult(
+        true,
+        'Added "$key" (no other locales to translate).',
+        <String, dynamic>{'key': key},
+      );
     }
     final VerifyOutcome result = await _translateAndVerify(targets);
     return OpResult(
@@ -423,7 +432,8 @@ class Operations {
     try {
       final Object? parsed = jsonDecode(arbContent);
       if (parsed is! Map<String, dynamic>) {
-        return OpResult(false, 'Invalid ARB: top-level value must be a JSON object.');
+        return OpResult(
+            false, 'Invalid ARB: top-level value must be a JSON object.');
       }
       catalog = isCatalogJson(parsed) ||
           (fileName != null && fileName.endsWith('.xcstrings'));
@@ -495,11 +505,16 @@ class Operations {
       final int others = fl.languages.length - 1;
       // Only an import that creates keys leaves base text in other locales;
       // --overwrite rewrites the base row and leaves translations alone.
-      final String untranslated = written > 0 && others > 0 && targetsBaseLanguage && !overwrite
+      final String untranslated = written > 0 &&
+              others > 0 &&
+              targetsBaseLanguage &&
+              !overwrite
           ? ' The $written new key(s) hold the base text in the $others other '
               'locale(s) until translated: run this import again with --translate.'
           : '';
-      return OpResult(true, '${outcome.phrase} into "${fl.name}".${outcome.hint}$untranslated',
+      return OpResult(
+          true,
+          '${outcome.phrase} into "${fl.name}".${outcome.hint}$untranslated',
           <String, dynamic>{
             'imported': keyCount,
             ...outcome.data,
@@ -513,7 +528,8 @@ class Operations {
     // inside a request, in which case the chunked client-side path below is
     // exactly the right fallback.
     Object? serverSide = importResponse['translation'];
-    if (serverSide is Map<String, dynamic> && serverSide['status'] == 'queued') {
+    if (serverSide is Map<String, dynamic> &&
+        serverSide['status'] == 'queued') {
       serverSide = await _awaitTranslationJob(serverSide);
     }
     if (serverSide is Map<String, dynamic> &&
@@ -561,7 +577,8 @@ class Operations {
       if (isCatalogJson(p)) {
         importedKeys.addAll(catalogKeys(p));
       } else if (p is Map<String, dynamic>) {
-        importedKeys.addAll(p.keys.where((final String k) => !k.startsWith('@')));
+        importedKeys
+            .addAll(p.keys.where((final String k) => !k.startsWith('@')));
       }
     } catch (_) {}
     final Map<String, String> baseValues = <String, String>{};
@@ -686,7 +703,8 @@ class Operations {
       final String state = '${job['state']}';
       if (state == 'done') {
         final Map<String, dynamic> r =
-            (job['results'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+            (job['results'] as Map<String, dynamic>?) ??
+                const <String, dynamic>{};
         final int failed = (r['failed_count'] as num?)?.toInt() ?? 0;
         return <String, dynamic>{
           'status': failed == 0 ? 'success' : 'partial',
@@ -723,7 +741,8 @@ class Operations {
   static ({String phrase, String hint, Map<String, dynamic> data})
       _importOutcome(final Map<String, dynamic> response, final int keyCount) {
     final Object? summary = response['import'];
-    final Object? keys = summary is Map<String, dynamic> ? summary['keys'] : null;
+    final Object? keys =
+        summary is Map<String, dynamic> ? summary['keys'] : null;
     if (keys is! Map<String, dynamic>) {
       return (
         phrase: 'Imported $keyCount key(s)',
@@ -743,10 +762,14 @@ class Operations {
     // A String Catalog import also says which locales it wrote and which
     // keys it had to leave out (a `select`, a key Dart cannot name).
     final List<String> locales = <String>[
-      for (final Object? l in (summary['locales'] as List?) ?? const <Object?>[]) '$l',
+      for (final Object? l
+          in (summary['locales'] as List?) ?? const <Object?>[])
+        '$l',
     ];
     final List<String> problems = <String>[
-      for (final Object? p in (summary['problems'] as List?) ?? const <Object?>[]) '$p',
+      for (final Object? p
+          in (summary['problems'] as List?) ?? const <Object?>[])
+        '$p',
     ];
     final Map<String, dynamic> data = <String, dynamic>{
       'written': written,
@@ -782,12 +805,14 @@ class Operations {
 
   /// Whether [value] carries catalog argument [name] in Xcode's form: its
   /// spec plain (`%@`) or numbered (`%2$@` for `arg2`).
-  static bool _keepsSpec(final String value, final String name, final Object? meta) {
+  static bool _keepsSpec(
+      final String value, final String name, final Object? meta) {
     final RegExpMatch? arg = RegExp(r'^arg(\d+)$').firstMatch(name);
     final Object? spec = meta is Map ? meta['spec'] : null;
     if (arg == null || spec is! String || !spec.startsWith('%')) return false;
     final String text = value.replaceAll('%%', '');
-    return text.contains(spec) || text.contains('%${arg.group(1)}\$${spec.substring(1)}');
+    return text.contains(spec) ||
+        text.contains('%${arg.group(1)}\$${spec.substring(1)}');
   }
 
   /// Edit one locale's value (or plural/placeholder fields) of an existing key.
@@ -820,7 +845,8 @@ class Operations {
       // Xcode one, so it is sent as typed.
       final List<String> dropped = <String>[
         for (final MapEntry<String, dynamic> p in base.placeholders.entries)
-          if (!value.contains('{${p.key}}') && !_keepsSpec(value, p.key, p.value))
+          if (!value.contains('{${p.key}}') &&
+              !_keepsSpec(value, p.key, p.value))
             p.value is Map && (p.value as Map)['spec'] is String
                 ? '{${p.key}} (${(p.value as Map)['spec']} in Xcode)'
                 : '{${p.key}}',
@@ -836,7 +862,8 @@ class Operations {
       }
     }
     if (dryRun) {
-      return OpResult(true, 'DRY RUN: would update "$full" [$locale] (id $id).');
+      return OpResult(
+          true, 'DRY RUN: would update "$full" [$locale] (id $id).');
     }
     await client.updateTranslation(
       id,
@@ -855,7 +882,8 @@ class Operations {
       clearDescription: clearDescription,
       isChecked: isChecked,
     );
-    return OpResult(true, 'Updated "$full" [$locale].', <String, dynamic>{'key': full, 'locale': locale});
+    return OpResult(true, 'Updated "$full" [$locale].',
+        <String, dynamic>{'key': full, 'locale': locale});
   }
 
   /// Delete a key. Without [locale] the whole key is removed (all locales + the key
@@ -868,7 +896,8 @@ class Operations {
     // Whole-key delete: one call, removes the TranslationKey too (no orphaned empty key).
     if (locale == null) {
       if (dryRun) {
-        return OpResult(true, 'DRY RUN: would delete the whole key "$key" (all locales).');
+        return OpResult(
+            true, 'DRY RUN: would delete the whole key "$key" (all locales).');
       }
       await client.deleteKey(projectId, key);
       return OpResult(
@@ -882,7 +911,8 @@ class Operations {
     final ProjectData project = await client.getProject(projectId);
     final List<({String locale, int id, bool empty})> targets = project
         .entriesForKey(key, flavorName: flavor)
-        .where((final ({bool empty, int id, String locale}) e) => e.locale == locale)
+        .where((final ({bool empty, int id, String locale}) e) =>
+            e.locale == locale)
         .toList();
 
     if (targets.isEmpty) {
@@ -892,8 +922,11 @@ class Operations {
       return OpResult(true, 'DRY RUN: would delete "$key" [$locale].');
     }
     await client.deleteTranslation(targets.first.id);
-    return OpResult(true, 'Deleted "$key" [$locale].',
-        <String, dynamic>{'key': key, 'locale': locale},);
+    return OpResult(
+      true,
+      'Deleted "$key" [$locale].',
+      <String, dynamic>{'key': key, 'locale': locale},
+    );
   }
 
   /// AI-translate a key's locales. Defaults to the missing ones; pass [all] for every
@@ -909,14 +942,21 @@ class Operations {
     final List<({String locale, int id, bool empty})> entries =
         project.entriesForKey(key, flavorName: flavor);
 
-    Iterable<({String locale, int id, bool empty})> selected =
-        entries.where((final ({bool empty, int id, String locale}) e) => e.locale != baseCode);
+    Iterable<({String locale, int id, bool empty})> selected = entries.where(
+        (final ({bool empty, int id, String locale}) e) =>
+            e.locale != baseCode);
     if (locales != null && locales.isNotEmpty) {
-      selected = selected.where((final ({bool empty, int id, String locale}) e) => locales.contains(e.locale));
+      selected = selected.where(
+          (final ({bool empty, int id, String locale}) e) =>
+              locales.contains(e.locale));
     } else if (!all) {
-      selected = selected.where((final ({bool empty, int id, String locale}) e) => e.empty); // only-missing default
+      selected = selected.where(
+          (final ({bool empty, int id, String locale}) e) =>
+              e.empty); // only-missing default
     }
-    final List<int> ids = selected.map((final ({bool empty, int id, String locale}) e) => e.id).toList();
+    final List<int> ids = selected
+        .map((final ({bool empty, int id, String locale}) e) => e.id)
+        .toList();
     if (ids.isEmpty) {
       // A locale with no row for this key is invisible to `entriesForKey`, so it
       // silently drops out of the selection and the command claims there is
@@ -940,12 +980,14 @@ class Operations {
       return OpResult(true, 'Nothing to translate for "$key".');
     }
     if (dryRun) {
-      return OpResult(true, 'DRY RUN: would translate ${ids.length} locale(s) for "$key".');
+      return OpResult(
+          true, 'DRY RUN: would translate ${ids.length} locale(s) for "$key".');
     }
     final VerifyOutcome raw = await _translateAndVerify(ids);
     // en-GB of an en string is meant to read the same; listing it as
     // "identical to the source" told the caller something was wrong.
-    final List<({int id, String key, String locale})> variants = <({int id, String key, String locale})>[
+    final List<({int id, String key, String locale})> variants =
+        <({int id, String key, String locale})>[
       for (final ({int id, String key, String locale}) u in raw.unchanged)
         if (baseCode != null && isVariantOf(u.locale, baseCode)) u,
     ];
@@ -1147,7 +1189,8 @@ class Operations {
     }
 
     if (ids.isEmpty) {
-      return OpResult(true, 'Nothing to translate — every locale differs from the base.');
+      return OpResult(
+          true, 'Nothing to translate — every locale differs from the base.');
     }
     if (dryRun) {
       return OpResult(
@@ -1161,8 +1204,8 @@ class Operations {
     final Map<int, String> backendErrors = <int, String>{};
     final List<String> unattributed = <String>[];
     for (var i = 0; i < ids.length; i += chunkSize) {
-      final List<int> chunk =
-          ids.sublist(i, i + chunkSize > ids.length ? ids.length : i + chunkSize);
+      final List<int> chunk = ids.sublist(
+          i, i + chunkSize > ids.length ? ids.length : i + chunkSize);
       unattributed.addAll(await _batchAdaptive(chunk, backendErrors));
     }
 
@@ -1179,7 +1222,11 @@ class Operations {
       // pipeline's own worst offender; see `bulkCheckTranslations`.
       try {
         accepted = await client.bulkCheckTranslations(
-          <int>[for (final ({int id, String key, String locale}) e in result.unchanged) e.id],
+          <int>[
+            for (final ({int id, String key, String locale}) e
+                in result.unchanged)
+              e.id
+          ],
         );
       } on ManagementException catch (err) {
         // The whole batch failed, so no row can be attributed — but the reason
@@ -1203,8 +1250,7 @@ class Operations {
         'failed': _failedJson(result.failed),
         'unchanged': _unchangedJson(result.unchanged),
         if (acceptUnchanged) 'accepted': accepted,
-        if (acceptFailed.isNotEmpty)
-          'accept_failed': _failedJson(acceptFailed),
+        if (acceptFailed.isNotEmpty) 'accept_failed': _failedJson(acceptFailed),
       },
     );
   }
@@ -1224,8 +1270,9 @@ class Operations {
               'locale': l.code,
               'base': l.isBase,
               'keys': l.translations.length,
-              'filled':
-                  l.translations.where((final TranslationEntry t) => !t.isEmpty).length,
+              'filled': l.translations
+                  .where((final TranslationEntry t) => !t.isEmpty)
+                  .length,
             },
         ],
       },
@@ -1262,7 +1309,8 @@ class Operations {
       command: 'languages add',
       narrow: rawLanguageCodes.length == 1,
       bulkForm: 'fl languages add <code> <code> <code> '
-          '${autoTranslate ? '--auto-translate' : ''}'.trimRight(),
+              '${autoTranslate ? '--auto-translate' : ''}'
+          .trimRight(),
     );
 
     // Base languages first: a script/region variant cannot be filled before the
@@ -1277,7 +1325,8 @@ class Operations {
       );
 
     if (!dryRun && ordered.length > 1) {
-      final OpResult? bulk = await _addLanguagesInOneRequest(ordered, autoTranslate);
+      final OpResult? bulk =
+          await _addLanguagesInOneRequest(ordered, autoTranslate);
       if (bulk != null) return bulk;
     }
 
@@ -1322,11 +1371,15 @@ class Operations {
       }
     }
 
-    final int ok = results.where((final Map<String, dynamic> r) => r['ok'] == true).length;
+    final int ok =
+        results.where((final Map<String, dynamic> r) => r['ok'] == true).length;
     return OpResult(
       failures.isEmpty,
       '${dryRun ? 'DRY RUN: would add' : 'Added'} $ok/${ordered.length} locale(s).',
-      <String, dynamic>{'results': results, if (failures.isNotEmpty) 'failures': failures},
+      <String, dynamic>{
+        'results': results,
+        if (failures.isNotEmpty) 'failures': failures
+      },
     );
   }
 
@@ -1338,21 +1391,24 @@ class Operations {
     final FlavorData f = project.flavor(flavor);
     final Map<String, dynamic> response;
     try {
-      response = await client.addLanguages(projectId, f.id,
-          ordered.map(canonicalizeOrKeep).toList(), autoTranslate: autoTranslate);
+      response = await client.addLanguages(
+          projectId, f.id, ordered.map(canonicalizeOrKeep).toList(),
+          autoTranslate: autoTranslate);
     } on ApiException catch (e) {
       if (e.statusCode == 404 || e.statusCode == 405) return null;
       rethrow;
     }
     final List<Map<String, dynamic>> results = <Map<String, dynamic>>[
-      for (final Object? r in (response['results'] as List?) ?? const <Object?>[])
+      for (final Object? r
+          in (response['results'] as List?) ?? const <Object?>[])
         if (r is Map<String, dynamic>)
           <String, dynamic>{
             'locale': r['code'],
             'ok': r['status'] != 'error',
             'message': switch (r['status']) {
               'added' => 'Added "${r['code']}" to "${f.name}".',
-              'exists' => 'Locale "${r['code']}" is already on flavor "${f.name}".',
+              'exists' =>
+                'Locale "${r['code']}" is already on flavor "${f.name}".',
               _ => '${r['message'] ?? 'refused'}',
             },
           },
@@ -1434,7 +1490,8 @@ class Operations {
       );
     }
 
-    final int keyCount = f.languages.isEmpty ? 0 : f.languages.first.translations.length;
+    final int keyCount =
+        f.languages.isEmpty ? 0 : f.languages.first.translations.length;
     if (dryRun) {
       return OpResult(
         true,
@@ -1453,8 +1510,7 @@ class Operations {
       // The retry then reaches a locale the first attempt already created, and
       // reporting that as a failure would be exactly backwards: the work
       // succeeded. Fall through to the verify below, which reads the truth.
-      final String detail =
-          '${e.message} ${e.body ?? ''}'.toLowerCase();
+      final String detail = '${e.message} ${e.body ?? ''}'.toLowerCase();
       final bool alreadyExists =
           e.statusCode == 400 && detail.contains('already exists');
       if (!alreadyExists) rethrow;
@@ -1477,15 +1533,20 @@ class Operations {
         <String, dynamic>{'locale': languageCode},
       );
     }
-    final int filled =
-        added.translations.where((final TranslationEntry t) => !t.isEmpty).length;
+    final int filled = added.translations
+        .where((final TranslationEntry t) => !t.isEmpty)
+        .length;
     if (autoTranslate && keyCount > 0 && filled == 0) {
       return OpResult(
         false,
         'Added "$languageCode", but auto-translate filled 0 of $keyCount key(s). '
         'Re-run `fl translate` for the affected keys, or check the AI translation '
         'quota — do NOT fall back to per-key adds.',
-        <String, dynamic>{'locale': languageCode, 'keys': keyCount, 'filled': 0},
+        <String, dynamic>{
+          'locale': languageCode,
+          'keys': keyCount,
+          'filled': 0
+        },
       );
     }
     return OpResult(
@@ -1512,10 +1573,12 @@ class Operations {
         .where((final LanguageData l) => l.code == languageCode)
         .firstOrNull;
     if (target == null) {
-      return OpResult(false, 'Locale "$languageCode" is not on flavor "${f.name}".');
+      return OpResult(
+          false, 'Locale "$languageCode" is not on flavor "${f.name}".');
     }
     if (target.isBase) {
-      return OpResult(false, 'Refusing to remove "$languageCode": it is the base language.');
+      return OpResult(false,
+          'Refusing to remove "$languageCode": it is the base language.');
     }
     if (dryRun) {
       return OpResult(
@@ -1550,7 +1613,8 @@ class Operations {
     final List<Map<String, dynamic>> rows = <Map<String, dynamic>>[];
     for (final LanguageData l in f.languages) {
       final int total = l.translations.length;
-      final int filled = l.translations.where((final TranslationEntry t) => !t.isEmpty).length;
+      final int filled =
+          l.translations.where((final TranslationEntry t) => !t.isEmpty).length;
       // Rows a reviewer has marked checked are counted as translated even when
       // they equal the source: that is how a deliberate match is recorded.
       // A variant of the base language (`en-GB` for `en`) that reads the same
@@ -1664,7 +1728,9 @@ extension ArbExport on Operations {
       written.add(<String, dynamic>{
         'file': file,
         'locale': lang.code,
-        'keys': lang.translations.where((final TranslationEntry t) => t.key.isNotEmpty).length,
+        'keys': lang.translations
+            .where((final TranslationEntry t) => t.key.isNotEmpty)
+            .length,
         'base': lang.isBase,
       });
       if (dryRun) continue;
@@ -1707,7 +1773,8 @@ extension ArbExport on Operations {
       } on ApiException catch (e) {
         if (e.statusCode != 422) rethrow;
         final List<String> details = <String>[
-          for (final Object? d in (e.body?['details'] as List?) ?? const <Object?>[])
+          for (final Object? d
+              in (e.body?['details'] as List?) ?? const <Object?>[])
             '$d',
         ];
         return OpResult(

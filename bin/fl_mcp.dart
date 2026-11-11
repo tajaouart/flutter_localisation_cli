@@ -1,4 +1,5 @@
 #!/usr/bin/env dart
+
 /// `fl_mcp` — Model Context Protocol server for FlutterLocalisation.
 ///
 /// Exposes translation-key management to Claude (or any MCP client) over stdio, reusing the
@@ -134,7 +135,8 @@ void _bootstrap() {
     defaultProject: env['FL_PROJECT'] ?? env['FL_PROJECT_ID'],
     defaultFlavor: env['FL_FLAVOR'],
   );
-  stderr.writeln('fl_mcp: ready @ $baseUrl (workspace-scoped; pick projects by name).');
+  stderr.writeln(
+      'fl_mcp: ready @ $baseUrl (workspace-scoped; pick projects by name).');
 }
 
 Future<void> _handle(final Map<String, dynamic> msg) async {
@@ -189,7 +191,8 @@ Map<String, dynamic> get _projectProps => <String, dynamic>{
       },
       'flavor': <String, dynamic>{
         'type': 'string',
-        'description': 'Flavor name. Optional if the project has a single flavor.',
+        'description':
+            'Flavor name. Optional if the project has a single flavor.',
       },
     };
 
@@ -229,17 +232,16 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       },
       <String, dynamic>{
         'name': 'check_l10n_setup',
-        'description':
-            "Check the app's gen-l10n setup against current Flutter: "
-                'synthetic-package: true in l10n.yaml (a hard error since '
-                'Flutter 3.47), a missing `generate: true` in pubspec.yaml, and '
-                'imports of package:flutter_gen/gen_l10n, which no longer '
-                'exists, and, once the app depends on material_ui, the gen-l10n '
-                'localizationsDelegates list that leaves Material widgets '
-                'without strings, and a project still on the discontinued '
-                'intl_utils. Use it when the build says AppLocalizations or '
-                'package:flutter_gen is not found, or after a Flutter upgrade. '
-                'Offline, no token. Call with apply=false first.',
+        'description': "Check the app's gen-l10n setup against current Flutter: "
+            'synthetic-package: true in l10n.yaml (a hard error since '
+            'Flutter 3.47), a missing `generate: true` in pubspec.yaml, and '
+            'imports of package:flutter_gen/gen_l10n, which no longer '
+            'exists, and, once the app depends on material_ui, the gen-l10n '
+            'localizationsDelegates list that leaves Material widgets '
+            'without strings, and a project still on the discontinued '
+            'intl_utils. Use it when the build says AppLocalizations or '
+            'package:flutter_gen is not found, or after a Flutter upgrade. '
+            'Offline, no token. Call with apply=false first.',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
@@ -289,18 +291,23 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       },
       <String, dynamic>{
         'name': 'add_string',
-        'description':
-            'Add ONE new translation key with its base-language value. Set translate=true to '
-                'AI-fill all other locales. Preview by default; pass apply=true to write. '
-                'DO NOT CALL THIS IN A LOOP: it costs one request per key plus one per '
-                'locale, and the server refuses after '
-                '$_kAddStringLoopLimit applied calls in a session. Adding two or more keys '
-                'is always import_arb instead — one request for every key and locale.',
+        'description': 'Add ONE new translation key with its base-language value. Set translate=true to '
+            'AI-fill all other locales. Preview by default; pass apply=true to write. '
+            'DO NOT CALL THIS IN A LOOP: it costs one request per key plus one per '
+            'locale, and the server refuses after '
+            '$_kAddStringLoopLimit applied calls in a session. Adding two or more keys '
+            'is always import_arb instead — one request for every key and locale.',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
-            'key': <String, dynamic>{'type': 'string', 'description': 'The translation key.'},
-            'value': <String, dynamic>{'type': 'string', 'description': 'Base-language value.'},
+            'key': <String, dynamic>{
+              'type': 'string',
+              'description': 'The translation key.'
+            },
+            'value': <String, dynamic>{
+              'type': 'string',
+              'description': 'Base-language value.'
+            },
             'translate': <String, dynamic>{
               'type': 'boolean',
               'description': 'AI-translate all other locales after adding.',
@@ -326,7 +333,8 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             },
             'apply': <String, dynamic>{
               'type': 'boolean',
-              'description': 'false = preview only (default); true = actually write.',
+              'description':
+                  'false = preview only (default); true = actually write.',
               'default': false,
             },
             'force': <String, dynamic>{
@@ -349,7 +357,10 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
           'type': 'object',
           'properties': <String, dynamic>{
             'key': <String, dynamic>{'type': 'string'},
-            'locale': <String, dynamic>{'type': 'string', 'description': 'e.g. fr'},
+            'locale': <String, dynamic>{
+              'type': 'string',
+              'description': 'e.g. fr'
+            },
             'value': <String, dynamic>{'type': 'string'},
             'description': <String, dynamic>{
               'type': 'string',
@@ -415,15 +426,14 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       },
       <String, dynamic>{
         'name': 'add_language',
-        'description':
-            'Add one or MORE locales to the flavor. With auto_translate=true the backend '
-                'AI-fills EVERY existing key for those locales, and keeps translating keys '
-                'added later. This is the ONLY correct way to populate a new language — '
-                'never iterate keys with translate_key or add_string to do it. '
-                'PASS EVERY LOCALE YOU WANT IN `codes` — one call, not one call per '
-                'locale; a loop over this tool is refused. Base languages are ordered '
-                'first automatically, so you can pass "zh-Hant" and "zh" together. '
-                'Preview by default; apply=true writes.',
+        'description': 'Add one or MORE locales to the flavor. With auto_translate=true the backend '
+            'AI-fills EVERY existing key for those locales, and keeps translating keys '
+            'added later. This is the ONLY correct way to populate a new language — '
+            'never iterate keys with translate_key or add_string to do it. '
+            'PASS EVERY LOCALE YOU WANT IN `codes` — one call, not one call per '
+            'locale; a loop over this tool is refused. Base languages are ordered '
+            'first automatically, so you can pass "zh-Hant" and "zh" together. '
+            'Preview by default; apply=true writes.',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
@@ -454,17 +464,16 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       },
       <String, dynamic>{
         'name': 'retranslate',
-        'description':
-            'Bulk-fix locales that are filled but NOT translated. Finds every value that '
-                'is empty, or still byte-identical to the source and not yet marked '
-                'checked, and AI-translates it across whole locales in batched requests. '
-                'This is the repair path for the case list_languages cannot show you: a '
-                'locale reports 100% filled because its rows hold the untranslated source '
-                'text, so the app ships in the source language while completion looks '
-                'done. translate_key cannot fix it — those rows are not "missing", and it '
-                'is one key per call. Values that are correctly identical to the source '
-                '(loanwords, product names, notation) should be marked checked, which '
-                'excludes them from future runs. Preview by default; apply=true writes.',
+        'description': 'Bulk-fix locales that are filled but NOT translated. Finds every value that '
+            'is empty, or still byte-identical to the source and not yet marked '
+            'checked, and AI-translates it across whole locales in batched requests. '
+            'This is the repair path for the case list_languages cannot show you: a '
+            'locale reports 100% filled because its rows hold the untranslated source '
+            'text, so the app ships in the source language while completion looks '
+            'done. translate_key cannot fix it — those rows are not "missing", and it '
+            'is one key per call. Values that are correctly identical to the source '
+            '(loanwords, product names, notation) should be marked checked, which '
+            'excludes them from future runs. Preview by default; apply=true writes.',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
@@ -502,16 +511,15 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       },
       <String, dynamic>{
         'name': 'glossary',
-        'description':
-            'The project glossary: terms the translator must handle the same way in '
-                'every string. A term is either kept exactly as written in every locale '
-                '(keep=true: brand and product names, which are otherwise translated '
-                'like ordinary words) or pinned to one translation per locale '
-                '(translations={"de": "Schnipsel"}). action=list shows the glossary; '
-                'add creates or updates one term; remove deletes one; suggest lists '
-                'likely terms (project name, recurring names, acronyms); apply '
-                're-translates the strings containing glossary terms so translations '
-                'made before a term existed follow it. Writes need apply=true.',
+        'description': 'The project glossary: terms the translator must handle the same way in '
+            'every string. A term is either kept exactly as written in every locale '
+            '(keep=true: brand and product names, which are otherwise translated '
+            'like ordinary words) or pinned to one translation per locale '
+            '(translations={"de": "Schnipsel"}). action=list shows the glossary; '
+            'add creates or updates one term; remove deletes one; suggest lists '
+            'likely terms (project name, recurring names, acronyms); apply '
+            're-translates the strings containing glossary terms so translations '
+            'made before a term existed follow it. Writes need apply=true.',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
@@ -540,13 +548,12 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       },
       <String, dynamic>{
         'name': 'language_style',
-        'description':
-            'How translations address the reader per locale: formal (Sie, vous, usted, '
-                'Lei...) or informal (du, tu, tú...), plus free instructions. Regional '
-                'variants (de-AT, de-CH) follow their language unless set themselves. '
-                'action=list shows every locale and where its style comes from; set '
-                'changes one; clear removes one. Existing translations keep their '
-                'wording until re-translated (glossary action=apply with all).',
+        'description': 'How translations address the reader per locale: formal (Sie, vous, usted, '
+            'Lei...) or informal (du, tu, tú...), plus free instructions. Regional '
+            'variants (de-AT, de-CH) follow their language unless set themselves. '
+            'action=list shows every locale and where its style comes from; set '
+            'changes one; clear removes one. Existing translations keep their '
+            'wording until re-translated (glossary action=apply with all).',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
@@ -599,16 +606,15 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       },
       <String, dynamic>{
         'name': 'import_arb',
-        'description':
-            'Bulk-create keys by importing a whole ARB file or an Xcode String Catalog '
-                '(.xcstrings) in ONE request, the right tool for adding MANY strings at '
-                'once. Put all the strings in an ARB JSON (a flat {"key":"value"} map, '
-                '@-metadata allowed) and import it, instead of many add_string calls. '
-                'Provide `path` (a file on disk) or `content` (raw JSON). A String '
-                'Catalog carries every locale and names its source language, so '
-                '`language` is ignored for it. translate=true batch-translates the other '
-                'locales after import (one batch call, not per key). Preview by default; '
-                'apply=true writes.',
+        'description': 'Bulk-create keys by importing a whole ARB file or an Xcode String Catalog '
+            '(.xcstrings) in ONE request, the right tool for adding MANY strings at '
+            'once. Put all the strings in an ARB JSON (a flat {"key":"value"} map, '
+            '@-metadata allowed) and import it, instead of many add_string calls. '
+            'Provide `path` (a file on disk) or `content` (raw JSON). A String '
+            'Catalog carries every locale and names its source language, so '
+            '`language` is ignored for it. translate=true batch-translates the other '
+            'locales after import (one batch call, not per key). Preview by default; '
+            'apply=true writes.',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
@@ -623,7 +629,8 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             },
             'language': <String, dynamic>{
               'type': 'string',
-              'description': 'Locale the file represents (default: the base language).',
+              'description':
+                  'Locale the file represents (default: the base language).',
             },
             'overwrite': <String, dynamic>{
               'type': 'boolean',
@@ -639,7 +646,8 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             },
             'apply': <String, dynamic>{
               'type': 'boolean',
-              'description': 'false = preview only (default); true = actually write.',
+              'description':
+                  'false = preview only (default); true = actually write.',
               'default': false,
             },
             ..._projectProps,
@@ -648,17 +656,16 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       },
       <String, dynamic>{
         'name': 'pull_arbs',
-        'description':
-            'Bring the repo\'s ARB files (and the String Catalogs of a project that '
-                'ships iOS) in line with the service, the step after any write. Uses the git mirror when there is a usable one and the API when '
-                'there is not, so a dirty clone, a stale local commit, a wrong git '
-                'credential or an unlinked repo can never block it. Never run git '
-                'commands in the ARB directory yourself. It refuses only when the '
-                'template holds keys the service does not have (they would be '
-                'overwritten away) — import those first, or pass adopt=true to import '
-                'them as part of the pull. After it lands, the Dart still has to be '
-                'regenerated in the app repo (`dart run flutter_localisation <arb_root> '
-                '<flavor>`, or `fl sync` which does all three steps).',
+        'description': 'Bring the repo\'s ARB files (and the String Catalogs of a project that '
+            'ships iOS) in line with the service, the step after any write. Uses the git mirror when there is a usable one and the API when '
+            'there is not, so a dirty clone, a stale local commit, a wrong git '
+            'credential or an unlinked repo can never block it. Never run git '
+            'commands in the ARB directory yourself. It refuses only when the '
+            'template holds keys the service does not have (they would be '
+            'overwritten away) — import those first, or pass adopt=true to import '
+            'them as part of the pull. After it lands, the Dart still has to be '
+            'regenerated in the app repo (`dart run flutter_localisation <arb_root> '
+            '<flavor>`, or `fl sync` which does all three steps).',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
@@ -666,7 +673,7 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
               'type': 'string',
               'description':
                   'ARB directory (default: arb_dir from flutterlocalisation.json; '
-                  'xcstrings_dir for the catalogs of an iOS project).',
+                      'xcstrings_dir for the catalogs of an iOS project).',
             },
             'adopt': <String, dynamic>{
               'type': 'boolean',
@@ -682,7 +689,8 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             },
             'apply': <String, dynamic>{
               'type': 'boolean',
-              'description': 'false = preview only (default); true = write the files.',
+              'description':
+                  'false = preview only (default); true = write the files.',
               'default': false,
             },
             ..._projectProps,
@@ -691,10 +699,11 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       },
     ];
 
-Future<void> _callTool(final Object? id, final Map<String, dynamic> params) async {
+Future<void> _callTool(
+    final Object? id, final Map<String, dynamic> params) async {
   final String name = (params['name'] ?? '') as String;
-  final Map<String, dynamic> a =
-      (params['arguments'] ?? const <String, dynamic>{}) as Map<String, dynamic>;
+  final Map<String, dynamic> a = (params['arguments'] ??
+      const <String, dynamic>{}) as Map<String, dynamic>;
   final bool apply = (a['apply'] ?? false) as bool;
 
   try {
@@ -773,24 +782,28 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
       _toolResult(id, <String, dynamic>{
         'ok': true,
         'projects': projects
-            .map((final ProjectSummary p) => <String, dynamic>{
-                  'name': p.name,
-                  'id': p.id,
-                  'workspace': p.workspace,
-                  'platforms': p.platforms,
-                  if (p.gitNeedsReauth)
-                    'warning':
-                        'Git sync is disconnected — reconnect GitHub in the dashboard; '
-                            'ARB files are not updating.',
-                  'flavors': p.flavors
-                      .map((final FlavorSummary f) => <String, dynamic>{
-                            'id': f.id,
-                            'name': f.name,
-                            'base_language': f.baseLanguage,
-                            'locales': f.languages,
-                          },)
-                      .toList(),
-                },)
+            .map(
+              (final ProjectSummary p) => <String, dynamic>{
+                'name': p.name,
+                'id': p.id,
+                'workspace': p.workspace,
+                'platforms': p.platforms,
+                if (p.gitNeedsReauth)
+                  'warning':
+                      'Git sync is disconnected — reconnect GitHub in the dashboard; '
+                          'ARB files are not updating.',
+                'flavors': p.flavors
+                    .map(
+                      (final FlavorSummary f) => <String, dynamic>{
+                        'id': f.id,
+                        'name': f.name,
+                        'base_language': f.baseLanguage,
+                        'locales': f.languages,
+                      },
+                    )
+                    .toList(),
+              },
+            )
             .toList(),
       });
       return;
@@ -831,8 +844,9 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
       };
       final File templateFile = File('$arbDir/$template');
       final File catalogFile = File('$catalogDir/$kLocalizableCatalog');
-      final List<String> orphans =
-          p.shipsFlutter ? localOnlyKeys(templateFile, serviceKeys) : <String>[];
+      final List<String> orphans = p.shipsFlutter
+          ? localOnlyKeys(templateFile, serviceKeys)
+          : <String>[];
       final List<String> catalogOrphans = p.shipsIos
           ? localOnlyCatalogKeys(catalogFile, serviceKeys)
           : <String>[];
@@ -848,10 +862,10 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
           'local_only_keys': <String>[...orphans, ...catalogOrphans],
           'message':
               '$file holds ${orphans.length + catalogOrphans.length} key(s) '
-              'the service does not have; syncing would overwrite the file '
-              'and lose them. Import them first (import_arb), or call again '
-              'with adopt=true. discard_local=true takes the service copy '
-              'instead.',
+                  'the service does not have; syncing would overwrite the file '
+                  'and lose them. Import them first (import_arb), or call again '
+                  'with adopt=true. discard_local=true takes the service copy '
+                  'instead.',
         });
         return;
       }
@@ -913,11 +927,12 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
           'method': ArbSyncMethod.git.name,
           'dir': dir,
           'upstream': outcome.upstream,
-          if (outcome.discardedAnything) 'discarded': <String, dynamic>{
-            'working_changes': outcome.discardedWorkingChanges,
-            'local_commits': outcome.discardedLocalCommits,
-            'recovery_ref': outcome.recoveryRef,
-          },
+          if (outcome.discardedAnything)
+            'discarded': <String, dynamic>{
+              'working_changes': outcome.discardedWorkingChanges,
+              'local_commits': outcome.discardedLocalCommits,
+              'recovery_ref': outcome.recoveryRef,
+            },
           'steps': steps,
           'message': 'Synced "$dir" to ${outcome.upstream}. Regenerate the '
               'Dart next.',
@@ -1030,7 +1045,8 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
         );
       case 'add_language':
         final List<String> codes = <String>[
-          for (final Object? c in (a['codes'] as List<dynamic>?) ?? const <dynamic>[])
+          for (final Object? c
+              in (a['codes'] as List<dynamic>?) ?? const <dynamic>[])
             c.toString(),
           if (a['code'] != null) a['code'].toString(),
         ];
@@ -1054,7 +1070,8 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
         r = await ops.listLanguages();
       case 'glossary':
         {
-          final GlossaryOperations g = GlossaryOperations(_client, target.projectId);
+          final GlossaryOperations g =
+              GlossaryOperations(_client, target.projectId);
           final String term = (a['term'] as String?) ?? '';
           switch (a['action']) {
             case 'list':
@@ -1080,7 +1097,8 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
             case 'apply':
               r = await g.apply(
                 ops,
-                only: (a['terms'] as List<dynamic>?)?.cast<String>() ?? const <String>[],
+                only: (a['terms'] as List<dynamic>?)?.cast<String>() ??
+                    const <String>[],
                 dryRun: !apply,
               );
             default:
@@ -1090,7 +1108,8 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
         }
       case 'language_style':
         {
-          final GlossaryOperations g = GlossaryOperations(_client, target.projectId);
+          final GlossaryOperations g =
+              GlossaryOperations(_client, target.projectId);
           final String locale = (a['locale'] as String?) ?? '';
           switch (a['action']) {
             case 'list':
@@ -1105,7 +1124,8 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
             case 'clear':
               r = await g.clearStyle(locale, dryRun: !apply);
             default:
-              _error(id, -32602, 'Unknown language_style action: ${a['action']}');
+              _error(
+                  id, -32602, 'Unknown language_style action: ${a['action']}');
               return;
           }
         }
@@ -1129,8 +1149,12 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
           if (content == null && path != null) {
             final File f = File(path);
             if (!f.existsSync()) {
-              _toolResult(id,
-                  <String, dynamic>{'ok': false, 'error': 'File not found: $path'},
+              _toolResult(
+                  id,
+                  <String, dynamic>{
+                    'ok': false,
+                    'error': 'File not found: $path'
+                  },
                   isError: true);
               return;
             }
@@ -1141,7 +1165,8 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
                 id,
                 <String, dynamic>{
                   'ok': false,
-                  'error': 'Provide `path` (a file) or `content` (raw ARB JSON).',
+                  'error':
+                      'Provide `path` (a file) or `content` (raw ARB JSON).',
                 },
                 isError: true);
             return;
@@ -1164,8 +1189,11 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
     if (target.flavor != null) out['flavor'] = target.flavor;
     _toolResult(id, out, isError: !r.ok);
   } on ManagementException catch (e) {
-    _toolResult(id, <String, dynamic>{'ok': false, 'error': e.message},
-        isError: true,);
+    _toolResult(
+      id,
+      <String, dynamic>{'ok': false, 'error': e.message},
+      isError: true,
+    );
   }
 }
 
@@ -1173,8 +1201,11 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
 // JSON-RPC framing
 // --------------------------------------------------------------------------- //
 
-void _toolResult(final Object? id, final Map<String, dynamic> data,
-    {final bool isError = false,}) {
+void _toolResult(
+  final Object? id,
+  final Map<String, dynamic> data, {
+  final bool isError = false,
+}) {
   _reply(id, <String, dynamic>{
     'content': <Map<String, dynamic>>[
       <String, dynamic>{

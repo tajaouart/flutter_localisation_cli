@@ -29,15 +29,17 @@ http.Response _project(final http.Request req) => http.Response(
     );
 
 void main() {
-  test('importArb posts the ARB to the import endpoint and counts keys', () async {
+  test('importArb posts the ARB to the import endpoint and counts keys',
+      () async {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
       hits.add('${req.method} ${req.url.path}');
       if (req.url.path == '/api/projects/7/') return _project(req);
-      return http.Response(jsonEncode(<String, dynamic>{'import_status': 'success'}), 200);
+      return http.Response(
+          jsonEncode(<String, dynamic>{'import_status': 'success'}), 200);
     });
-    final ManagementClient client =
-        ManagementClient(baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock);
+    final ManagementClient client = ManagementClient(
+        baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock);
 
     final String arb = jsonEncode(<String, dynamic>{
       '@@locale': 'en',
@@ -45,14 +47,17 @@ void main() {
       'k2': 'v2',
       '@k1': <String, dynamic>{'description': 'meta, not a key'},
     });
-    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).importArb(arb);
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+        .importArb(arb);
 
     expect(r.ok, isTrue);
     expect(hits, contains('POST /api/project/7/import-arb/'));
     expect(r.data['imported'], 2); // k1, k2 — not @@locale / @k1
   });
 
-  test('importArb dry run resolves but does NOT hit the import endpoint', () async {
+  test('importArb dry run resolves but does NOT hit the import endpoint',
+      () async {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
       hits.add('${req.method} ${req.url.path}');
@@ -62,7 +67,8 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
         .importArb(jsonEncode(<String, dynamic>{'k': 'v'}), dryRun: true);
 
     expect(r.ok, isTrue);
@@ -79,8 +85,9 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r =
-        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).importArb('not json {');
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+        .importArb('not json {');
 
     expect(r.ok, isFalse);
     expect(r.message, contains('Invalid ARB'));
@@ -101,7 +108,8 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
+    await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
         .importArb(jsonEncode(<String, dynamic>{'k': 'v'}), languageCode: 'fr');
 
     // A targeted locale import must NOT fan out across every language, else it
@@ -124,7 +132,8 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
+    await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
         .importArb(jsonEncode(<String, dynamic>{'k': 'v'}));
 
     // A base-language import seeds all locales so fresh keys are translatable.
@@ -146,7 +155,8 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
+    await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
         .importArb(jsonEncode(<String, dynamic>{'k': 'v'}), languageCode: 'en');
 
     // `--language en` on an en-base project must behave exactly like omitting
@@ -161,7 +171,8 @@ void main() {
     // en has the imported key, fr does not — the exact state the old code
     // reported as "imported; nothing to translate", i.e. success with zero
     // translations.
-    http.Response projectWithUnseededFr(final http.Request req) => http.Response(
+    http.Response projectWithUnseededFr(final http.Request req) =>
+        http.Response(
           jsonEncode(<String, dynamic>{
             'id': 7,
             'name': 'P',
@@ -197,7 +208,9 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).importArb(
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+        .importArb(
       jsonEncode(<String, dynamic>{'k': 'v'}),
       translate: true,
     );
@@ -234,11 +247,14 @@ void main() {
       return _project(req);
     });
 
-    final OpResult r = await Operations(ManagementClient(
-      baseUrl: 'http://t',
-      token: 'x',
-      httpClient: mock,
-    ), 7, flavor: 'default')
+    final OpResult r = await Operations(
+            ManagementClient(
+              baseUrl: 'http://t',
+              token: 'x',
+              httpClient: mock,
+            ),
+            7,
+            flavor: 'default')
         .importArb(jsonEncode(<String, dynamic>{'k': 'v'}), translate: true);
 
     expect(r.ok, isTrue);
@@ -295,11 +311,14 @@ void main() {
       );
     });
 
-    await Operations(ManagementClient(
-      baseUrl: 'http://t',
-      token: 'x',
-      httpClient: mock,
-    ), 7, flavor: 'default')
+    await Operations(
+            ManagementClient(
+              baseUrl: 'http://t',
+              token: 'x',
+              httpClient: mock,
+            ),
+            7,
+            flavor: 'default')
         .importArb(jsonEncode(<String, dynamic>{'k': 'v'}), translate: true);
 
     expect(batchCalls, 1, reason: 'the CLI must still translate it');
@@ -358,11 +377,14 @@ void main() {
       );
     });
 
-    await Operations(ManagementClient(
-      baseUrl: 'http://t',
-      token: 'x',
-      httpClient: mock,
-    ), 7, flavor: 'default')
+    await Operations(
+            ManagementClient(
+              baseUrl: 'http://t',
+              token: 'x',
+              httpClient: mock,
+            ),
+            7,
+            flavor: 'default')
         .importArb(jsonEncode(<String, dynamic>{'k': 'v'}), translate: true);
 
     expect(batchCalls, 1);
@@ -398,7 +420,11 @@ void main() {
                   'is_base_language': true,
                   'translations': <Map<String, dynamic>>[
                     for (int i = 0; i < 25; i++)
-                      <String, dynamic>{'id': i + 1, 'key': 'k$i', 'value': 'v'},
+                      <String, dynamic>{
+                        'id': i + 1,
+                        'key': 'k$i',
+                        'value': 'v'
+                      },
                   ],
                 },
                 <String, dynamic>{
@@ -421,11 +447,14 @@ void main() {
       );
     });
 
-    await Operations(ManagementClient(
-      baseUrl: 'http://t',
-      token: 'x',
-      httpClient: mock,
-    ), 7, flavor: 'default')
+    await Operations(
+            ManagementClient(
+              baseUrl: 'http://t',
+              token: 'x',
+              httpClient: mock,
+            ),
+            7,
+            flavor: 'default')
         .importArb(
       jsonEncode(<String, dynamic>{
         for (int i = 0; i < 25; i++) 'k$i': 'v',
@@ -488,7 +517,9 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).importArb(
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+        .importArb(
       jsonEncode(<String, dynamic>{'k': 'v'}),
       translate: true,
     );

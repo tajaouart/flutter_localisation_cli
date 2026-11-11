@@ -10,7 +10,8 @@ void main() {
   setUp(() => tmp = Directory.systemTemp.createTempSync('fl_guard_test'));
   tearDown(() => tmp.deleteSync(recursive: true));
 
-  test('deriveGuardGlobs reads arb_dir (config) + l10n.yaml dirs + methods file',
+  test(
+      'deriveGuardGlobs reads arb_dir (config) + l10n.yaml dirs + methods file',
       () {
     File('${tmp.path}/l10n.yaml').writeAsStringSync(
       'arb-dir: lib/l10n\n'
@@ -42,26 +43,32 @@ void main() {
     ) as Map<String, dynamic>;
     final List<dynamic> deny =
         (json['permissions'] as Map<String, dynamic>)['deny'] as List<dynamic>;
-    expect(deny, containsAll(<String>[
-      'Edit(arbs/**)',
-      'Write(arbs/**)',
-      'Edit(lib/x.dart)',
-      'Write(lib/x.dart)',
-    ]),);
+    expect(
+      deny,
+      containsAll(<String>[
+        'Edit(arbs/**)',
+        'Write(arbs/**)',
+        'Edit(lib/x.dart)',
+        'Write(lib/x.dart)',
+      ]),
+    );
   });
 
-  test('installGuard merges into existing settings without clobbering or duping',
+  test(
+      'installGuard merges into existing settings without clobbering or duping',
       () {
     final Directory claude = Directory('${tmp.path}/.claude')..createSync();
-    File('${claude.path}/settings.json').writeAsStringSync(jsonEncode(
-      <String, dynamic>{
-        'permissions': <String, dynamic>{
-          'allow': <String>['Bash(git *)'],
-          'deny': <String>['Edit(arbs/**)'],
+    File('${claude.path}/settings.json').writeAsStringSync(
+      jsonEncode(
+        <String, dynamic>{
+          'permissions': <String, dynamic>{
+            'allow': <String>['Bash(git *)'],
+            'deny': <String>['Edit(arbs/**)'],
+          },
+          'model': 'sonnet',
         },
-        'model': 'sonnet',
-      },
-    ),);
+      ),
+    );
 
     final GuardResult r =
         installGuard(tmp, globs: <String>['arbs/**', 'lib/gen.dart']);

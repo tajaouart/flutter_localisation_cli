@@ -81,7 +81,12 @@ List<Map<String, dynamic>> _parseCsv(final String text) {
   if (termAt < 0) {
     throw ManagementException('The CSV header must have a "term" column.');
   }
-  const Set<String> flags = <String>{'keep', 'do_not_translate', 'case_sensitive', 'note'};
+  const Set<String> flags = <String>{
+    'keep',
+    'do_not_translate',
+    'case_sensitive',
+    'note'
+  };
   final List<Map<String, dynamic>> out = <Map<String, dynamic>>[];
   for (final List<String> row in rows.skip(1)) {
     if (row.every((final String c) => c.trim().isEmpty)) continue;
@@ -154,10 +159,13 @@ List<List<String>> _csvRows(final String text) {
 /// How the backend matches a term: whole words where the term starts or ends
 /// with a letter or digit, so "Pro" is not found in "Professional".
 RegExp termPattern(final String term, {final bool caseSensitive = false}) {
-  bool word(final String c) => RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(c);
-  final String start = term.isNotEmpty && word(term[0]) ? r'(?<![\p{L}\p{N}_])' : '';
-  final String end =
-      term.isNotEmpty && word(term[term.length - 1]) ? r'(?![\p{L}\p{N}_])' : '';
+  bool word(final String c) =>
+      RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(c);
+  final String start =
+      term.isNotEmpty && word(term[0]) ? r'(?<![\p{L}\p{N}_])' : '';
+  final String end = term.isNotEmpty && word(term[term.length - 1])
+      ? r'(?![\p{L}\p{N}_])'
+      : '';
   return RegExp('$start${RegExp.escape(term)}$end',
       unicode: true, caseSensitive: caseSensitive);
 }
@@ -212,11 +220,13 @@ class GlossaryOperations {
       if (caseSensitive != null) 'case_sensitive': caseSensitive,
     };
     if (dryRun) {
-      return OpResult(true, 'Would save "${term.trim()}".', <String, dynamic>{'term': payload});
+      return OpResult(true, 'Would save "${term.trim()}".',
+          <String, dynamic>{'term': payload});
     }
     final Map<String, dynamic> r =
         await client.upsertGlossary(projectId, <Map<String, dynamic>>[payload]);
-    final List<dynamic> created = r['created'] as List<dynamic>? ?? const <dynamic>[];
+    final List<dynamic> created =
+        r['created'] as List<dynamic>? ?? const <dynamic>[];
     final Map<String, dynamic> saved = (created.isNotEmpty
         ? created.first
         : (r['updated'] as List<dynamic>).first) as Map<String, dynamic>;
@@ -230,7 +240,8 @@ class GlossaryOperations {
     );
   }
 
-  Future<OpResult> remove(final String term, {final bool dryRun = false}) async {
+  Future<OpResult> remove(final String term,
+      {final bool dryRun = false}) async {
     final Map<String, dynamic>? found = await _find(term);
     if (found == null) {
       return OpResult(false, '"$term" is not in the glossary.');
@@ -240,7 +251,8 @@ class GlossaryOperations {
     return OpResult(true, 'Removed "${found['term']}".');
   }
 
-  Future<OpResult> importFile(final String path, {final bool dryRun = false}) async {
+  Future<OpResult> importFile(final String path,
+      {final bool dryRun = false}) async {
     final List<Map<String, dynamic>> terms = readGlossaryFile(path);
     if (terms.isEmpty) return OpResult(false, '$path holds no terms.');
     if (dryRun) {
@@ -255,8 +267,10 @@ class GlossaryOperations {
         projectId,
         terms.sublist(i, i + 500 > terms.length ? terms.length : i + 500),
       );
-      created.addAll((r['created'] as List<dynamic>? ?? const <dynamic>[]).cast());
-      updated.addAll((r['updated'] as List<dynamic>? ?? const <dynamic>[]).cast());
+      created
+          .addAll((r['created'] as List<dynamic>? ?? const <dynamic>[]).cast());
+      updated
+          .addAll((r['updated'] as List<dynamic>? ?? const <dynamic>[]).cast());
     }
     return OpResult(
       true,
@@ -281,17 +295,21 @@ class GlossaryOperations {
         },
     ];
     File(path).writeAsStringSync(
-      '${const JsonEncoder.withIndent('  ').convert(<String, dynamic>{'terms': rows})}\n',
+      '${const JsonEncoder.withIndent('  ').convert(<String, dynamic>{
+            'terms': rows
+          })}\n',
     );
     return OpResult(true, 'Wrote ${rows.length} term(s) to $path.',
         <String, dynamic>{'path': path, 'count': rows.length});
   }
 
-  Future<OpResult> suggest({final bool apply = false, final bool dryRun = false}) async {
+  Future<OpResult> suggest(
+      {final bool apply = false, final bool dryRun = false}) async {
     final List<Map<String, dynamic>> suggestions =
         await client.glossarySuggestions(projectId);
     if (suggestions.isEmpty) {
-      return OpResult(true, 'Nothing to suggest.', <String, dynamic>{'suggestions': suggestions});
+      return OpResult(true, 'Nothing to suggest.',
+          <String, dynamic>{'suggestions': suggestions});
     }
     if (!apply || dryRun) {
       return OpResult(
@@ -302,11 +320,16 @@ class GlossaryOperations {
         <String, dynamic>{'suggestions': suggestions},
       );
     }
-    final Map<String, dynamic> r = await client.upsertGlossary(projectId, <Map<String, dynamic>>[
+    final Map<String, dynamic> r =
+        await client.upsertGlossary(projectId, <Map<String, dynamic>>[
       for (final Map<String, dynamic> s in suggestions)
-        <String, dynamic>{'term': s['term'], 'do_not_translate': s['do_not_translate'] == true},
+        <String, dynamic>{
+          'term': s['term'],
+          'do_not_translate': s['do_not_translate'] == true
+        },
     ]);
-    final int created = (r['created'] as List<dynamic>? ?? const <dynamic>[]).length;
+    final int created =
+        (r['created'] as List<dynamic>? ?? const <dynamic>[]).length;
     return OpResult(true, 'Added $created term(s). $_retranslateHint',
         <String, dynamic>{'created': r['created']});
   }
@@ -330,10 +353,13 @@ class GlossaryOperations {
         only.map((final String t) => t.trim().toLowerCase()).toSet();
     final List<Map<String, dynamic>> chosen = <Map<String, dynamic>>[
       for (final Map<String, dynamic> t in terms)
-        if (wanted.isEmpty || wanted.contains((t['term'] as String).toLowerCase())) t,
+        if (wanted.isEmpty ||
+            wanted.contains((t['term'] as String).toLowerCase()))
+          t,
     ];
     final Set<String> unknown = wanted.difference(<String>{
-      for (final Map<String, dynamic> t in chosen) (t['term'] as String).toLowerCase(),
+      for (final Map<String, dynamic> t in chosen)
+        (t['term'] as String).toLowerCase(),
     });
     if (unknown.isNotEmpty) {
       return OpResult(false, 'Not in the glossary: ${unknown.join(', ')}.');
@@ -343,7 +369,8 @@ class GlossaryOperations {
     }
     final List<RegExp> patterns = <RegExp>[
       for (final Map<String, dynamic> t in chosen)
-        termPattern(t['term'] as String, caseSensitive: t['case_sensitive'] == true),
+        termPattern(t['term'] as String,
+            caseSensitive: t['case_sensitive'] == true),
     ];
     return ops.retranslateWhere(
       (final String base) => patterns.any((final RegExp p) => p.hasMatch(base)),
@@ -354,7 +381,8 @@ class GlossaryOperations {
 
   Future<OpResult> styles() async {
     final Map<String, dynamic> r = await client.listLanguageStyles(projectId);
-    return OpResult(true, 'Language styles.', <String, dynamic>{'languages': r['languages'] ?? const <dynamic>[]});
+    return OpResult(true, 'Language styles.',
+        <String, dynamic>{'languages': r['languages'] ?? const <dynamic>[]});
   }
 
   Future<OpResult> setStyle(
@@ -365,7 +393,8 @@ class GlossaryOperations {
   }) async {
     final String locale = canonicalizeOrKeep(code);
     if (dryRun) {
-      return OpResult(true, 'Would set $locale to ${formality.isEmpty ? "translator's choice" : formality}.');
+      return OpResult(true,
+          'Would set $locale to ${formality.isEmpty ? "translator's choice" : formality}.');
     }
     final Map<String, dynamic> saved = await client.setLanguageStyle(
       projectId,
@@ -382,7 +411,8 @@ class GlossaryOperations {
     );
   }
 
-  Future<OpResult> clearStyle(final String code, {final bool dryRun = false}) async {
+  Future<OpResult> clearStyle(final String code,
+      {final bool dryRun = false}) async {
     final String locale = canonicalizeOrKeep(code);
     if (dryRun) return OpResult(true, 'Would clear the style of $locale.');
     await client.deleteLanguageStyle(projectId, locale);
@@ -396,7 +426,8 @@ class GlossaryOperations {
   }) async {
     if (keys.isEmpty) throw ManagementException('Name at least one key.');
     if (dryRun) {
-      return OpResult(true, 'Would ${on ? 'lock' : 'unlock'} ${keys.length} key(s).');
+      return OpResult(
+          true, 'Would ${on ? 'lock' : 'unlock'} ${keys.length} key(s).');
     }
     final Map<String, dynamic> r =
         await client.setDoNotTranslate(projectId, keys, doNotTranslate: on);
@@ -423,14 +454,18 @@ class GlossaryOperations {
   static String _describe(final Map<String, dynamic> t) {
     if (t['do_not_translate'] == true) return 'kept as written';
     final Map<String, dynamic> tr =
-        (t['translations'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+        (t['translations'] as Map<String, dynamic>?) ??
+            const <String, dynamic>{};
     if (tr.isEmpty) return 'no fixed translation';
-    return tr.entries.map((final MapEntry<String, dynamic> e) => '${e.key}: ${e.value}').join(', ');
+    return tr.entries
+        .map((final MapEntry<String, dynamic> e) => '${e.key}: ${e.value}')
+        .join(', ');
   }
 
   /// One line per term, for the CLI listing.
   static String describeTerm(final Map<String, dynamic> t) {
-    final String note = (t['note'] as String? ?? '').isEmpty ? '' : '  (${t['note']})';
+    final String note =
+        (t['note'] as String? ?? '').isEmpty ? '' : '  (${t['note']})';
     return '${t['term']} → ${_describe(t)}  [${t['string_count'] ?? 0} string(s)]$note';
   }
 }

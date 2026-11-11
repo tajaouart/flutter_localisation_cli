@@ -34,7 +34,11 @@ String _project({
               'is_base_language': true,
               'translations': <Map<String, dynamic>>[
                 for (int i = 0; i < base.length; i++)
-                  <String, dynamic>{'id': i + 1, 'key': 'k$i', 'value': base[i]},
+                  <String, dynamic>{
+                    'id': i + 1,
+                    'key': 'k$i',
+                    'value': base[i]
+                  },
               ],
             },
             for (final MapEntry<String, List<Row>> e in locales.entries)
@@ -45,9 +49,8 @@ String _project({
                 'translations': <Map<String, dynamic>>[
                   for (int i = 0; i < e.value.length; i++)
                     <String, dynamic>{
-                      'id': 1000 +
-                          locales.keys.toList().indexOf(e.key) * 100 +
-                          i,
+                      'id':
+                          1000 + locales.keys.toList().indexOf(e.key) * 100 + i,
                       'key': 'k$i',
                       'value': e.value[i].value,
                       'is_checked': e.value[i].checked,
@@ -114,8 +117,11 @@ void main() {
         'fr': <Row>[v('Bonjour'), v('Au revoir'), v('Enregistrer')],
       },
     );
-    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
-        _mock(before: before, after: after);
+    final ({
+      List<List<int>> batches,
+      List<List<int>> checked,
+      MockClient client
+    }) m = _mock(before: before, after: after);
 
     final OpResult r = await _ops(m.client).retranslate();
 
@@ -134,8 +140,11 @@ void main() {
         'fr': <Row>[v('OK', checked: true), v('Save')],
       },
     );
-    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
-        _mock(before: p, after: p);
+    final ({
+      List<List<int>> batches,
+      List<List<int>> checked,
+      MockClient client
+    }) m = _mock(before: p, after: p);
 
     final OpResult r = await _ops(m.client).retranslate(dryRun: true);
 
@@ -151,8 +160,11 @@ void main() {
         'fr': <Row>[v(''), v('Enregistrer')],
       },
     );
-    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
-        _mock(before: p, after: p);
+    final ({
+      List<List<int>> batches,
+      List<List<int>> checked,
+      MockClient client
+    }) m = _mock(before: p, after: p);
 
     final OpResult r = await _ops(m.client).retranslate(dryRun: true);
 
@@ -168,8 +180,11 @@ void main() {
         'de': <Row>[v('Save')],
       },
     );
-    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
-        _mock(before: p, after: p);
+    final ({
+      List<List<int>> batches,
+      List<List<int>> checked,
+      MockClient client
+    }) m = _mock(before: p, after: p);
 
     final OpResult r =
         await _ops(m.client).retranslate(locales: <String>['de'], dryRun: true);
@@ -184,10 +199,14 @@ void main() {
         'fr': <Row>[v('Save')],
       },
     );
-    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
-        _mock(before: p, after: p);
+    final ({
+      List<List<int>> batches,
+      List<List<int>> checked,
+      MockClient client
+    }) m = _mock(before: p, after: p);
 
-    final OpResult r = await _ops(m.client).retranslate(locales: <String>['zz']);
+    final OpResult r =
+        await _ops(m.client).retranslate(locales: <String>['zz']);
 
     expect(r.ok, isFalse);
     expect(r.data['unknown_locales'], <String>['zz']);
@@ -203,8 +222,11 @@ void main() {
         'fr': <Row>[for (int i = 0; i < 5; i++) v('source $i')],
       },
     );
-    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
-        _mock(before: p, after: p);
+    final ({
+      List<List<int>> batches,
+      List<List<int>> checked,
+      MockClient client
+    }) m = _mock(before: p, after: p);
 
     await _ops(m.client).retranslate(chunkSize: 2);
 
@@ -225,8 +247,11 @@ void main() {
         'fr': <Row>[v('Save')],
       },
     );
-    final ({List<List<int>> batches, List<List<int>> checked, MockClient client}) m =
-        _mock(before: p, after: p);
+    final ({
+      List<List<int>> batches,
+      List<List<int>> checked,
+      MockClient client
+    }) m = _mock(before: p, after: p);
 
     final OpResult r = await _ops(m.client).retranslate();
 
@@ -248,8 +273,11 @@ void main() {
         'fr': <Row>[v('Save')],
       },
     );
-    final ({List<List<int>> batches, List<List<int>> checked, MockClient client})
-        m = _mock(before: p, after: p);
+    final ({
+      List<List<int>> batches,
+      List<List<int>> checked,
+      MockClient client
+    }) m = _mock(before: p, after: p);
 
     final OpResult r = await _ops(m.client).retranslate(acceptUnchanged: true);
 
@@ -283,11 +311,13 @@ void main() {
               'failed': <Map<String, dynamic>>[
                 <String, dynamic>{
                   'translation_id': null,
-                  'error': 'AI returned text identical to the source (untranslated).',
+                  'error':
+                      'AI returned text identical to the source (untranslated).',
                 },
                 <String, dynamic>{
                   'translation_id': null,
-                  'error': 'AI returned text identical to the source (untranslated).',
+                  'error':
+                      'AI returned text identical to the source (untranslated).',
                 },
               ],
             },
@@ -370,11 +400,13 @@ void main() {
               'failed': <Map<String, dynamic>>[
                 <String, dynamic>{
                   'translation_id': 1000,
-                  'error': 'AI returned text identical to the source (untranslated).',
+                  'error':
+                      'AI returned text identical to the source (untranslated).',
                 },
                 <String, dynamic>{
                   'translation_id': 1001,
-                  'error': "AI response altered placeholders — singular_case: unexpected ['count']",
+                  'error':
+                      "AI response altered placeholders — singular_case: unexpected ['count']",
                 },
               ],
             },

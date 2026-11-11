@@ -192,7 +192,8 @@ void main() {
   });
 
   group('project.pbxproj', () {
-    test('every locale is registered, grouped, and copied by a build phase', () {
+    test('every locale is registered, grouped, and copied by a build phase',
+        () {
       final String out = syncPbxproj(_minimalPbxproj, <String>['en', 'fr']);
 
       expect(out, contains('path = "fr.lproj/InfoPlist.strings"'));
@@ -216,8 +217,8 @@ void main() {
       // Random ids would rewrite the whole project file on every sync and make
       // the diff unreadable — which is how a generated file stops being read.
       expect(pbxId('InfoPlist.strings/fr'), pbxId('InfoPlist.strings/fr'));
-      expect(pbxId('InfoPlist.strings/fr'),
-          isNot(pbxId('InfoPlist.strings/de')));
+      expect(
+          pbxId('InfoPlist.strings/fr'), isNot(pbxId('InfoPlist.strings/de')));
       expect(pbxId('InfoPlist.strings/fr'), matches(RegExp(r'^[0-9A-F]{24}$')));
     });
   });
@@ -264,7 +265,8 @@ void main() {
       expect(() => planNativeSync(root), throwsA(isA<StateError>()));
     });
 
-    test('the manifest is pointed at the locale config it would otherwise ignore',
+    test(
+        'the manifest is pointed at the locale config it would otherwise ignore',
         () {
       final NativeSyncPlan plan = planNativeSync(fixture());
       final String manifest =

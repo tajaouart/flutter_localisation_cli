@@ -76,11 +76,14 @@ http.Response _json(final String body, [final int status = 200]) =>
     http.Response.bytes(
       utf8.encode(body),
       status,
-      headers: <String, String>{'content-type': 'application/json; charset=utf-8'},
+      headers: <String, String>{
+        'content-type': 'application/json; charset=utf-8'
+      },
     );
 
 Operations _ops(final MockClient mock) => Operations(
-      ManagementClient(baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock),
+      ManagementClient(
+          baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock),
       7,
       flavor: 'Default',
       budget: CallBudget.disabled(),
@@ -92,7 +95,8 @@ void main() {
   tearDown(() => tmp.deleteSync(recursive: true));
 
   group('project model', () {
-    test('platforms default to flutter when the backend predates the field', () {
+    test('platforms default to flutter when the backend predates the field',
+        () {
       final ProjectData old = ProjectData.fromJson(<String, dynamic>{
         'id': 1,
         'name': 'Old',
@@ -118,7 +122,9 @@ void main() {
   });
 
   group('config', () {
-    test('xcstrings_dir resolves against the config file and falls back to arb_dir', () {
+    test(
+        'xcstrings_dir resolves against the config file and falls back to arb_dir',
+        () {
       final File cfgFile = File(p.join(tmp.path, 'flutterlocalisation.json'))
         ..writeAsStringSync(jsonEncode(<String, dynamic>{
           'project': 'Gush',
@@ -128,7 +134,8 @@ void main() {
       expect(cfg.xcstringsDir, p.join(tmp.path, 'Gush', 'Resources'));
       expect(cfg.catalogDir, cfg.xcstringsDir);
 
-      cfgFile.writeAsStringSync(jsonEncode(<String, dynamic>{'arb_dir': 'arbs/Default'}));
+      cfgFile.writeAsStringSync(
+          jsonEncode(<String, dynamic>{'arb_dir': 'arbs/Default'}));
       final ProjectConfig arbOnly = ProjectConfig.load(path: cfgFile.path);
       expect(arbOnly.xcstringsDir, isNull);
       expect(arbOnly.catalogDir, arbOnly.arbDir);
@@ -152,15 +159,21 @@ void main() {
       final File file = File(p.join(tmp.path, kLocalizableCatalog))
         ..writeAsStringSync(jsonEncode(<String, dynamic>{
           'sourceLanguage': 'en',
-          'strings': <String, dynamic>{'known': <String, dynamic>{}, 'new %@': <String, dynamic>{}},
+          'strings': <String, dynamic>{
+            'known': <String, dynamic>{},
+            'new %@': <String, dynamic>{}
+          },
         }));
       expect(localOnlyCatalogKeys(file, <String>{'known'}), <String>['new %@']);
-      expect(localOnlyCatalogKeys(File(p.join(tmp.path, 'missing')), <String>{}), isEmpty);
+      expect(
+          localOnlyCatalogKeys(File(p.join(tmp.path, 'missing')), <String>{}),
+          isEmpty);
     });
   });
 
   group('exportCatalogs', () {
-    test('writes the served bytes unchanged and skips an empty InfoPlist', () async {
+    test('writes the served bytes unchanged and skips an empty InfoPlist',
+        () async {
       final List<String> hits = <String>[];
       final MockClient mock = MockClient((final http.Request req) async {
         hits.add('${req.method} ${req.url.path}?${req.url.query}');
@@ -181,13 +194,16 @@ void main() {
           'GET /api/project/7/export/?flavor_id=3&format=xcstrings&table=InfoPlist',
         ],
       );
-      expect(File(p.join(tmp.path, kLocalizableCatalog)).readAsStringSync(), kServedCatalog);
+      expect(File(p.join(tmp.path, kLocalizableCatalog)).readAsStringSync(),
+          kServedCatalog);
       expect(File(p.join(tmp.path, kInfoPlistCatalog)).existsSync(), isFalse);
       expect((r.data['files'] as List<dynamic>).length, 1);
     });
 
-    test('writes InfoPlist.xcstrings when the project has Info.plist keys', () async {
-      final String plist = kServedCatalog.replaceAll('running %lld', 'NSCameraUsageDescription');
+    test('writes InfoPlist.xcstrings when the project has Info.plist keys',
+        () async {
+      final String plist =
+          kServedCatalog.replaceAll('running %lld', 'NSCameraUsageDescription');
       final MockClient mock = MockClient((final http.Request req) async {
         if (req.url.path == '/api/projects/7/') {
           return _json(_project(<String>['ios']));
@@ -199,7 +215,8 @@ void main() {
       final OpResult r = await _ops(mock).exportCatalogs(tmp.path);
 
       expect(r.ok, isTrue);
-      expect(File(p.join(tmp.path, kInfoPlistCatalog)).readAsStringSync(), plist);
+      expect(
+          File(p.join(tmp.path, kInfoPlistCatalog)).readAsStringSync(), plist);
     });
 
     test('a 422 names the strings the backend could not express', () async {
@@ -210,7 +227,9 @@ void main() {
         return http.Response(
           jsonEncode(<String, dynamic>{
             'error': 'Some strings have no String Catalog equivalent.',
-            'details': <String>["key 'gender' in en: `select` has no String Catalog equivalent"],
+            'details': <String>[
+              "key 'gender' in en: `select` has no String Catalog equivalent"
+            ],
           }),
           422,
         );
@@ -230,7 +249,8 @@ void main() {
         }
         return _json(kServedCatalog);
       });
-      final OpResult r = await _ops(mock).exportCatalogs(tmp.path, dryRun: true);
+      final OpResult r =
+          await _ops(mock).exportCatalogs(tmp.path, dryRun: true);
       expect(r.ok, isTrue);
       expect(r.message, startsWith('DRY RUN'));
       expect(tmp.listSync(), isEmpty);
@@ -238,7 +258,9 @@ void main() {
   });
 
   group('importArb with a String Catalog', () {
-    test('sends no language, keeps the file name and reports locales and problems', () async {
+    test(
+        'sends no language, keeps the file name and reports locales and problems',
+        () async {
       String? body;
       String? sentPath;
       final MockClient mock = MockClient((final http.Request req) async {
@@ -251,11 +273,18 @@ void main() {
           jsonEncode(<String, dynamic>{
             'import_status': 'success',
             'import': <String, dynamic>{
-              'keys': <String, int>{'total': 2, 'written': 2, 'skipped': 0, 'unchanged': 0},
+              'keys': <String, int>{
+                'total': 2,
+                'written': 2,
+                'skipped': 0,
+                'unchanged': 0
+              },
               'rows': <String, int>{},
               'skipped_keys': <String>[],
               'locales': <String>['en', 'fr'],
-              'problems': <String>['skip_me: marked as not to translate; skipped'],
+              'problems': <String>[
+                'skip_me: marked as not to translate; skipped'
+              ],
             },
           }),
           200,
@@ -279,14 +308,16 @@ void main() {
       expect(r.message, contains('skip_me'));
     });
 
-    test('a catalog is recognised by content when it has no file name', () async {
+    test('a catalog is recognised by content when it has no file name',
+        () async {
       String? body;
       final MockClient mock = MockClient((final http.Request req) async {
         if (req.url.path == '/api/projects/7/') {
           return _json(_project(<String>['ios']));
         }
         body = req.body;
-        return http.Response(jsonEncode(<String, dynamic>{'import_status': 'success'}), 200);
+        return http.Response(
+            jsonEncode(<String, dynamic>{'import_status': 'success'}), 200);
       });
 
       final OpResult r = await _ops(mock).importArb(kServedCatalog);
@@ -297,9 +328,10 @@ void main() {
     });
 
     test('the dry run counts catalog keys, not top-level JSON keys', () async {
-      final MockClient mock = MockClient((final http.Request req) async =>
-          _json(_project(<String>['ios'])));
-      final OpResult r = await _ops(mock).importArb(kServedCatalog, dryRun: true);
+      final MockClient mock = MockClient(
+          (final http.Request req) async => _json(_project(<String>['ios'])));
+      final OpResult r =
+          await _ops(mock).importArb(kServedCatalog, dryRun: true);
       expect(r.data['keys'], 1);
       expect(r.data['format'], 'xcstrings');
       expect(r.data.containsKey('language'), isFalse);
@@ -312,9 +344,11 @@ void main() {
           return _json(_project(<String>['flutter']));
         }
         body = req.body;
-        return http.Response(jsonEncode(<String, dynamic>{'import_status': 'success'}), 200);
+        return http.Response(
+            jsonEncode(<String, dynamic>{'import_status': 'success'}), 200);
       });
-      await _ops(mock).importArb('{"@@locale": "en", "k": "v"}', fileName: 'app_en.arb');
+      await _ops(mock)
+          .importArb('{"@@locale": "en", "k": "v"}', fileName: 'app_en.arb');
       expect(body, contains('name="selected_language_code"'));
       expect(body, contains('filename="app_en.arb"'));
     });

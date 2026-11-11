@@ -20,8 +20,7 @@ class InvalidLocaleCode implements Exception {
   final String code;
 
   @override
-  String toString() =>
-      'InvalidLocaleCode: "$code" is not a locale code. '
+  String toString() => 'InvalidLocaleCode: "$code" is not a locale code. '
       "Expected forms: 'fr', 'pt-BR', 'zh-Hant', 'es-419'.";
 }
 
@@ -75,7 +74,8 @@ List<String> splitLocaleArgs(final Iterable<String> args) => args
 ///
 /// Hyphens are what BCP-47 uses and underscores are what the Dart tooling
 /// reads; a file named `app_pt-BR.arb` is not picked up by `gen_l10n` at all.
-String arbSuffix(final String code) => canonicalizeOrKeep(code).replaceAll('-', '_');
+String arbSuffix(final String code) =>
+    canonicalizeOrKeep(code).replaceAll('-', '_');
 
 /// The language subtag: `en` for `en-GB`, `pt` for `pt_BR`.
 String languageOf(final String code) =>

@@ -57,7 +57,9 @@ void main() {
     var call = 0;
     final MockClient mock = MockClient((final http.Request req) async {
       // A server from before the bulk endpoint: the CLI walks the list.
-      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
+      if (req.url.path == '/api/add-languages/') {
+        return http.Response('{"detail": "Not found."}', 404);
+      }
       hits.add('${req.method} ${req.url.path}');
       if (req.url.path == '/api/projects/7/') {
         call++;
@@ -72,12 +74,17 @@ void main() {
         );
       }
       body = req.body;
-      return http.Response(jsonEncode(<String, dynamic>{'language': <String, dynamic>{'code': 'id'}}), 200);
+      return http.Response(
+          jsonEncode(<String, dynamic>{
+            'language': <String, dynamic>{'code': 'id'}
+          }),
+          200);
     });
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
         .addLanguage('id', autoTranslate: true);
 
     expect(r.ok, isTrue);
@@ -94,7 +101,9 @@ void main() {
     var call = 0;
     final MockClient mock = MockClient((final http.Request req) async {
       // A server from before the bulk endpoint: the CLI walks the list.
-      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
+      if (req.url.path == '/api/add-languages/') {
+        return http.Response('{"detail": "Not found."}', 404);
+      }
       if (req.url.path == '/api/projects/7/') {
         call++;
         return http.Response(
@@ -113,7 +122,8 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
         .addLanguage('id', autoTranslate: true);
 
     // Must not claim success: that is what pushes callers into per-key loops.
@@ -126,18 +136,23 @@ void main() {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
       // A server from before the bulk endpoint: the CLI walks the list.
-      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
+      if (req.url.path == '/api/add-languages/') {
+        return http.Response('{"detail": "Not found."}', 404);
+      }
       hits.add('${req.method} ${req.url.path}');
       return http.Response(
-        _project(keys: 1, extra: <String, List<String>>{'id': <String>['x']}),
+        _project(keys: 1, extra: <String, List<String>>{
+          'id': <String>['x']
+        }),
         200,
       );
     });
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r =
-        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).addLanguage('id');
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+        .addLanguage('id');
 
     expect(r.ok, isFalse);
     expect(r.message, contains('already'));
@@ -151,7 +166,9 @@ void main() {
     var call = 0;
     final MockClient mock = MockClient((final http.Request req) async {
       // A server from before the bulk endpoint: the CLI walks the list.
-      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
+      if (req.url.path == '/api/add-languages/') {
+        return http.Response('{"detail": "Not found."}', 404);
+      }
       hits.add('${req.method} ${req.url.path}');
       if (req.url.path == '/api/projects/7/') {
         call++;
@@ -170,13 +187,15 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r =
-        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).addLanguage('pt_br');
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+        .addLanguage('pt_br');
 
     expect(r.ok, isTrue);
     // The backend stores `pt-BR`. Sending `pt_br` made a second row for one
     // locale, and the verify-after-write read below never found what it added.
-    expect((jsonDecode(body!) as Map<String, dynamic>)['languageCode'], 'pt-BR');
+    expect(
+        (jsonDecode(body!) as Map<String, dynamic>)['languageCode'], 'pt-BR');
     expect(r.data['locale'], 'pt-BR');
   });
 
@@ -185,31 +204,37 @@ void main() {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
       // A server from before the bulk endpoint: the CLI walks the list.
-      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
+      if (req.url.path == '/api/add-languages/') {
+        return http.Response('{"detail": "Not found."}', 404);
+      }
       hits.add('${req.method} ${req.url.path}');
       return http.Response(
-        _project(keys: 1, extra: <String, List<String>>{'pt-BR': <String>['x']}),
+        _project(keys: 1, extra: <String, List<String>>{
+          'pt-BR': <String>['x']
+        }),
         200,
       );
     });
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r =
-        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).addLanguage('PT-br');
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+        .addLanguage('PT-br');
 
     expect(r.ok, isFalse);
     expect(r.message, contains('already'));
     expect(hits.any((final String h) => h.contains('add-language')), isFalse);
   });
 
-
   test('addLanguage treats a retry\'s "already exists" as the success it is',
       () async {
     var call = 0;
     final MockClient mock = MockClient((final http.Request req) async {
       // A server from before the bulk endpoint: the CLI walks the list.
-      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
+      if (req.url.path == '/api/add-languages/') {
+        return http.Response('{"detail": "Not found."}', 404);
+      }
       if (req.url.path == '/api/projects/7/') {
         call++;
         return http.Response(
@@ -233,7 +258,8 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
         .addLanguage('pt-BR', autoTranslate: true);
 
     expect(r.ok, isTrue);
@@ -244,14 +270,17 @@ void main() {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
       // A server from before the bulk endpoint: the CLI walks the list.
-      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
+      if (req.url.path == '/api/add-languages/') {
+        return http.Response('{"detail": "Not found."}', 404);
+      }
       hits.add('${req.method} ${req.url.path}');
       return http.Response(_project(keys: 5), 200);
     });
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r = await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
         .addLanguage('th', autoTranslate: true, dryRun: true);
 
     expect(r.ok, isTrue);
@@ -264,30 +293,38 @@ void main() {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
       // A server from before the bulk endpoint: the CLI walks the list.
-      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
+      if (req.url.path == '/api/add-languages/') {
+        return http.Response('{"detail": "Not found."}', 404);
+      }
       hits.add('${req.method} ${req.url.path}');
       return http.Response(_project(keys: 1), 200);
     });
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r =
-        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).removeLanguage('en');
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+        .removeLanguage('en');
 
     expect(r.ok, isFalse);
     expect(r.message, contains('base language'));
-    expect(hits.any((final String h) => h.contains('delete-language')), isFalse);
+    expect(
+        hits.any((final String h) => h.contains('delete-language')), isFalse);
   });
 
   test('removeLanguage deletes by the language row id', () async {
     final List<String> hits = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
       // A server from before the bulk endpoint: the CLI walks the list.
-      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
+      if (req.url.path == '/api/add-languages/') {
+        return http.Response('{"detail": "Not found."}', 404);
+      }
       hits.add('${req.method} ${req.url.path}');
       if (req.url.path == '/api/projects/7/') {
         return http.Response(
-          _project(keys: 1, extra: <String, List<String>>{'id': <String>['x']}),
+          _project(keys: 1, extra: <String, List<String>>{
+            'id': <String>['x']
+          }),
           200,
         );
       }
@@ -296,8 +333,9 @@ void main() {
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    final OpResult r =
-        await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled()).removeLanguage('id');
+    final OpResult r = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+        .removeLanguage('id');
 
     expect(r.ok, isTrue);
     expect(hits, contains('DELETE /api/delete-language/200/'));
@@ -314,15 +352,21 @@ void main() {
     final Map<String, List<String>> present = <String, List<String>>{};
     final MockClient mock = MockClient((final http.Request req) async {
       // A server from before the bulk endpoint: the CLI walks the list.
-      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
+      if (req.url.path == '/api/add-languages/') {
+        return http.Response('{"detail": "Not found."}', 404);
+      }
       if (req.url.path == '/api/projects/7/') {
         return http.Response(_project(keys: 1, extra: present), 200);
       }
-      final String code =
-          (jsonDecode(req.body) as Map<String, dynamic>)['languageCode'] as String;
+      final String code = (jsonDecode(req.body)
+          as Map<String, dynamic>)['languageCode'] as String;
       posted.add(code);
       present[code] = <String>['t'];
-      return http.Response(jsonEncode(<String, dynamic>{'language': <String, dynamic>{'code': code}}), 200);
+      return http.Response(
+          jsonEncode(<String, dynamic>{
+            'language': <String, dynamic>{'code': code}
+          }),
+          200);
     });
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
@@ -345,20 +389,28 @@ void main() {
     final Map<String, List<String>> present = <String, List<String>>{};
     final MockClient mock = MockClient((final http.Request req) async {
       // A server from before the bulk endpoint: the CLI walks the list.
-      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
+      if (req.url.path == '/api/add-languages/') {
+        return http.Response('{"detail": "Not found."}', 404);
+      }
       if (req.url.path == '/api/projects/7/') {
         return http.Response(_project(keys: 1, extra: present), 200);
       }
-      final Map<String, dynamic> b = jsonDecode(req.body) as Map<String, dynamic>;
+      final Map<String, dynamic> b =
+          jsonDecode(req.body) as Map<String, dynamic>;
       final String code = b['languageCode'] as String;
       posted.add(code);
       present[code] = <String>['t'];
-      return http.Response(jsonEncode(<String, dynamic>{'language': <String, dynamic>{'code': code}}), 200);
+      return http.Response(
+          jsonEncode(<String, dynamic>{
+            'language': <String, dynamic>{'code': code}
+          }),
+          200);
     });
     final ManagementClient client =
         ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
 
-    await Operations(client, 7, flavor: 'default', budget: CallBudget.disabled())
+    await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
         .addLanguages(<String>['zh-Hant', 'pt-BR', 'zh', 'pt']);
 
     expect(posted.indexOf('zh'), lessThan(posted.indexOf('zh-Hant')));
@@ -371,11 +423,14 @@ void main() {
     final List<String> posted = <String>[];
     final MockClient mock = MockClient((final http.Request req) async {
       // A server from before the bulk endpoint: the CLI walks the list.
-      if (req.url.path == '/api/add-languages/') return http.Response('{"detail": "Not found."}', 404);
+      if (req.url.path == '/api/add-languages/') {
+        return http.Response('{"detail": "Not found."}', 404);
+      }
       if (req.url.path == '/api/projects/7/') {
         return http.Response(_project(keys: 1), 200);
       }
-      final Map<String, dynamic> b = jsonDecode(req.body) as Map<String, dynamic>;
+      final Map<String, dynamic> b =
+          jsonDecode(req.body) as Map<String, dynamic>;
       posted.add(b['languageCode'] as String);
       return http.Response('{"detail":"Rate limited for another 600s"}', 429,
           headers: <String, String>{'retry-after': '600'});
