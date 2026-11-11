@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.15.0] - 2026-11-11
+### Added
+- `fl doctor [--fix]` and the MCP tool `check_l10n_setup`: find and fix a gen-l10n setup current
+  Flutter refuses (`synthetic-package: true`, a missing `generate: true`, imports of
+  `package:flutter_gen/gen_l10n`) and report a missing `flutter_localizations` or `intl` dependency.
+
 ## [1.14.3] - 2026-11-01
 ### Changed
 - `fl edit` sends a String Catalog value as typed (`%@`, `%1$lld`) and lets the service convert it,

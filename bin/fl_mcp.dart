@@ -27,6 +27,7 @@ import 'package:flutter_localisation_cli/src/arb_sync.dart';
 import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/glossary.dart';
+import 'package:flutter_localisation_cli/src/l10n_doctor.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/native_sync.dart';
@@ -222,6 +223,33 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
               'type': 'boolean',
               'description':
                   'false (default) reports what is stale; true writes it.',
+            },
+          },
+        },
+      },
+      <String, dynamic>{
+        'name': 'check_l10n_setup',
+        'description':
+            "Check the app's gen-l10n setup against current Flutter: "
+                'synthetic-package: true in l10n.yaml (a hard error since '
+                'Flutter 3.47), a missing `generate: true` in pubspec.yaml, and '
+                'imports of package:flutter_gen/gen_l10n, which no longer '
+                'exists. Use it when the build says AppLocalizations or '
+                'package:flutter_gen is not found, or after a Flutter upgrade. '
+                'Offline, no token. Call with apply=false first.',
+        'inputSchema': <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'project_root': <String, dynamic>{
+              'type': 'string',
+              'description':
+                  'Path to the Flutter project root. Defaults to the working '
+                      'directory the server was started in.',
+            },
+            'apply': <String, dynamic>{
+              'type': 'boolean',
+              'description':
+                  'false (default) reports; true rewrites the files.',
             },
           },
         },
@@ -667,6 +695,34 @@ Future<void> _callTool(final Object? id, final Map<String, dynamic> params) asyn
   final bool apply = (a['apply'] ?? false) as bool;
 
   try {
+    if (name == 'check_l10n_setup') {
+      final Directory root = Directory(
+        (a['project_root'] as String?) ?? Directory.current.path,
+      );
+      if (!root.existsSync()) {
+        _toolResult(id, <String, dynamic>{
+          'ok': false,
+          'message': 'No such directory: ${root.path}',
+        });
+        return;
+      }
+      final L10nDoctorReport r = checkL10nSetup(root, fix: apply);
+      final int fixed = r.issues.where((final L10nIssue i) => i.fixed).length;
+      _toolResult(id, <String, dynamic>{
+        ...r.toJson(),
+        'applied': apply,
+        'message': !r.applicable
+            ? 'No l10n.yaml and no package:flutter_gen import: nothing to check.'
+            : r.issues.isEmpty
+                ? 'gen-l10n setup is current.'
+                : apply
+                    ? 'Fixed $fixed of ${r.issues.length} issue(s). '
+                        'Run flutter gen-l10n.'
+                    : '${r.issues.length} issue(s), call again with apply=true.',
+      });
+      return;
+    }
+
     // sync_native_locales touches only the local repo — no token, no project.
     if (name == 'sync_native_locales') {
       final Directory root = Directory(

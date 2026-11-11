@@ -25,6 +25,7 @@ import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/glossary.dart';
 import 'package:flutter_localisation_cli/src/guard.dart';
 import 'package:flutter_localisation_cli/src/init_detect.dart';
+import 'package:flutter_localisation_cli/src/l10n_doctor.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/native_sync.dart';
@@ -73,6 +74,7 @@ Future<void> main(final List<String> args) async {
   runner.addCommand(PullCommand());
   runner.addCommand(SyncCommand());
   runner.addCommand(GuardCommand());
+  runner.addCommand(DoctorCommand());
   runner.addCommand(NativeCommand());
   runner.addCommand(ExportCommand());
   runner.addCommand(GlossaryCommand());
@@ -1786,6 +1788,55 @@ class GuardCommand extends Command<int> {
           : '✓ Updated AI guidance → $path');
     }
     return 0;
+  }
+}
+
+/// `fl doctor`: the gen-l10n setup that stops building after a Flutter upgrade.
+class DoctorCommand extends Command<int> {
+  DoctorCommand() {
+    argParser.addFlag(
+      'fix',
+      negatable: false,
+      help: 'Rewrite l10n.yaml, pubspec.yaml and the imports.',
+    );
+  }
+
+  bool get _jsonOut => (globalResults?['json'] as bool?) ?? false;
+
+  @override
+  String get name => 'doctor';
+  @override
+  String get description =>
+      'Check l10n.yaml, pubspec.yaml and imports against current Flutter '
+      '(synthetic-package, generate: true, package:flutter_gen).';
+  @override
+  String get invocation => 'fl doctor [--fix]';
+
+  @override
+  Future<int> run() async {
+    final bool fix = argResults!['fix'] as bool;
+    final L10nDoctorReport r = checkL10nSetup(Directory.current, fix: fix);
+    if (_jsonOut) {
+      stdout.writeln(const JsonEncoder.withIndent('  ').convert(r.toJson()));
+      return r.ok ? 0 : 1;
+    }
+    if (!r.applicable) {
+      stdout.writeln('No l10n.yaml and no package:flutter_gen import here.');
+      return 0;
+    }
+    if (r.issues.isEmpty) {
+      stdout.writeln('✓ gen-l10n setup is current.');
+      return 0;
+    }
+    for (final L10nIssue i in r.issues) {
+      stdout.writeln('${i.fixed ? '✓ fixed' : '✗'} ${i.file}: ${i.message}');
+    }
+    if (r.ok) {
+      stdout.writeln('Run flutter gen-l10n (or flutter pub get) to regenerate.');
+      return 0;
+    }
+    if (!fix) stdout.writeln('Run fl doctor --fix to apply.');
+    return 1;
   }
 }
 

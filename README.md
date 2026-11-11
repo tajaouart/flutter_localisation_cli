@@ -67,6 +67,7 @@ fl sync app_en.arb                       # import, pull and regenerate the Dart,
 fl guard                                 # stop AI agents editing ARBs + generated Dart
 fl native                                # tell iOS + Android about the locales, translate
                                          # the iOS permission alerts
+fl doctor --fix                          # fix a gen-l10n setup current Flutter refuses
 fl glossary add Dictee --keep            # never translate the app's name
 fl glossary add Snippets --as de=Schnipsel --as fr=Extraits
 fl style set de --formal                 # Sie, never du (de-AT, de-CH follow)
@@ -213,6 +214,14 @@ with more than one argument they are numbered (`%1$@`, `%2$lld`). ICU plurals be
 variations. Not supported in a catalog: ICU `select`, substitutions (several plural arguments
 in one string) and device variations; the export names the offending keys and refuses.
 
+### `fl doctor` — after a Flutter upgrade
+
+Flutter no longer generates `package:flutter_gen`: since 3.47, `synthetic-package: true` fails
+the build, gen-l10n refuses to run without `generate: true`, and every
+`import 'package:flutter_gen/gen_l10n/...'` breaks. `fl doctor` finds all three, plus a missing
+`flutter_localizations` or `intl` dependency; `fl doctor --fix` rewrites `l10n.yaml`,
+`pubspec.yaml` and the imports (to `package:<your_app>/<output-dir>/...`). Offline, no token.
+
 ### `fl native` — the half of localisation that is not the ARBs
 
 Translating an app is three jobs, and the ARBs are only the first.
@@ -338,8 +347,8 @@ translate it to all locales."* Tools: `list_projects`, `list_status`, `list_lang
 `add_language`, `project_repo`, `add_string`, `edit_string`, `delete_string`, `translate_key`,
 `retranslate`, `import_arb`, `pull_arbs`, `glossary`, `language_style`, `lock_keys` (each
 takes an optional `project`/`flavor`), and
-`sync_native_locales` — the MCP face of `fl native`, which needs no token and takes an optional
-`project_root`. `project_repo` returns the linked ARB git repo so the agent can clone it before
+`sync_native_locales` — the MCP face of `fl native`, and `check_l10n_setup` — the MCP face of
+`fl doctor`, both needing no token and taking an optional `project_root`. `project_repo` returns the linked ARB git repo so the agent can clone it before
 codegen; `pull_arbs` writes the ARBs into `arb_dir` (and the String Catalogs into
 `xcstrings_dir`) the same way `fl pull` does. `import_arb` takes an `.xcstrings` too.
 
