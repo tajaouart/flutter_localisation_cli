@@ -368,6 +368,13 @@ A string change then goes `add_string` or `import_arb` → `pull_arbs` → regen
 (`fl sync`, or `dart run flutter_localisation <arb_root> <flavor>`) → `analyze_files`. After a Flutter upgrade: `check_l10n_setup` with `apply: true`, `flutter gen-l10n`,
 then `analyze_files`.
 
+## VS Code extension
+
+[Flutter Localization (ARB, gen-l10n)](https://marketplace.visualstudio.com/items?itemName=flutterlocalisation.flutter-l10n)
+reports hardcoded strings, extracts them to the template ARB with one quick fix, regenerates on save and shows
+every translation on hover. Its **Translate and Sync** command runs `fl sync`. Also on Open VSX for Cursor and
+other VS Code forks.
+
 ## Agent skill
 
 `skills/flutter-localisation` teaches a coding agent the workflows above: setup, adding strings
