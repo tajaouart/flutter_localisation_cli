@@ -353,6 +353,20 @@ takes an optional `project`/`flavor`), and
 codegen; `pull_arbs` writes the ARBs into `arb_dir` (and the String Catalogs into
 `xcstrings_dir`) the same way `fl pull` does. `import_arb` takes an `.xcstrings` too.
 
+### With the Dart and Flutter MCP server
+
+`dart mcp-server` (Dart 3.12+) gives the agent the analyzer, tests, `dart fix`, hot reload and
+the widget inspector; `fl_mcp` changes the strings. Run both, no tool names overlap:
+
+```bash
+claude mcp add dart -- dart mcp-server
+claude mcp add flutter-localisation --env FL_API_TOKEN=flk_live_xxx -- fl_mcp
+```
+
+A string change then goes `add_string` or `import_arb` → `pull_arbs` → regenerate the Dart
+(`fl sync`, or `dart run flutter_localisation <arb_root> <flavor>`) → `analyze_files`. After a Flutter upgrade: `check_l10n_setup` with `apply: true`, `flutter gen-l10n`,
+then `analyze_files`.
+
 ## Agent skill
 
 `skills/flutter-localisation` teaches a coding agent the workflows above: setup, adding strings

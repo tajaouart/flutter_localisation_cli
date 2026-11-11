@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.16.2] - 2026-11-11
+### Added
+- README: running `fl_mcp` next to `dart mcp-server`, and the order to use their tools in.
+  The agent skill points to the Dart server for analysis and tests.
+
 ## [1.16.1] - 2026-11-11
 ### Added
 - Agent skill `skills/flutter-localisation`, installed with

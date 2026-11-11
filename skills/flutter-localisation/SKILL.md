@@ -30,6 +30,8 @@ fl / fl_mcp -> backend stores and AI-translates -> backend pushes ARBs to git
 
 When the `fl_mcp` tools are available, prefer them to shelling out. Mutating tools only preview until called with `apply: true`.
 
+When Dart's own MCP server (`dart mcp-server`) is also connected, use it to check the result: `analyze_files` after regenerating the Dart, `run_tests` before calling the work done. `fl_mcp` changes strings, the Dart server checks code; their tool names do not overlap.
+
 ## Rules
 
 - **Never edit ARB files or generated Dart by hand.** The backend owns the ARB directory, `l10n.yaml`'s `output-dir` and `lib/generated_translation_methods.dart`. A direct edit is overwritten on the next sync. Change strings through `fl` or `fl_mcp`, then `fl pull` or `fl sync`. `fl guard` makes Claude Code refuse those edits; run it once per project.
