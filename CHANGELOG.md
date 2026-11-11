@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.16.1] - 2026-11-11
+### Added
+- Agent skill `skills/flutter-localisation`, installed with
+  `npx skills add tajaouart/flutter_localisation_cli --skill flutter-localisation`.
+
 ## [1.16.0] - 2026-11-11
 ### Added
 - `fl doctor` warns when an app depends on `material_ui` but still passes the gen-l10n
