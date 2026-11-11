@@ -353,6 +353,16 @@ takes an optional `project`/`flavor`), and
 codegen; `pull_arbs` writes the ARBs into `arb_dir` (and the String Catalogs into
 `xcstrings_dir`) the same way `fl pull` does. `import_arb` takes an `.xcstrings` too.
 
+## Agent skill
+
+`skills/flutter-localisation` teaches a coding agent the workflows above: setup, adding strings
+and languages in bulk, `fl doctor` after a Flutter upgrade, live updates and `fl native`, and
+never editing the generated files by hand. Install it into an app with:
+
+```bash
+npx skills add tajaouart/flutter_localisation_cli --skill flutter-localisation
+```
+
 ## How strings reach your app
 
 ```
