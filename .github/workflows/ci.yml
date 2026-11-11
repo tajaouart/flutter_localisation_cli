@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned: the formatter's output changes between SDK releases, so the
+      # format check only means something against one version.
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.13.7
+      - run: dart pub get
+      - run: dart format --output=none --set-exit-if-changed lib bin test
+      - run: dart analyze --fatal-infos lib bin test
+      - run: dart test
