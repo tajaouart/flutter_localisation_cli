@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.17.0] - 2026-11-11
+### Added
+- `fl doctor` and `check_l10n_setup` flag a project that still uses `intl_utils`, which is
+  discontinued on pub.dev, and link the gen-l10n migration guide. The agent skill covers the
+  migration too.
+
 ## [1.16.2] - 2026-11-11
 ### Added
 - README: running `fl_mcp` next to `dart mcp-server`, and the order to use their tools in.

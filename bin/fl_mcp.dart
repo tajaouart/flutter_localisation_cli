@@ -236,7 +236,8 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
                 'imports of package:flutter_gen/gen_l10n, which no longer '
                 'exists, and, once the app depends on material_ui, the gen-l10n '
                 'localizationsDelegates list that leaves Material widgets '
-                'without strings. Use it when the build says AppLocalizations or '
+                'without strings, and a project still on the discontinued '
+                'intl_utils. Use it when the build says AppLocalizations or '
                 'package:flutter_gen is not found, or after a Flutter upgrade. '
                 'Offline, no token. Call with apply=false first.',
         'inputSchema': <String, dynamic>{

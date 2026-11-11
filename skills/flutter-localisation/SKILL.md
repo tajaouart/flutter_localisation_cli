@@ -108,6 +108,8 @@ localizationsDelegates: [
 
 - [ ] Run `fl doctor` again until it reports nothing, then `flutter analyze`.
 
+An app still on `intl_utils` (a `flutter_intl:` section in `pubspec.yaml`, class `S`) has to move to gen-l10n first: follow https://flutterlocalisation.com/blog/migrate-intl-utils-flutter-intl-to-gen-l10n. Keep `output-class: S` so `S.of(context)` keeps working, replace `S.current`, and set `Intl.defaultLocale` in `MaterialApp.builder` or dates silently fall back to the system locale.
+
 ## Workflow: Live updates
 
 Paid plans only. The app fetches changed strings at runtime, so a wording fix ships without a store release.

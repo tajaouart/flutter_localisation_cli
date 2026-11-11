@@ -219,7 +219,8 @@ in one string) and device variations; the export names the offending keys and re
 Flutter no longer generates `package:flutter_gen`: since 3.47, `synthetic-package: true` fails
 the build, gen-l10n refuses to run without `generate: true`, and every
 `import 'package:flutter_gen/gen_l10n/...'` breaks. `fl doctor` finds all three, plus a missing
-`flutter_localizations` or `intl` dependency, and an app on `material_ui` that still passes
+`flutter_localizations` or `intl` dependency, a project still on the discontinued `intl_utils` (with a link to the migration guide),
+and an app on `material_ui` that still passes
 `AppLocalizations.localizationsDelegates` (Material widgets then get no localized strings); `fl doctor --fix` rewrites `l10n.yaml`,
 `pubspec.yaml` and the imports (to `package:<your_app>/<output-dir>/...`). Offline, no token.
 

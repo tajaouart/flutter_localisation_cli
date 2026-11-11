@@ -201,4 +201,27 @@ void main() {
     );
     expect(checkL10nSetup(tmp).applicable, isFalse);
   });
+
+  test('an intl_utils app is pointed at the migration guide', () {
+    write(
+      'pubspec.yaml',
+      '${pubspec}dev_dependencies:\n  intl_utils: ^2.8.0\n\n'
+          'flutter_intl:\n  enabled: true\n',
+    );
+    final L10nDoctorReport r = checkL10nSetup(tmp, fix: true);
+    expect(r.applicable, isTrue);
+    final L10nIssue issue = r.issues.first;
+    expect(issue.code, 'intl-utils');
+    expect(issue.fixed, isFalse);
+    expect(issue.message, contains(intlUtilsGuide));
+  });
+
+  test('a migrated app without intl_utils is quiet', () {
+    write(
+        'pubspec.yaml',
+        pubspec.replaceFirst(
+            'flutter:\n  uses', 'flutter:\n  generate: true\n  uses'));
+    write('l10n.yaml', 'arb-dir: lib/l10n\n');
+    expect(codes(checkL10nSetup(tmp)), isNot(contains('intl-utils')));
+  });
 }

@@ -19,7 +19,7 @@ class L10nIssue {
     this.fixed = false,
   });
 
-  /// `synthetic-package`, `generate-flag`, `dependencies`,
+  /// `intl-utils`, `synthetic-package`, `generate-flag`, `dependencies`,
   /// `flutter-gen-import` or `material-ui-delegates`.
   final String code;
   final String message;
@@ -54,6 +54,13 @@ class L10nDoctorReport {
       };
 }
 
+const String intlUtilsGuide =
+    'https://flutterlocalisation.com/blog/migrate-intl-utils-flutter-intl-to-gen-l10n';
+
+/// The `flutter_intl:` section or an `intl_utils` dependency.
+final RegExp _intlUtils =
+    RegExp(r'^(?:flutter_intl:|\s+intl_utils:)', multiLine: true);
+
 /// Only import and export directives: the prefix inside a string or a comment is
 /// not a dependency.
 final RegExp _flutterGenDirective = RegExp(
@@ -67,11 +74,22 @@ L10nDoctorReport checkL10nSetup(final Directory root,
   final File l10nYaml = File(p.join(root.path, 'l10n.yaml'));
   final File pubspec = File(p.join(root.path, 'pubspec.yaml'));
   final List<File> importers = _dartFilesImportingFlutterGen(root);
-  if (!l10nYaml.existsSync() && importers.isEmpty) {
+  final bool intlUtils =
+      pubspec.existsSync() && _intlUtils.hasMatch(pubspec.readAsStringSync());
+  if (!l10nYaml.existsSync() && importers.isEmpty && !intlUtils) {
     return L10nDoctorReport(<L10nIssue>[], applicable: false);
   }
 
-  final List<L10nIssue> issues = <L10nIssue>[];
+  final List<L10nIssue> issues = <L10nIssue>[
+    if (intlUtils)
+      L10nIssue(
+        'intl-utils',
+        'uses intl_utils (Flutter Intl), which is discontinued on pub.dev. '
+            'Move to gen-l10n: $intlUtilsGuide',
+        file: 'pubspec.yaml',
+        fixable: false,
+      ),
+  ];
   String arbDir = 'lib/l10n';
   String? outputDir;
 
