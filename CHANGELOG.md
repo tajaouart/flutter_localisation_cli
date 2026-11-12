@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.17.1] - 2026-11-12
+### Fixed
+- `fl sync` and `fl init` codegen works with an absolute `arb_dir`: the generator gets the
+  flavor folder and its parent split with `package:path`, and runs from the app root. When it
+  fails, its own output is printed; the "add flutter_localisation" hint only shows when the
+  pubspec lacks it, and a pubspec without `generate: true` gets a warning first.
+- `fl clone` clones into the folder above `arb_dir` when that folder is a flavor name
+  (`arbs/` for `arbs/Default`), matching the repo's one-folder-per-flavor layout, instead of
+  ending up with `arbs/Default/Default`. A refused https clone on github.com, gitlab.com or
+  bitbucket.org is retried over SSH.
+- `fl edit` without `--locale` edits the base language. A missing mandatory option on any
+  command prints the usage and exits 64 instead of a stack trace.
+- `fl init` always stores the flavor in `flutterlocalisation.json`. Flavor resolution goes
+  `--flavor`, the config's `flavor`, the last folder of `arb_dir` when it names a flavor, then
+  the only flavor, so adding a second flavor in the dashboard no longer breaks every command.
+- `fl pull` stops when the clone's origin is not the repo the project is linked to (relinked
+  in the dashboard), prints both and the `git remote set-url` that fixes it, with a
+  `repo_mismatch` shape under `--json`. When `arb_dir` sits inside the app's own repo, `pull`
+  writes from the API rather than resetting the app.
+
 ## [1.17.0] - 2026-11-11
 ### Added
 - `fl doctor` and `check_l10n_setup` flag a project that still uses `intl_utils`, which is

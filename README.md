@@ -52,7 +52,7 @@ fl init                                  # first run: token, project, folders, f
 fl projects                              # list your projects (name, flavors, locales)
 fl status --project "Chat Bot"           # completion % per locale
 fl add greeting --value "Hello" -t       # add key + AI-translate every other locale
-fl edit greeting --locale fr --value "Bonjour"
+fl edit greeting --locale fr --value "Bonjour"   # no --locale: the base language
 fl edit done_body --locale fr --value "{arg1} en {arg2} s"   # catalog key by its stem
 fl import strings.arb -t                 # bulk-create MANY keys from one ARB, then translate
 fl translate greeting --missing          # fill only empty locales
@@ -61,7 +61,7 @@ fl languages add id -t                   # add a locale and AI-fill EVERY existi
 fl languages remove id                   # drop a locale and its translations
 fl delete greeting                       # whole key (or --locale fr for one locale)
 fl repo                                  # print the ARB git repo URL (from the dashboard)
-fl clone                                 # first-time: clone that repo into arb_dir
+fl clone                                 # first-time: clone that repo above arb_dir
 fl pull                                  # sync arb_dir with the service (git or API)
 fl sync app_en.arb                       # import, pull and regenerate the Dart, in one
 fl guard                                 # stop AI agents editing ARBs + generated Dart
@@ -175,6 +175,12 @@ fl sync app_en.arb     # import that file, pull, then regenerate the Dart
 fl export path/to/dir  # just the write, to any directory
 ```
 
+`fl sync` and `fl init` regenerate the Dart with `dart run flutter_localisation <folder>
+<flavor>` from the app root (the folder holding `flutterlocalisation.json`), whatever folder
+you run them from. They warn first when `pubspec.yaml` lacks `generate: true`, and when the
+generator fails they print the end of its output, adding the `flutter pub add
+flutter_localisation` hint only when the pubspec really lacks it.
+
 **Keys that exist only on disk stop a sync.** Both paths rewrite the template from the
 service, so a key staged by hand for an import that never ran would vanish — it has
 happened, and it took an app's build with it. `pull` and `export` name those keys and
@@ -280,7 +286,7 @@ The backend pushes generated ARBs to a git repo you link in the dashboard (**Pro
 
 ```bash
 fl repo --project "V-Shape"      # → https://github.com/you/shape_arbs  (github)
-fl clone --project "V-Shape"     # clones it into arb_dir (default: ./arbs)
+fl clone --project "V-Shape"     # arb_dir arbs/Default: clones it as ./arbs
 echo '/arbs/' >> .gitignore      # the backend owns that repo; don't vendor it
 ```
 
@@ -296,10 +302,20 @@ nullable-getter: false
 `fl repo` reads the linked provider off the project detail endpoint (`github`, `gitlab`,
 `bitbucket` or `bitbucket_server`) and warns when the git token needs reconnecting. `--json`
 gives `{project, repository: {provider, url, needs_reauth}}`; it exits non-zero when no
-provider is linked. `fl clone [<dir>]` refuses to clobber a non-empty directory — use
-`fl pull` to update an existing clone. Preview either with `--dry-run`. If the clone never
-happens, or the machine's git credential cannot see the repo, `fl pull` still works: it
-writes the ARBs from the API.
+provider is linked. The repo holds one folder per flavor at its root, so when the last folder
+of `arb_dir` is a flavor name, `fl clone` clones into the folder above it (`arbs/` for
+`arbs/Default`); `fl clone <dir>` clones exactly where you say. It refuses to clobber a
+non-empty directory: use `fl pull` to update an existing clone. When git is refused the https
+URL of a private repo on github.com, gitlab.com or bitbucket.org, `fl clone` retries the SSH
+form (`git@host:owner/repo.git`) and says which one worked. Preview either with `--dry-run`.
+If the clone never happens, or the machine's git credential cannot see the repo, `fl pull`
+still works: it writes the ARBs from the API.
+
+When the project is relinked to another repo in the dashboard, `fl pull` stops instead of
+syncing the old clone: it prints the clone's origin and the new repo, and the
+`git -C arbs remote set-url origin <new>` that fixes it (or delete the clone and run
+`fl clone` again). `--json` reports it as `{"ok": false, "error": "repo_mismatch", ...}`.
+https, SSH and `.git` spellings of one repo count as the same repo.
 
 `fl guard` writes `permissions.deny` rules into `.claude/settings.json` so Claude Code refuses
 to `Edit`/`Write` the backend-managed files — the ARB directory (`arb_dir` + `l10n.yaml`
@@ -313,6 +329,9 @@ time:
 ```json
 { "project": "Chat Bot", "flavor": "Default", "arb_dir": "widget_chat_arbs" }
 ```
+
+The flavor comes from `--flavor`, then `flavor` here (`fl init` writes it), then the last
+folder of `arb_dir` when it names a flavor (`arbs/Default`), then the project's only flavor.
 
 `xcstrings_dir` (optional) is where `fl pull` writes the iOS String Catalogs, relative to the
 config file like `arb_dir`; an iOS-only app points it at its Xcode resources folder. Without

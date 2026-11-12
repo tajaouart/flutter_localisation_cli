@@ -202,7 +202,7 @@ mixin _ApiCommand on Command<int> {
     final String? projectArg = globalResults?['project'] as String?;
     final String? flavor = (globalResults?['flavor'] as String?) ?? cfg.flavor;
 
-    // Fast path: an explicit numeric id in config and no name override — no
+    // Fast path: an explicit numeric id in config and no name override, no
     // lookup needed. Without a flavor, `arb_dir` may name it, and only the
     // project's flavor list can tell.
     if (projectArg == null &&
