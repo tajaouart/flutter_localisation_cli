@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.17.2] - 2026-11-12
+### Fixed
+- `fl pull` checks for a relinked repository before the local-only key guard. A clone of
+  the old repository holds the old repository's keys, and the guard offered `--adopt`,
+  which would have imported them.
+
 ## [1.17.1] - 2026-11-12
 ### Fixed
 - `fl sync` and `fl init` codegen works with an absolute `arb_dir`: the generator gets the

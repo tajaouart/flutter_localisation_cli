@@ -1463,6 +1463,45 @@ Future<int> _pullArbs(
         if (t.key.isNotEmpty) t.key,
     };
 
+    // Checked before anything reads the files: a clone of the old repo
+    // holds the old repo's keys, and offering to adopt them would import
+    // strings from a repository the project left.
+    final GitMirror mirror = GitMirror(dir);
+    final GitRepository? linked = project.repository;
+    final ({String name, String url, String root})? local =
+        noGit || linked == null ? null : await mirror.remote();
+    final bool appRepo = local != null &&
+        _contains(local.root, cfg.root ?? Directory.current.path);
+    // Relinking the project in the dashboard leaves the old clone behind,
+    // and it would go on syncing fine from a repo nobody pushes to.
+    if (local != null && !appRepo && !sameRepo(local.url, linked!.url)) {
+      final String fix =
+          'git -C ${local.root} remote set-url ${local.name} ${linked.url}';
+      if (cmd.jsonOut) {
+        stdout.writeln(const JsonEncoder.withIndent('  ').convert(
+          <String, dynamic>{
+            'ok': false,
+            'error': 'repo_mismatch',
+            'dir': dir,
+            'clone': local.root,
+            'local_origin': redactCredentials(local.url),
+            'project_repo': linked.url,
+            'fix': fix,
+          },
+        ));
+      } else {
+        stderr.writeln('Error: the clone in ${local.root} pulls from\n'
+            '  ${redactCredentials(local.url)}\n'
+            'but "${project.name}" is now linked to\n'
+            '  ${linked.url}\n'
+            'Nothing was pulled. Point the clone at the new repo:\n'
+            '  $fix\n'
+            'or delete ${local.root} and run `fl clone`. `fl pull --no-git` '
+            'writes the files from the API meanwhile.');
+      }
+      return 1;
+    }
+
     // The one thing a sync must not do quietly: both refresh paths rewrite
     // the files from the service, so a key staged on disk and never
     // imported would disappear. Stop, name them, and offer both answers.
@@ -1543,41 +1582,6 @@ Future<int> _pullArbs(
     // which is why the fallback is silent enough to be routine and loud
     // enough to explain itself.
     if (!noGit) {
-      final GitMirror mirror = GitMirror(dir);
-      // Relinking the project in the dashboard leaves the old clone behind,
-      // and it would go on syncing fine from a repo nobody pushes to.
-      final GitRepository? linked = project.repository;
-      final ({String name, String url, String root})? local =
-          linked == null ? null : await mirror.remote();
-      final bool appRepo = local != null &&
-          _contains(local.root, cfg.root ?? Directory.current.path);
-      if (local != null && !appRepo && !sameRepo(local.url, linked!.url)) {
-        final String fix =
-            'git -C ${local.root} remote set-url ${local.name} ${linked.url}';
-        if (cmd.jsonOut) {
-          stdout.writeln(const JsonEncoder.withIndent('  ').convert(
-            <String, dynamic>{
-              'ok': false,
-              'error': 'repo_mismatch',
-              'dir': dir,
-              'clone': local.root,
-              'local_origin': redactCredentials(local.url),
-              'project_repo': linked.url,
-              'fix': fix,
-            },
-          ));
-        } else {
-          stderr.writeln('Error: the clone in ${local.root} pulls from\n'
-              '  ${redactCredentials(local.url)}\n'
-              'but "${project.name}" is now linked to\n'
-              '  ${linked.url}\n'
-              'Nothing was pulled. Point the clone at the new repo:\n'
-              '  $fix\n'
-              'or delete ${local.root} and run `fl clone`. `fl pull --no-git` '
-              'writes the files from the API meanwhile.');
-        }
-        return 1;
-      }
       // arb_dir inside the app's own repo is not a mirror: resetting it onto
       // its upstream would reset the app.
       final GitSyncOutcome outcome =

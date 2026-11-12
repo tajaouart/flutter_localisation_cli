@@ -303,6 +303,22 @@ void main() {
       expect(again.out, contains('Synced'));
     });
 
+    test('a key only the old repo has is not offered for adoption', () async {
+      backend.repoUrl = serviceRepo('gitlab');
+      final File template =
+          File(p.join(tmp.path, 'arbs', 'Default', 'app_en.arb'));
+      final Map<String, dynamic> arb =
+          jsonDecode(template.readAsStringSync()) as Map<String, dynamic>;
+      template.writeAsStringSync(jsonEncode(<String, dynamic>{
+        ...arb,
+        'onlyInTheOldRepo': 'x',
+      }));
+      final Run r = await fl(<String>['pull']);
+      expect(r.code, 1);
+      expect(r.err, contains('is now linked to'));
+      expect(r.err, isNot(contains('--adopt')));
+    });
+
     test('the same repo spelled differently is not a change', () async {
       backend.repoUrl = 'file://${p.join(tmp.path, 'remotes', 'github')}.git';
       final Run r = await fl(<String>['pull']);
