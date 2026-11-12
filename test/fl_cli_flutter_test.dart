@@ -112,4 +112,52 @@ void main() {
       expect(r.err, isNot(contains('generate: true')));
     });
   });
+
+  group('flavor', () {
+    test('init stores the flavor it picked', () async {
+      final Run r = await fl(<String>[
+        'init',
+        '--yes',
+        '--no-pull',
+        '--base-url',
+        backend.url,
+      ]);
+      expect(r.code, 0, reason: r.err);
+      final Map<String, dynamic> cfg = jsonDecode(
+          File(p.join(tmp.path, 'flutterlocalisation.json'))
+              .readAsStringSync()) as Map<String, dynamic>;
+      expect(cfg['flavor'], 'Default');
+      expect(cfg['arb_dir'], 'arbs/Default');
+    });
+
+    test(
+        'an older config without "flavor" keeps working once a second flavor '
+        'exists: arb_dir names it', () async {
+      backend.flavors = <String>['Default', 'staging'];
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'arbs/Default'});
+      final Run r = await fl(<String>['--json', 'languages', 'list']);
+      expect(r.code, 0, reason: r.err);
+      expect(r.json['flavor'], 'Default');
+    });
+
+    test('"flavor" in the config wins over the arb_dir folder', () async {
+      backend.flavors = <String>['Default', 'staging'];
+      writeConfig(<String, Object>{
+        'project_id': 7,
+        'flavor': 'staging',
+        'arb_dir': 'arbs/Default',
+      });
+      final Run r = await fl(<String>['--json', 'languages', 'list']);
+      expect(r.code, 0, reason: r.err);
+      expect(r.json['flavor'], 'staging');
+    });
+
+    test('with neither, the error says how to choose', () async {
+      backend.flavors = <String>['Default', 'staging'];
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'lib/l10n'});
+      final Run r = await fl(<String>['languages', 'list']);
+      expect(r.code, isNot(0));
+      expect(r.err, contains('--flavor'));
+    });
+  });
 }

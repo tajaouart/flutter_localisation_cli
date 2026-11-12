@@ -182,8 +182,12 @@ mixin _ApiCommand on Command<int> {
     final String? projectArg = globalResults?['project'] as String?;
     final String? flavor = (globalResults?['flavor'] as String?) ?? cfg.flavor;
 
-    // Fast path: an explicit numeric id in config and no name override — no lookup needed.
-    if (projectArg == null && cfg.projectId != null) {
+    // Fast path: an explicit numeric id in config and no name override — no
+    // lookup needed. Without a flavor, `arb_dir` may name it, and only the
+    // project's flavor list can tell.
+    if (projectArg == null &&
+        cfg.projectId != null &&
+        (flavor != null || cfg.arbDir == null)) {
       return (
         client: client,
         ops: Operations(client, cfg.projectId!, flavor: flavor)
@@ -196,6 +200,7 @@ mixin _ApiCommand on Command<int> {
       client,
       defaultProject: cfg.projectSelector,
       defaultFlavor: flavor,
+      flavorHint: cfg.arbDirFlavor,
     );
     final ResolvedTarget target =
         await resolver.resolve(project: projectArg, flavor: flavor);
@@ -392,7 +397,7 @@ class InitCommand extends Command<int> with _ApiCommand {
         if (baseUrl != kDefaultBaseUrl) 'base_url': baseUrl,
         'project': project.name,
         'project_id': project.id,
-        if (project.flavors.length > 1) 'flavor': flavor.name,
+        if (project.flavors.isNotEmpty) 'flavor': flavor.name,
         if (arbDir != null) 'arb_dir': arbDir,
         if (catalogDir != null) 'xcstrings_dir': catalogDir,
       };

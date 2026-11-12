@@ -24,6 +24,7 @@ class ProjectResolver {
     this.client, {
     this.defaultProject,
     this.defaultFlavor,
+    this.flavorHint,
   });
 
   final ManagementClient client;
@@ -31,6 +32,10 @@ class ProjectResolver {
   /// A project name or id (as a string) to fall back to when a call omits one.
   final String? defaultProject;
   final String? defaultFlavor;
+
+  /// A flavor name to pick when it matches one of the project's flavors, and
+  /// to ignore when it does not (the folder name in `arb_dir`).
+  final String? flavorHint;
 
   List<ProjectSummary>? _cache;
 
@@ -109,11 +114,16 @@ class ProjectResolver {
       }
       return flavor;
     }
+    final String? hint = flavorHint?.toLowerCase();
+    for (final FlavorSummary f in project.flavors) {
+      if (f.name.toLowerCase() == hint) return f.name;
+    }
     if (project.flavors.length == 1) return project.flavors.first.name;
     if (project.flavors.isEmpty) return null;
     throw ResolveException(
       'Project "${project.name}" has multiple flavors '
-      '(${project.flavors.map((final FlavorSummary f) => f.name).join(", ")}); specify one.',
+      '(${project.flavors.map((final FlavorSummary f) => f.name).join(", ")}); '
+      'pass --flavor or set "flavor" in flutterlocalisation.json.',
     );
   }
 

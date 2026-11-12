@@ -57,8 +57,14 @@ class ProjectConfig {
   /// no config file was found.
   final String? root;
 
-  /// A selector string (name or id) for [ProjectResolver], or null.
-  String? get projectSelector => project ?? projectId?.toString();
+  /// A selector string (id or name) for [ProjectResolver], or null. The id
+  /// first: it survives a rename in the dashboard.
+  String? get projectSelector => projectId?.toString() ?? project;
+
+  /// The last segment of `arb_dir`, which `fl init` names after the flavor
+  /// (arbs/Default). Only a hint: configs written before `flavor` was stored
+  /// carry the flavor nowhere else.
+  String? get arbDirFlavor => arbDir == null ? null : p.basename(arbDir!);
 
   /// Load from an explicit path, or search upward from [startDir] for
   /// `flutterlocalisation.json`. All fields are optional except that the file

@@ -101,8 +101,8 @@ void main() {
     expect(cfg['project_id'], 7);
     expect(cfg['xcstrings_dir'], 'App');
     expect(cfg.containsKey('arb_dir'), isFalse, reason: 'iOS-only project');
-    expect(cfg.containsKey('flavor'), isFalse,
-        reason: 'a single flavor needs no key');
+    expect(cfg['flavor'], 'Default',
+        reason: 'stored, so a second flavor later does not break commands');
     expect(r.out, contains('Wrote flutterlocalisation.json'));
     expect(r.out, contains('String Catalog'), reason: 'the first pull ran');
     expect(File(p.join(tmp.path, '.claude', 'settings.json')).existsSync(),

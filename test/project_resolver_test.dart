@@ -120,6 +120,55 @@ void main() {
     expect(t.flavor, 'staging');
   });
 
+  group('flavor order: --flavor, config flavor, arb_dir folder, sole flavor',
+      () {
+    ManagementClient twoFlavors() => clientWith(<Map<String, dynamic>>[
+          project(3, 'Multi', <Map<String, dynamic>>[
+            flavor('Default', <String>['en']),
+            flavor('staging', <String>['en']),
+          ]),
+        ]);
+
+    test('the arb_dir folder picks a flavor, whatever its case', () async {
+      final ProjectResolver r =
+          ProjectResolver(twoFlavors(), flavorHint: 'default');
+      expect((await r.resolve()).flavor, 'Default');
+    });
+
+    test('an explicit or configured flavor wins over the folder', () async {
+      expect(
+          (await ProjectResolver(twoFlavors(), flavorHint: 'Default')
+                  .resolve(flavor: 'staging'))
+              .flavor,
+          'staging');
+      expect(
+          (await ProjectResolver(twoFlavors(),
+                      defaultFlavor: 'staging', flavorHint: 'Default')
+                  .resolve())
+              .flavor,
+          'staging');
+    });
+
+    test('a folder that names no flavor is ignored', () async {
+      final ProjectResolver single = ProjectResolver(
+        clientWith(<Map<String, dynamic>>[
+          project(3, 'One', <Map<String, dynamic>>[
+            flavor('production', <String>['en']),
+          ]),
+        ]),
+        flavorHint: 'l10n',
+      );
+      expect((await single.resolve()).flavor, 'production');
+      expect(
+        () => ProjectResolver(twoFlavors(), flavorHint: 'l10n').resolve(),
+        throwsA(isA<ResolveException>().having(
+            (final ResolveException e) => e.message,
+            'message',
+            contains('"flavor" in flutterlocalisation.json'))),
+      );
+    });
+  });
+
   test('default project selector is used when no arg passed', () async {
     final ProjectResolver r = ProjectResolver(
       clientWith(<Map<String, dynamic>>[
