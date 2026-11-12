@@ -816,9 +816,11 @@ class Operations {
   }
 
   /// Edit one locale's value (or plural/placeholder fields) of an existing key.
+  ///
+  /// A null [locale] is the flavor's base language.
   Future<OpResult> edit(
     final String key,
-    final String locale, {
+    final String? locale, {
     final String? value,
     final bool? isPluralEnabled,
     final String? zeroCase,
@@ -836,7 +838,12 @@ class Operations {
     final bool dryRun = false,
   }) async {
     final ProjectData project = await client.getProject(projectId);
-    final int id = project.resolveId(key, locale, flavorName: flavor);
+    final String? code = locale ?? project.baseLanguage(flavor)?.code;
+    if (code == null) {
+      return OpResult(false,
+          'No base language on "${project.name}"; pass --locale <code>.');
+    }
+    final int id = project.resolveId(key, code, flavorName: flavor);
     final String full = project.canonicalKey(key, flavorName: flavor);
     final TranslationEntry? base = project.baseEntry(full, flavorName: flavor);
     if (value != null && base != null && !base.isPluralEnabled) {
@@ -854,7 +861,7 @@ class Operations {
       if (dropped.isNotEmpty) {
         return OpResult(
           false,
-          'Value for "$full" [$locale] must keep ${dropped.join(', ')}: '
+          'Value for "$full" [$code] must keep ${dropped.join(', ')}: '
           'the key\'s placeholders are written as '
           '${base.placeholders.keys.map((final String n) => '{$n}').join(', ')} '
           'in every locale (base: "${base.value}").',
@@ -862,8 +869,7 @@ class Operations {
       }
     }
     if (dryRun) {
-      return OpResult(
-          true, 'DRY RUN: would update "$full" [$locale] (id $id).');
+      return OpResult(true, 'DRY RUN: would update "$full" [$code] (id $id).');
     }
     await client.updateTranslation(
       id,
@@ -882,8 +888,8 @@ class Operations {
       clearDescription: clearDescription,
       isChecked: isChecked,
     );
-    return OpResult(true, 'Updated "$full" [$locale].',
-        <String, dynamic>{'key': full, 'locale': locale});
+    return OpResult(true, 'Updated "$full" [$code].',
+        <String, dynamic>{'key': full, 'locale': code});
   }
 
   /// Delete a key. Without [locale] the whole key is removed (all locales + the key

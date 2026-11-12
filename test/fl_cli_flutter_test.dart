@@ -160,4 +160,34 @@ void main() {
       expect(r.err, contains('--flavor'));
     });
   });
+
+  group('arguments', () {
+    test('edit without --locale edits the base language', () async {
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'arbs/Default'});
+      final Run r = await fl(<String>[
+        '--dry-run',
+        'edit',
+        'running',
+        '--value',
+        '{arg1} s to go',
+      ]);
+      expect(r.code, 0, reason: r.err);
+      expect(r.out, contains('would update "running %lld" [en]'));
+    });
+
+    test('a missing mandatory option prints usage and exits 64, no trace',
+        () async {
+      final Run r = await fl(<String>['login']);
+      expect(r.code, 64);
+      expect(r.err, contains('Option token is mandatory'));
+      expect(r.err, contains('Usage: fl login'));
+      expect(r.err, isNot(contains('#0 ')), reason: 'no stack trace');
+    });
+
+    test('an unknown option is a usage error too', () async {
+      final Run r = await fl(<String>['edit', 'k', '--nope']);
+      expect(r.code, 64);
+      expect(r.err, contains('Could not find an option named "--nope"'));
+    });
+  });
 }

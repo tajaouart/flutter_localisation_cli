@@ -405,5 +405,10 @@ void main() {
     expect(bodies.last['description'], '');
     await _ops(mock, <String>[]).edit('Clean %@', 'en', description: '');
     expect(bodies.last.containsKey('description'), isFalse);
+
+    final OpResult base =
+        await _ops(mock, <String>[]).edit('Clean %@', null, value: 'Wash %@');
+    expect(base.ok, isTrue, reason: base.message);
+    expect(base.data['locale'], 'en', reason: 'no locale means the base');
   });
 }

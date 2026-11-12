@@ -89,6 +89,11 @@ Future<void> main(final List<String> args) async {
   } on UsageException catch (e) {
     stderr.writeln(e);
     exit(64);
+  } on ArgumentError catch (e) {
+    // What `args` throws for a missing mandatory option, read inside run(),
+    // after CommandRunner's own usage handling.
+    stderr.writeln('${e.message}\n\n${_usageFor(runner, args)}');
+    exit(64);
   } on ManagementException catch (e) {
     stderr.writeln('Error: ${e.message}');
     if (e is ApiException) _writeRowErrors(e);
@@ -112,6 +117,19 @@ Future<void> main(final List<String> args) async {
     }
     exit(1);
   }
+}
+
+/// The usage of the deepest command named in [args], else the runner's.
+String _usageFor(final CommandRunner<int> runner, final List<String> args) {
+  Map<String, Command<int>> commands = runner.commands;
+  Command<int>? found;
+  for (final String arg in args) {
+    final Command<int>? next = commands[arg];
+    if (next == null) continue;
+    found = next;
+    commands = next.subcommands;
+  }
+  return found?.usage ?? runner.usage;
 }
 
 /// Canonicalise a locale typed on the command line.
@@ -696,7 +714,7 @@ class ImportCommand extends Command<int> with _ApiCommand {
 class EditCommand extends Command<int> with _ApiCommand {
   EditCommand() {
     argParser.addOption('locale',
-        mandatory: true, help: 'Locale code, e.g. fr.');
+        help: 'Locale code, e.g. fr (default: the base language).');
     argParser.addOption('value', help: 'New value.');
     argParser.addFlag(
       'checked',
@@ -743,7 +761,7 @@ class EditCommand extends Command<int> with _ApiCommand {
       'Edit a locale\'s value / flags of an existing key.';
   @override
   String get invocation =>
-      'fl edit <key> --locale <code> [--value "..."] [--singular-case "..." '
+      'fl edit <key> [--locale <code>] [--value "..."] [--singular-case "..." '
       '--plural-case "..."]\n'
       'A String Catalog key may be given by its stem: "done_body" finds '
       '"done_body %@ %lld". Placeholders are written {arg1}, {arg2} in the value.';
@@ -761,7 +779,7 @@ class EditCommand extends Command<int> with _ApiCommand {
     try {
       final OpResult r = await built.ops.edit(
         key,
-        _locale(argResults!['locale'] as String)!,
+        _locale(argResults!['locale'] as String?),
         value: argResults!['value'] as String?,
         isChecked: argResults!['checked'] as bool?,
         isPlaceholdersEnabled: placeholders == null ? null : true,
