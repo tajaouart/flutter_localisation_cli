@@ -80,6 +80,12 @@ class FakeBackend {
   /// What the project ships; tests change it between calls.
   List<String> platforms = <String>['ios'];
 
+  /// Flavor names, in order; each holds the same one English key.
+  List<String> flavors = <String>['Default'];
+
+  /// The linked git repo the project detail reports, or null for none.
+  String? repoUrl;
+
   final List<ReceivedImport> imports = <ReceivedImport>[];
   final List<String> requests = <String>[];
 
@@ -100,28 +106,36 @@ class FakeBackend {
         'name': 'Gush',
         'platforms': platforms,
         'xcstrings_dir': 'Resources',
+        if (repoUrl != null) ...<String, dynamic>{
+          'is_github_linked': true,
+          'github_repository_url': repoUrl,
+        },
         'flavors': <Map<String, dynamic>>[
-          <String, dynamic>{
-            'id': 3,
-            'name': 'Default',
-            'languages': <Map<String, dynamic>>[
-              <String, dynamic>{
-                'id': 1,
-                'code': 'en',
-                'is_base_language': true,
-                'translations': <Map<String, dynamic>>[
-                  <String, dynamic>{
-                    'id': 1,
-                    'key': 'running %lld',
-                    'value': 'Cleaning… {arg1} s left',
-                    'placeholders': <String, dynamic>{
-                      'arg1': <String, dynamic>{'type': 'int', 'spec': '%lld'},
+          for (int i = 0; i < flavors.length; i++)
+            <String, dynamic>{
+              'id': 3 + i,
+              'name': flavors[i],
+              'languages': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'id': 1 + i,
+                  'code': 'en',
+                  'is_base_language': true,
+                  'translations': <Map<String, dynamic>>[
+                    <String, dynamic>{
+                      'id': 1 + i,
+                      'key': 'running %lld',
+                      'value': 'Cleaning… {arg1} s left',
+                      'placeholders': <String, dynamic>{
+                        'arg1': <String, dynamic>{
+                          'type': 'int',
+                          'spec': '%lld'
+                        },
+                      },
                     },
-                  },
-                ],
-              },
-            ],
-          },
+                  ],
+                },
+              ],
+            },
         ],
       };
 
@@ -147,12 +161,13 @@ class FakeBackend {
             'workspace': 'AylanTech',
             'platforms': platforms,
             'flavors': <Map<String, dynamic>>[
-              <String, dynamic>{
-                'id': 3,
-                'name': 'Default',
-                'base_language': 'en',
-                'languages': <String>['en'],
-              },
+              for (int i = 0; i < flavors.length; i++)
+                <String, dynamic>{
+                  'id': 3 + i,
+                  'name': flavors[i],
+                  'base_language': 'en',
+                  'languages': <String>['en'],
+                },
             ],
           },
         ],

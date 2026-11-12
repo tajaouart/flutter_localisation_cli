@@ -20,6 +20,7 @@ import 'dart:io';
 import 'package:args/command_runner.dart';
 
 import 'package:flutter_localisation_cli/src/arb_sync.dart';
+import 'package:flutter_localisation_cli/src/codegen.dart';
 import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/glossary.dart';
@@ -425,7 +426,9 @@ class InitCommand extends Command<int> with _ApiCommand {
 
     final ProjectConfig written = ProjectConfig.load(path: configFile.path);
     if (written.arbDir != null && looksLikeFlutterApp(root)) {
-      final int gen = await _regenerateDart(written);
+      final int gen = await _regenerateDart(written,
+          skipHint: '$kProjectConfigName is written and the strings are '
+              'pulled; run `fl sync` once the generator works.');
       if (gen != 0) return gen;
     }
 
@@ -1673,7 +1676,8 @@ class SyncCommand extends Command<int> with _ApiCommand {
       target.client.close();
     }
 
-    final int gen = await _regenerateDart(cfg);
+    final int gen = await _regenerateDart(cfg,
+        skipHint: 'Re-run with --no-codegen to skip this step.');
     if (gen != 0) return gen;
     stdout.writeln('✓ In sync: service → ARBs → Dart.');
     return 0;
@@ -1683,28 +1687,42 @@ class SyncCommand extends Command<int> with _ApiCommand {
 /// Run the flutter_localisation generator over `arb_dir`.
 ///
 /// Shared by `fl sync` and `fl init`; both end with the Dart matching the ARBs.
-Future<int> _regenerateDart(final ProjectConfig cfg) async {
-  final String dir = cfg.arbDir ?? 'arbs';
-  // `arb_dir` points at the flavor folder (arbs/Default); the generator
-  // takes the root and the flavor as two arguments.
-  final List<String> parts = dir.split('/')
-    ..removeWhere((final String p) => p.isEmpty);
-  final String root =
-      parts.length > 1 ? parts.sublist(0, parts.length - 1).join('/') : dir;
-  final String flavorDir = parts.length > 1 ? parts.last : 'Default';
-  stdout.writeln('Regenerating Dart from $root/$flavorDir …');
+/// [skipHint] is the last line of a failure: how to get past it.
+Future<int> _regenerateDart(final ProjectConfig cfg,
+    {required final String skipHint}) async {
+  final String projectRoot = cfg.root ?? Directory.current.path;
+  final Directory rootDir = Directory(projectRoot);
+  final ({String flavorsFolder, String flavor}) target =
+      generatorTarget(cfg.arbDir ?? 'arbs/Default', projectRoot);
+  if (lacksGenerateFlag(rootDir)) {
+    stderr.writeln('Warning: pubspec.yaml has no `generate: true` under '
+        '`flutter:`, so gen-l10n may refuse to run. `fl doctor --fix` adds it.');
+  }
+  stdout.writeln(
+      'Regenerating Dart from ${target.flavorsFolder}/${target.flavor} …');
   final ProcessResult gen = await Process.run(
     'dart',
-    <String>['run', 'flutter_localisation', root, flavorDir],
+    <String>[
+      'run',
+      'flutter_localisation',
+      target.flavorsFolder,
+      target.flavor
+    ],
+    workingDirectory: projectRoot,
   );
-  stdout.write(gen.stdout);
   if (gen.exitCode != 0) {
-    stderr.write(gen.stderr);
-    stderr.writeln(
-        'Codegen failed. Is flutter_localisation a dependency of this app? '
-        'Re-run with --no-codegen to skip it.');
+    // The generator logs its errors to stdout as often as to stderr.
+    final String output = tail('${gen.stdout}\n${gen.stderr}');
+    stderr.writeln('Codegen failed (exit ${gen.exitCode}) in $projectRoot:');
+    if (output.isNotEmpty) stderr.writeln(output);
+    if (!dependsOn(rootDir, 'flutter_localisation')) {
+      stderr.writeln('pubspec.yaml does not list flutter_localisation; add it '
+          'with `flutter pub add flutter_localisation`.');
+    }
+    stderr.writeln(skipHint);
     return gen.exitCode;
   }
+  stdout.write(gen.stdout);
   return 0;
 }
 

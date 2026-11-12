@@ -31,6 +31,7 @@ class ProjectConfig {
     this.flavor,
     this.arbDir,
     this.xcstringsDir,
+    this.root,
   });
 
   final String baseUrl;
@@ -51,6 +52,10 @@ class ProjectConfig {
 
   /// The catalog folder in effect: `xcstrings_dir`, else `arb_dir`, else here.
   String get catalogDir => xcstringsDir ?? arbDir ?? '.';
+
+  /// The folder holding the config file, which is the app's root; null when
+  /// no config file was found.
+  final String? root;
 
   /// A selector string (name or id) for [ProjectResolver], or null.
   String? get projectSelector => project ?? projectId?.toString();
@@ -108,6 +113,7 @@ class ProjectConfig {
       flavor: text('flavor'),
       arbDir: relativeToConfig('arb_dir'),
       xcstringsDir: relativeToConfig('xcstrings_dir'),
+      root: p.normalize(file.absolute.parent.path),
     );
   }
 

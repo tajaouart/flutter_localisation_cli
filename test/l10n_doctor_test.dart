@@ -138,6 +138,24 @@ void main() {
     expect(checkL10nSetup(tmp).issues, isEmpty);
   });
 
+  test('lacksGenerateFlag and dependsOn read the pubspec alone', () {
+    expect(lacksGenerateFlag(tmp), isFalse, reason: 'no pubspec');
+    expect(dependsOn(tmp, 'flutter_localisation'), isFalse);
+    write('pubspec.yaml', pubspec);
+    expect(lacksGenerateFlag(tmp), isTrue);
+    expect(dependsOn(tmp, 'flutter_localisation'), isFalse,
+        reason: 'flutter_localizations is another package');
+    expect(dependsOn(tmp, 'intl'), isTrue);
+    write(
+        'pubspec.yaml',
+        pubspec
+            .replaceFirst('  intl: any\n', '  flutter_localisation: ^2.7.1\n')
+            .replaceFirst(
+                'flutter:\n  uses', 'flutter:\n  generate: true\n  uses'));
+    expect(lacksGenerateFlag(tmp), isFalse);
+    expect(dependsOn(tmp, 'flutter_localisation'), isTrue);
+  });
+
   group('material_ui', () {
     final String withMaterialUi = '${pubspec.replaceFirst(
       '  intl: any\n',

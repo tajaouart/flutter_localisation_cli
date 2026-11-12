@@ -222,6 +222,23 @@ L10nDoctorReport checkL10nSetup(final Directory root,
   return L10nDoctorReport(issues, applicable: true);
 }
 
+/// Whether the pubspec under [root] lacks `flutter: generate: true`, the
+/// `generate-flag` check on its own. False when there is no pubspec.
+bool lacksGenerateFlag(final Directory root) {
+  final File pubspec = File(p.join(root.path, 'pubspec.yaml'));
+  return pubspec.existsSync() &&
+      _withGenerateFlag(pubspec.readAsStringSync()) != null;
+}
+
+/// Whether the pubspec under [root] lists [package] as a dependency of any
+/// kind. False when there is no pubspec.
+bool dependsOn(final Directory root, final String package) {
+  final File pubspec = File(p.join(root.path, 'pubspec.yaml'));
+  return pubspec.existsSync() &&
+      RegExp('^\\s+${RegExp.escape(package)}:', multiLine: true)
+          .hasMatch(pubspec.readAsStringSync());
+}
+
 String _withoutComments(final String dart) =>
     dart.replaceAll(RegExp(r'^\s*//.*$', multiLine: true), '');
 
