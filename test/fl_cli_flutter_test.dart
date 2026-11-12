@@ -263,4 +263,75 @@ void main() {
       expect(r.err, contains('fl pull --no-git'));
     });
   });
+
+  group('pull after the project was relinked', () {
+    setUp(() async {
+      backend.repoUrl = serviceRepo('github');
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'arbs/Default'});
+      final Run r = await fl(<String>['clone']);
+      expect(r.code, 0, reason: r.err);
+    });
+
+    test('refuses the stale clone, names both repos and the fix', () async {
+      final String moved = serviceRepo('gitlab');
+      backend.repoUrl = moved;
+      final Run r = await fl(<String>['pull']);
+      expect(r.code, 1);
+      expect(r.err, contains(p.join(tmp.path, 'remotes', 'github')));
+      expect(r.err, contains(moved));
+      expect(r.err, contains('remote set-url origin $moved'));
+      expect(r.err, contains('fl clone'));
+      expect(r.out, isNot(contains('Synced')));
+
+      final Run json = await fl(<String>['--json', 'pull']);
+      expect(json.code, 1);
+      expect(json.json['error'], 'repo_mismatch');
+      expect(json.json['project_repo'], moved);
+      expect(json.json['local_origin'], p.join(tmp.path, 'remotes', 'github'));
+
+      final ProcessResult fix = Process.runSync('git', <String>[
+        '-C',
+        p.join(tmp.path, 'arbs'),
+        'remote',
+        'set-url',
+        'origin',
+        moved
+      ]);
+      expect(fix.exitCode, 0);
+      final Run again = await fl(<String>['pull']);
+      expect(again.code, 0, reason: again.err);
+      expect(again.out, contains('Synced'));
+    });
+
+    test('the same repo spelled differently is not a change', () async {
+      backend.repoUrl = 'file://${p.join(tmp.path, 'remotes', 'github')}.git';
+      final Run r = await fl(<String>['pull']);
+      expect(r.code, 0, reason: r.err);
+      expect(r.out, contains('Synced'));
+    });
+
+    test('--no-git skips the check and writes from the API', () async {
+      backend.repoUrl = serviceRepo('gitlab');
+      final Run r = await fl(<String>['pull', '--no-git']);
+      expect(r.code, 0, reason: r.err);
+    });
+  });
+
+  test("arb_dir inside the app's own repo is written from the API", () async {
+    backend.repoUrl = serviceRepo('github');
+    for (final List<String> args in <List<String>>[
+      <String>['init', '-q'],
+      <String>['remote', 'add', 'origin', 'https://github.com/acme/app.git'],
+    ]) {
+      expect(
+          Process.runSync('git', args, workingDirectory: tmp.path).exitCode, 0);
+    }
+    Directory(p.join(tmp.path, 'lib', 'l10n')).createSync(recursive: true);
+    writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'lib/l10n'});
+    final Run r = await fl(<String>['pull']);
+    expect(r.code, 0, reason: r.err);
+    expect(r.out, contains("arb_dir is in the app's own repo"));
+    expect(File(p.join(tmp.path, 'lib', 'l10n', 'app_en.arb')).existsSync(),
+        isTrue);
+  });
 }

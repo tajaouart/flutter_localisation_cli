@@ -132,6 +132,24 @@ class GitMirror {
   Future<ProcessResult> _git(final List<String> args) =>
       runner('git', args, workingDirectory: dir);
 
+  /// The remote [hardSync] would fetch from, its URL and the clone's root;
+  /// null when [dir] is not a git clone with a remote.
+  Future<({String name, String url, String root})?> remote() async {
+    if (!Directory(dir).existsSync()) return null;
+    final ProcessResult remotes = await _git(<String>['remote']);
+    final String name = '${remotes.stdout}'.trim().split('\n').first.trim();
+    if (remotes.exitCode != 0 || name.isEmpty) return null;
+    final ProcessResult url = await _git(<String>['remote', 'get-url', name]);
+    final ProcessResult root =
+        await _git(<String>['rev-parse', '--show-toplevel']);
+    if (url.exitCode != 0 || root.exitCode != 0) return null;
+    return (
+      name: name,
+      url: '${url.stdout}'.trim(),
+      root: '${root.stdout}'.trim(),
+    );
+  }
+
   /// Bring the mirror to exactly what the remote holds.
   ///
   /// Deliberately a reset and not a merge or a rebase: there is no such thing

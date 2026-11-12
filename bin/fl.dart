@@ -1543,7 +1543,48 @@ Future<int> _pullArbs(
     // which is why the fallback is silent enough to be routine and loud
     // enough to explain itself.
     if (!noGit) {
-      final GitSyncOutcome outcome = await GitMirror(dir).hardSync();
+      final GitMirror mirror = GitMirror(dir);
+      // Relinking the project in the dashboard leaves the old clone behind,
+      // and it would go on syncing fine from a repo nobody pushes to.
+      final GitRepository? linked = project.repository;
+      final ({String name, String url, String root})? local =
+          linked == null ? null : await mirror.remote();
+      final bool appRepo = local != null &&
+          _contains(local.root, cfg.root ?? Directory.current.path);
+      if (local != null && !appRepo && !sameRepo(local.url, linked!.url)) {
+        final String fix =
+            'git -C ${local.root} remote set-url ${local.name} ${linked.url}';
+        if (cmd.jsonOut) {
+          stdout.writeln(const JsonEncoder.withIndent('  ').convert(
+            <String, dynamic>{
+              'ok': false,
+              'error': 'repo_mismatch',
+              'dir': dir,
+              'clone': local.root,
+              'local_origin': redactCredentials(local.url),
+              'project_repo': linked.url,
+              'fix': fix,
+            },
+          ));
+        } else {
+          stderr.writeln('Error: the clone in ${local.root} pulls from\n'
+              '  ${redactCredentials(local.url)}\n'
+              'but "${project.name}" is now linked to\n'
+              '  ${linked.url}\n'
+              'Nothing was pulled. Point the clone at the new repo:\n'
+              '  $fix\n'
+              'or delete ${local.root} and run `fl clone`. `fl pull --no-git` '
+              'writes the files from the API meanwhile.');
+        }
+        return 1;
+      }
+      // arb_dir inside the app's own repo is not a mirror: resetting it onto
+      // its upstream would reset the app.
+      final GitSyncOutcome outcome =
+          appRepo && !sameRepo(local.url, linked!.url)
+              ? const GitSyncOutcome.skipped(GitSkipReason.notARepo,
+                  detail: "arb_dir is in the app's own repo")
+              : await mirror.hardSync();
       if (outcome.ok) {
         stdout.writeln('✓ Synced "$dir" to ${outcome.upstream}.');
         if (outcome.discardedAnything) {
@@ -1640,9 +1681,20 @@ Future<OpResult> _exportFromApi(
   );
 }
 
+/// Whether [dir] is [other] or one of its ancestors, symlinks resolved.
+bool _contains(final String dir, final String other) {
+  try {
+    final String a = Directory(dir).resolveSymbolicLinksSync();
+    final String b = Directory(other).resolveSymbolicLinksSync();
+    return path.equals(a, b) || path.isWithin(a, b);
+  } on FileSystemException {
+    return false;
+  }
+}
+
 String _skipReason(final GitSyncOutcome o) => switch (o.skip) {
       GitSkipReason.gitMissing => 'no git on PATH',
-      GitSkipReason.notARepo => 'not a git clone',
+      GitSkipReason.notARepo => o.detail.isEmpty ? 'not a git clone' : o.detail,
       GitSkipReason.noRemote => 'no remote',
       GitSkipReason.unreachable =>
         o.detail.isEmpty ? 'remote unreachable' : o.detail,
