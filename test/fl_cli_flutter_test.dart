@@ -49,6 +49,36 @@ void main() {
         ...fields,
       }));
 
+  /// A repo laid out the way the backend pushes it: one folder per flavor
+  /// at the root. Cloning a plain working tree needs no bare repo.
+  String serviceRepo(final String name) {
+    final String dir = p.join(tmp.path, 'remotes', name);
+    File(p.join(dir, 'Default', 'app_en.arb'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync(jsonEncode(<String, String>{
+        '@@locale': 'en',
+        'running %lld': 'Cleaning… {arg1} s left',
+      }));
+    for (final List<String> args in <List<String>>[
+      <String>['init', '-q', '-b', 'main'],
+      <String>['add', '.'],
+      <String>[
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@t',
+        'commit',
+        '-qm',
+        'ARBs'
+      ],
+    ]) {
+      final ProcessResult r =
+          Process.runSync('git', args, workingDirectory: dir);
+      expect(r.exitCode, 0, reason: '${r.stderr}');
+    }
+    return dir;
+  }
+
   setUpAll(() async => backend = await FakeBackend.start());
   tearDownAll(() => backend.close());
 
@@ -188,6 +218,49 @@ void main() {
       final Run r = await fl(<String>['edit', 'k', '--nope']);
       expect(r.code, 64);
       expect(r.err, contains('Could not find an option named "--nope"'));
+    });
+  });
+
+  group('clone', () {
+    test('clones into the folder above the flavor folder arb_dir names',
+        () async {
+      backend.repoUrl = serviceRepo('arbs');
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'arbs/Default'});
+      final Run r = await fl(<String>['clone']);
+      expect(r.code, 0, reason: r.err);
+      expect(
+          File(p.join(tmp.path, 'arbs', 'Default', 'app_en.arb')).existsSync(),
+          isTrue);
+      expect(
+          Directory(p.join(tmp.path, 'arbs', 'Default', 'Default'))
+              .existsSync(),
+          isFalse);
+      expect(r.out, contains('Add "/arbs/" to .gitignore'));
+
+      final Run pull = await fl(<String>['pull']);
+      expect(pull.code, 0, reason: pull.err);
+      expect(pull.out, contains('Synced'), reason: 'pull finds the same clone');
+    });
+
+    test('an arb_dir that is not a flavor folder is the clone itself',
+        () async {
+      backend.repoUrl = serviceRepo('arbs');
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'translations'});
+      final Run r = await fl(<String>['clone']);
+      expect(r.code, 0, reason: r.err);
+      expect(
+          File(p.join(tmp.path, 'translations', 'Default', 'app_en.arb'))
+              .existsSync(),
+          isTrue);
+    });
+
+    test('a failed clone shows what git said and a way forward', () async {
+      backend.repoUrl = p.join(tmp.path, 'no_such_repo');
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'arbs/Default'});
+      final Run r = await fl(<String>['clone']);
+      expect(r.code, isNot(0));
+      expect(r.err, contains('git clone'));
+      expect(r.err, contains('fl pull --no-git'));
     });
   });
 }

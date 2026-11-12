@@ -18,6 +18,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/command_runner.dart';
+import 'package:path/path.dart' as path;
 
 import 'package:flutter_localisation_cli/src/arb_sync.dart';
 import 'package:flutter_localisation_cli/src/codegen.dart';
@@ -32,6 +33,7 @@ import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/native_sync.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:flutter_localisation_cli/src/project_resolver.dart';
+import 'package:flutter_localisation_cli/src/repo_url.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
 
 Future<void> main(final List<String> args) async {
@@ -1288,14 +1290,20 @@ class RepoCommand extends Command<int> with _ApiCommand {
   }
 }
 
-/// Clone the linked ARB repo into `arb_dir` — the first-run counterpart to
+/// Clone the linked ARB repo for `arb_dir`, the first-run counterpart to
 /// `pull`, which only works once the repo is already on disk.
+///
+/// The backend keeps one folder per flavor at the repo root (Default/,
+/// staging/) and `arb_dir` points at one of them, so the clone goes into
+/// the folder above it. `pull` runs git from inside `arb_dir`, which finds
+/// the same clone.
 class CloneCommand extends Command<int> with _ApiCommand {
   @override
   String get name => 'clone';
   @override
   String get description =>
-      'Clone the ARB repo into arb_dir (first-time setup; then use `pull`).';
+      'Clone the ARB repo so arb_dir is its flavor folder (first-time setup; '
+      'then use `pull`).';
   @override
   String get invocation => 'fl clone [<dir>]';
 
@@ -1303,7 +1311,6 @@ class CloneCommand extends Command<int> with _ApiCommand {
   Future<int> run() async {
     final ProjectConfig cfg = loadProject();
     final List<String> rest = argResults!.rest;
-    final String dir = rest.isNotEmpty ? rest.first : (cfg.arbDir ?? 'arbs');
 
     final ({
       ManagementClient client,
@@ -1325,6 +1332,15 @@ class CloneCommand extends Command<int> with _ApiCommand {
       );
       return 1;
     }
+    final String arbDir = cfg.arbDir ?? 'arbs';
+    final String folder = path.basename(arbDir).toLowerCase();
+    final bool flavorFolder =
+        p.flavors.any((final FlavorData f) => f.name.toLowerCase() == folder);
+    final String dir = rest.isNotEmpty
+        ? rest.first
+        : flavorFolder
+            ? path.dirname(arbDir)
+            : arbDir;
     if (Directory(dir).existsSync() && Directory(dir).listSync().isNotEmpty) {
       stderr.writeln(
         'Error: "$dir" already exists and is not empty. Use `fl pull` to '
@@ -1338,17 +1354,37 @@ class CloneCommand extends Command<int> with _ApiCommand {
     }
 
     stdout.writeln('Cloning ${repo.url} into "$dir" …');
-    final ProcessResult res = await Process.run(
-      'git',
-      <String>['clone', repo.url, dir],
-    );
-    stdout.write(res.stdout);
-    if (res.exitCode != 0) {
-      stderr.write(res.stderr);
-      return res.exitCode;
+    final CloneOutcome outcome = await cloneRepo(repo.url, dir);
+    if (!outcome.ok) {
+      for (final ({String url, int exitCode, String output}) a
+          in outcome.attempts) {
+        stderr.writeln('git clone ${redactCredentials(a.url)} failed:');
+        stderr.writeln(tail(a.output, lines: 5));
+      }
+      final String? ssh = sshFormOf(repo.url);
+      stderr.writeln(looksLikeAccessDenied(outcome.attempts.last.output)
+          ? 'Hint: git has no credential that can read this repo. Sign git in '
+              'to ${repo.provider} (a credential helper for https'
+              '${ssh == null ? '' : ', or an SSH key for $ssh'}), or run '
+              '`fl pull --no-git`, which writes the files from the API with '
+              'your fl token.'
+          : 'Hint: `fl pull --no-git` writes the files from the API without '
+              'git.');
+      return outcome.attempts.last.exitCode;
     }
-    stdout
-        .writeln('✓ Cloned. Add "/$dir/" to .gitignore — the backend owns it.');
+    if (outcome.url != repo.url) {
+      stdout.writeln('https was refused; cloned over SSH from ${outcome.url}.');
+    }
+    if (rest.isEmpty && flavorFolder && !Directory(arbDir).existsSync()) {
+      stderr.writeln('Warning: the repo has no ${path.basename(arbDir)}/ '
+          'folder yet, which arb_dir ($arbDir) points at.');
+    }
+    final String? root = cfg.root;
+    final String shown = root != null && path.isWithin(root, dir)
+        ? path.relative(dir, from: root)
+        : dir;
+    stdout.writeln(
+        '✓ Cloned. Add "/$shown/" to .gitignore: the backend owns it.');
     return 0;
   }
 }
