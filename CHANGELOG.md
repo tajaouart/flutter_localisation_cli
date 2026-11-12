@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.17.3] - 2026-11-12
+### Fixed
+- `fl export` ends with the generator command the README documents
+  (`dart run flutter_localisation <folder> <flavor>`, filled in from `arb_dir`) instead of
+  `flutter pub run flutter_localisation:generate <flavor>`.
+
 ## [1.17.2] - 2026-11-12
 ### Fixed
 - `fl pull` checks for a relinked repository before the local-only key guard. A clone of

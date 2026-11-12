@@ -2233,8 +2233,9 @@ class ExportCommand extends Command<int> with _ApiCommand {
             '${m['base'] == true ? '  (template)' : ''}');
       }
       if (r.ok && !dryRun && project.shipsFlutter) {
-        stdout.writeln('\nNow regenerate the Dart: `flutter pub get` then '
-            '`flutter pub run flutter_localisation:generate <flavor>`.');
+        stdout.writeln('\nNow regenerate the Dart: '
+            '`dart run flutter_localisation ${path.dirname(arbDir)} '
+            '${path.basename(arbDir)}`, then restart the app.');
       }
       return r.ok ? 0 : 1;
     } finally {
