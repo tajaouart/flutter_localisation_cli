@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.17.6] - 2026-11-13
 ### Added
 - `FL_INTERACTIVE=1` makes `fl init` ask its questions when stdin is a pipe, so a script can
   feed the answers line by line.
