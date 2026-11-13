@@ -284,6 +284,25 @@ void main() {
     expect(catalog().readAsStringSync(), kServedCatalog);
   });
 
+  test(
+      'pull --adopt imports the catalog when the token cannot translate, and says so',
+      () async {
+    backend.translateScope = false;
+    addTearDown(() => backend.translateScope = true);
+    catalog()
+      ..createSync(recursive: true)
+      ..writeAsStringSync(kCatalogWithLocalKey);
+
+    final Run adopted = await fl(<String>['pull', '--no-git', '--adopt']);
+
+    expect(adopted.code, 0, reason: adopted.err);
+    expect(backend.imports.last.autoTranslate, isFalse);
+    expect(backend.imports.last.fileName, 'Localizable.xcstrings');
+    expect(adopted.out, contains('Not translated: this token does not have'));
+    expect(adopted.out, contains('fl retranslate'));
+    expect(catalog().readAsStringSync(), kServedCatalog);
+  });
+
   test('pull --discard-local takes the service copy over the Xcode edit',
       () async {
     catalog()
