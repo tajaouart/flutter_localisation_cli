@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.17.5] - 2026-11-13
+### Fixed
+- `fl pull --adopt` and `fl init` translate a key that was added to the base ARB only. 1.17.4
+  asked the server to translate only when a language had no local file at all, so with a
+  file per language the new key kept the base text everywhere, without a word.
+- On Windows: the generator folder and the files `fl doctor` names use forward slashes (the
+  folder ends up in the shared `l10n.yaml`), and `fl pull` recognises a `file://C:\dir`
+  remote as the linked repository. The test suite now runs on Windows and macOS in CI.
+
 ## [1.17.4] - 2026-11-13
 ### Fixed
 - `fl init`, `fl pull --adopt` and the MCP `pull_arbs` with `adopt` no longer stop on a token

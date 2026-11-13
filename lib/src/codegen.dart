@@ -28,7 +28,12 @@ import 'package:flutter_localisation_cli/src/l10n_doctor.dart';
       : parent == root
           ? '.'
           : parent;
-  return (flavorsFolder: flavorsFolder, flavor: p.basename(dir));
+  // Forward slashes on every platform: the folder ends up in the l10n.yaml the
+  // generator writes, which the whole team shares.
+  return (
+    flavorsFolder: flavorsFolder.replaceAll(r'\', '/'),
+    flavor: p.basename(dir)
+  );
 }
 
 /// The last [lines] non-empty lines of [text].

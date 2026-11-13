@@ -786,9 +786,10 @@ class Operations {
   /// beside it, so translations a human already wrote are kept instead of
   /// being replaced by machine output.
   ///
-  /// The server is asked to translate only when a language has no file. A
-  /// token without the Translate scope still gets its strings imported; the
-  /// message then names the locales left holding the base text.
+  /// The server is asked to translate only when a language has no file, or a
+  /// file that lacks some of the template's keys. A token without the
+  /// Translate scope still gets its strings imported; the message then names
+  /// the locales left holding the base text.
   Future<OpResult> adoptArbs(final File template) async {
     final ProjectData project = await client.getProject(projectId);
     final FlavorData fl = project.flavor(flavor);
@@ -797,20 +798,26 @@ class Operations {
       return OpResult(false, 'No base language on flavor "${fl.name}".');
     }
     final String templateName = template.uri.pathSegments.last;
+    final String content = template.readAsStringSync();
+    final Set<String> templateKeys = _arbKeys(content);
     final Map<String, File> local = <String, File>{};
+    // Languages with something left to translate: no file at all, or a file
+    // that lacks some of the template's keys (a key added to the base only).
     final List<String> missing = <String>[];
     for (final LanguageData l in fl.languages) {
       if (l.code == baseCode) continue;
       final File file = File.fromUri(
           template.uri.resolve(siblingArbName(templateName, baseCode, l.code)));
-      if (file.existsSync()) {
-        local[l.code] = file;
-      } else {
+      if (!file.existsSync()) {
+        missing.add(l.code);
+        continue;
+      }
+      local[l.code] = file;
+      if (!_arbKeys(file.readAsStringSync()).containsAll(templateKeys)) {
         missing.add(l.code);
       }
     }
 
-    final String content = template.readAsStringSync();
     final List<String> lines = <String>[];
     bool scopeRefused = false;
 
@@ -869,6 +876,17 @@ class Operations {
       ],
       if (scopeRefused) 'untranslated_locales': missing,
     });
+  }
+
+  /// The message keys of an ARB, or nothing when it is not one.
+  static Set<String> _arbKeys(final String content) {
+    try {
+      final Object? parsed = jsonDecode(content);
+      if (parsed is! Map<String, dynamic>) return <String>{};
+      return parsed.keys.where((final String k) => !k.startsWith('@')).toSet();
+    } on FormatException {
+      return <String>{};
+    }
   }
 
   /// [adoptArbs] for a String Catalog, which carries every locale itself.

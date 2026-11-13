@@ -735,6 +735,31 @@ void _languageTests() {
       expect(r.message, contains('Translated 4 locale-string(s)'));
     });
 
+    test('a local file that lacks a base key gets that key translated',
+        () async {
+      File('${tmp.path}/app_de.arb').writeAsStringSync(jsonEncode(
+          <String, String>{'@@locale': 'de', 'k': 'v', 'added': 'Neu'}));
+      arb('app_en.arb', 'en');
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject(others: <String>['en']);
+      final OpResult r = await _ops(t.client).adoptArbs(template);
+      expect(r.ok, isTrue);
+      expect(t.imports, <String>['de all', 'en', 'de all +translate']);
+    });
+
+    test('the same gap without the Translate scope names the language',
+        () async {
+      File('${tmp.path}/app_de.arb').writeAsStringSync(jsonEncode(
+          <String, String>{'@@locale': 'de', 'k': 'v', 'added': 'Neu'}));
+      arb('app_en.arb', 'en');
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject(others: <String>['en'], translateScope: false);
+      final OpResult r = await _ops(t.client).adoptArbs(template);
+      expect(r.ok, isTrue);
+      expect(t.imports, <String>['de all', 'en']);
+      expect(r.message, contains('so the base text is still in en'));
+    });
+
     test('with no local translations it is one import that translates',
         () async {
       final ({ManagementClient client, List<String> imports}) t =

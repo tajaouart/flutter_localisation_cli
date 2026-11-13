@@ -173,7 +173,8 @@ L10nDoctorReport checkL10nSetup(final Directory root,
       : null;
 
   for (final File f in importers) {
-    final String rel = p.relative(f.path, from: root.path);
+    final String rel =
+        p.relative(f.path, from: root.path).replaceAll(r'\', '/');
     final L10nIssue issue = L10nIssue(
       'flutter-gen-import',
       replacement == null
@@ -200,7 +201,8 @@ L10nDoctorReport checkL10nSetup(final Directory root,
       RegExp(r'^\s+material_ui:', multiLine: true)
           .hasMatch(pubspec.readAsStringSync())) {
     for (final File f in _dartFiles(root, <String>['lib'])) {
-      final String rel = p.relative(f.path, from: root.path);
+      final String rel =
+          p.relative(f.path, from: root.path).replaceAll(r'\', '/');
       if (p.isWithin(genDir, rel) || p.dirname(rel) == genDir) continue;
       if (_legacyDelegates.hasMatch(_withoutComments(f.readAsStringSync()))) {
         issues.add(

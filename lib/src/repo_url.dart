@@ -47,7 +47,7 @@ String normalizeRepoUrl(final String url) {
     }
     return '${uri.host.toLowerCase()}/${path.toLowerCase()}';
   }
-  final String local = s.startsWith('file://') ? Uri.parse(s).toFilePath() : s;
+  final String local = s.startsWith('file://') ? _fileUrlPath(s) : s;
   return p.normalize(_trimGit(local));
 }
 
@@ -79,9 +79,21 @@ bool looksLikeAccessDenied(final String gitOutput) {
   ].any(o.contains);
 }
 
+/// The path of a `file://` URL, including the `file://C:\\dir` spelling git
+/// accepts on Windows, which is not a URI and makes `Uri.toFilePath` throw.
+String _fileUrlPath(final String url) {
+  final String rest = url.substring('file://'.length);
+  if (RegExp(r'^[A-Za-z]:[\\/]').hasMatch(rest)) return rest;
+  try {
+    return Uri.parse(url).toFilePath();
+  } on Object {
+    return rest;
+  }
+}
+
 String _trimGit(final String s) {
   String out = s;
-  while (out.endsWith('/')) {
+  while (out.endsWith('/') || out.endsWith(r'\')) {
     out = out.substring(0, out.length - 1);
   }
   return out.endsWith('.git') ? out.substring(0, out.length - 4) : out;
