@@ -279,4 +279,46 @@ void main() {
     expect(data['_isError'], isTrue);
     expect(data['error'], contains('File not found'));
   });
+
+  // Last: it turns the shared folder into a git repository.
+  test('pull_arbs inside the app\'s own git repository leaves its HEAD alone',
+      () async {
+    void git(final List<String> args, {final String? cwd}) {
+      final ProcessResult r = Process.runSync(
+        'git',
+        <String>['-c', 'user.name=t', '-c', 'user.email=t@t', ...args],
+        workingDirectory: cwd ?? tmp.path,
+      );
+      expect(r.exitCode, 0, reason: 'git ${args.join(' ')}: ${r.stderr}');
+    }
+
+    final Directory origin = Directory.systemTemp.createTempSync('fl_mcp_app');
+    addTearDown(() => origin.deleteSync(recursive: true));
+    File(p.join(origin.path, 'README.md')).writeAsStringSync('app\n');
+    git(<String>['init', '-q', '-b', 'main'], cwd: origin.path);
+    git(<String>['add', '.'], cwd: origin.path);
+    git(<String>['commit', '-qm', 'app'], cwd: origin.path);
+
+    git(<String>['init', '-q', '-b', 'feature']);
+    git(<String>['remote', 'add', 'origin', origin.path]);
+    git(<String>['fetch', '-q', 'origin']);
+    git(<String>['add', 'flutterlocalisation.json']);
+    git(<String>['commit', '-qm', 'feature work']);
+    String head() => '${Process.runSync('git', <String>[
+              'rev-parse',
+              'HEAD'
+            ], workingDirectory: tmp.path).stdout}'
+        .trim();
+    final String before = head();
+
+    backend.platforms = <String>['ios'];
+    Directory(catalogDir()).createSync(recursive: true);
+    final Map<String, dynamic> data = await mcp.call(
+        'pull_arbs', <String, dynamic>{'apply': true, 'discard_local': true});
+    expect(data['ok'], isTrue, reason: data.toString());
+    expect(data['method'], 'api');
+    expect(head(), before);
+    expect(File(p.join(tmp.path, 'flutterlocalisation.json')).existsSync(),
+        isTrue);
+  });
 }

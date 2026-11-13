@@ -9,9 +9,10 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show stderr;
+import 'dart:io' show HttpClient, Platform, stderr;
 
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
@@ -446,18 +447,67 @@ class FlavorSummary {
 // Client
 // --------------------------------------------------------------------------- //
 
+/// Seconds one request may take before the CLI gives up.
+const String kTimeoutEnvVar = 'FL_HTTP_TIMEOUT';
+
 class ManagementClient {
   ManagementClient({
     required this.baseUrl,
     required this.token,
     final http.Client? httpClient,
     this.maxRetries = 3,
-  }) : _http = httpClient ?? http.Client();
+    final Duration? requestTimeout,
+  })  : _http = httpClient ?? _defaultHttpClient(),
+        requestTimeout = requestTimeout ?? _timeoutFromEnvironment();
 
   final String baseUrl;
   final String token;
   final int maxRetries;
   final http.Client _http;
+
+  /// How long one request may take, connection to last byte.
+  ///
+  /// The service cuts a request at 120s, so past this nothing is coming. With
+  /// no limit a stalled connection held a CI job until the pipeline's own
+  /// timeout killed it, an hour later and with nothing in the log.
+  final Duration requestTimeout;
+
+  static const Duration _defaultRequestTimeout = Duration(seconds: 150);
+
+  static Duration _timeoutFromEnvironment() {
+    final int? secs = int.tryParse(Platform.environment[kTimeoutEnvVar] ?? '');
+    return secs != null && secs > 0
+        ? Duration(seconds: secs)
+        : _defaultRequestTimeout;
+  }
+
+  /// dart:io ignores `HTTPS_PROXY` and `NO_PROXY` unless told to read them,
+  /// and a build agent on a company network reaches nothing without them.
+  static http.Client _defaultHttpClient() => IOClient(HttpClient()
+    ..findProxy = HttpClient.findProxyFromEnvironment
+    ..connectionTimeout = const Duration(seconds: 20));
+
+  /// Send [req] and read the whole answer within [requestTimeout].
+  ///
+  /// A timeout is not retried: the service had longer than it ever takes, and
+  /// a write that timed out may have landed.
+  Future<http.Response> _exchange(
+    final http.BaseRequest req,
+    final String label,
+  ) async {
+    try {
+      return await _http
+          .send(req)
+          .then(http.Response.fromStream)
+          .timeout(requestTimeout);
+    } on TimeoutException {
+      throw ManagementException(
+        'No answer from $baseUrl after ${requestTimeout.inSeconds}s '
+        '($label). The service or the network between is not responding; '
+        'nothing was retried. \$$kTimeoutEnvVar sets the limit in seconds.',
+      );
+    }
+  }
 
   void close() => _http.close();
 
@@ -744,8 +794,9 @@ class ManagementClient {
         if (languageCode != null) {
           req.fields['selected_language_code'] = languageCode;
         }
-        final http.StreamedResponse streamed = await _http.send(req);
-        res = await http.Response.fromStream(streamed);
+        res = await _exchange(req, 'POST $path');
+      } on ManagementException {
+        rethrow;
       } catch (e) {
         if (attempt <= maxRetries) {
           await _backoff(attempt);
@@ -883,8 +934,9 @@ class ManagementClient {
         final http.Request req = http.Request(method, uri)
           ..headers.addAll(_headers);
         if (encoded != null) req.body = encoded;
-        final http.StreamedResponse streamed = await _http.send(req);
-        res = await http.Response.fromStream(streamed);
+        res = await _exchange(req, '$method $path');
+      } on ManagementException {
+        rethrow;
       } catch (e) {
         if (attempt <= maxRetries) {
           await _backoff(attempt);
@@ -930,7 +982,18 @@ class ManagementClient {
 
   Map<String, dynamic> _json(final http.Response res) {
     if (res.body.isEmpty) return const <String, dynamic>{};
-    final Object? decoded = jsonDecode(res.body);
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(res.body);
+    } on FormatException {
+      // A proxy's block page or a captive portal answers 200 with HTML.
+      throw ManagementException(
+        '${res.request?.url ?? baseUrl} answered HTTP ${res.statusCode} with '
+        '${res.headers['content-type'] ?? 'a body'} that is not JSON. '
+        'Something between this machine and the API (a proxy, a login page) '
+        'answered in its place.',
+      );
+    }
     if (decoded is Map<String, dynamic>) return decoded;
     return <String, dynamic>{'data': decoded};
   }

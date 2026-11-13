@@ -1940,8 +1940,9 @@ extension ArbExport on Operations {
   Future<OpResult> exportArbs(
     final String dir, {
     final bool dryRun = false,
+    final ProjectData? fetched,
   }) async {
-    final ProjectData project = await client.getProject(projectId);
+    final ProjectData project = fetched ?? await client.getProject(projectId);
     final FlavorData f = project.flavor(flavor);
     if (f.languages.isEmpty) {
       return OpResult(false, 'Flavor "${f.name}" has no locales.');
@@ -2022,8 +2023,9 @@ extension ArbExport on Operations {
   Future<OpResult> exportCatalogs(
     final String dir, {
     final bool dryRun = false,
+    final ProjectData? fetched,
   }) async {
-    final ProjectData project = await client.getProject(projectId);
+    final ProjectData project = fetched ?? await client.getProject(projectId);
     final FlavorData f = project.flavor(flavor);
     final List<Map<String, dynamic>> written = <Map<String, dynamic>>[];
     for (final String table in <String>['Localizable', 'InfoPlist']) {

@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.18.1] - 2026-11-13
+### Fixed
+- **`fl pull` no longer runs git in the app's own repository.** With no repository linked to the
+  project and the ARBs committed inside the app, `pull` took the app's checkout for the ARB
+  mirror: it reset it onto its upstream branch, printed "Synced", and left the ARBs as they were
+  committed, so a build shipped the strings from git and not the ones in the service. On a build
+  agent with a detached HEAD the reset could also move the checkout to the default branch. Git
+  is now used only for a clone of the repository the project is linked to; anything else is
+  written from the API. The MCP tool `pull_arbs` had the same fault and the same fix.
+- A request that never gets an answer fails after 150 seconds with a message, instead of holding
+  the command (and a CI job) forever. `FL_HTTP_TIMEOUT` sets the limit in seconds.
+- `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are honoured, so the CLI works on a build agent
+  behind a company proxy.
+- A proxy or login page answering with HTML in place of the API is reported as that, not as a
+  Dart stack trace.
+- `fl --json pull` prints only the JSON object on stdout; the progress lines go to stderr.
+### Changed
+- `fl pull` and `fl export` download the project once, not twice.
+### Added
+- README: "In a CI pipeline", with Azure Pipelines, GitHub Actions and GitLab CI steps.
+
 ## [1.18.0] - 2026-11-13
 ### Added
 - **GitHub Copilot support in `fl guard`.** It now also writes a `preToolUse` hook

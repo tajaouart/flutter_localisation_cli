@@ -1565,6 +1565,9 @@ Future<int> _pullArbs(
           '  fl pull --discard-local   drop them and take the service copy');
       return 1;
     }
+    // With --json stdout carries the object and nothing else, so a script
+    // can pipe it straight into a parser.
+    final IOSink say = cmd.jsonOut ? stderr : stdout;
     if (staged.isNotEmpty && adopt) {
       if (cmd.dryRun) {
         stdout.writeln(
@@ -1572,17 +1575,17 @@ Future<int> _pullArbs(
             'local-only key(s) before syncing.');
       } else {
         if (orphans.isNotEmpty) {
-          stdout.writeln('Importing ${orphans.length} local-only key(s) from '
+          say.writeln('Importing ${orphans.length} local-only key(s) from '
               '$templateName …');
           final OpResult imported = await built.ops.adoptArbs(template);
           if (!imported.ok) {
             stderr.writeln(imported.message);
             return 1;
           }
-          stdout.writeln('  ${imported.message.replaceAll('\n', '\n  ')}');
+          say.writeln('  ${imported.message.replaceAll('\n', '\n  ')}');
         }
         if (catalogOrphans.isNotEmpty) {
-          stdout.writeln('Importing ${catalogOrphans.length} local-only key(s) '
+          say.writeln('Importing ${catalogOrphans.length} local-only key(s) '
               'from $kLocalizableCatalog …');
           final OpResult imported = await built.ops.adoptCatalog(
             catalog.readAsStringSync(),
@@ -1592,7 +1595,7 @@ Future<int> _pullArbs(
             stderr.writeln(imported.message);
             return 1;
           }
-          stdout.writeln('  ${imported.message.replaceAll('\n', '\n  ')}');
+          say.writeln('  ${imported.message.replaceAll('\n', '\n  ')}');
         }
       }
     }
@@ -1606,26 +1609,23 @@ Future<int> _pullArbs(
     // which is why the fallback is silent enough to be routine and loud
     // enough to explain itself.
     if (!noGit) {
-      // arb_dir inside the app's own repo is not a mirror: resetting it onto
-      // its upstream would reset the app.
-      final GitSyncOutcome outcome =
-          appRepo && !sameRepo(local.url, linked!.url)
-              ? const GitSyncOutcome.skipped(GitSkipReason.notARepo,
-                  detail: "arb_dir is in the app's own repo")
-              : await mirror.hardSync();
+      final GitSyncOutcome outcome = await mirror.syncMirrorOf(
+        linked?.url,
+        appRoot: cfg.root ?? Directory.current.path,
+      );
       if (outcome.ok) {
-        stdout.writeln('✓ Synced "$dir" to ${outcome.upstream}.');
+        say.writeln('✓ Synced "$dir" to ${outcome.upstream}.');
         if (outcome.discardedAnything) {
           final List<String> what = <String>[
             if (outcome.discardedWorkingChanges) 'local edits',
             if (outcome.discardedLocalCommits > 0)
               '${outcome.discardedLocalCommits} local commit(s)',
           ];
-          stdout.writeln(
+          say.writeln(
               '  Discarded ${what.join(' and ')} — the backend owns this '
               'directory.');
           if (outcome.recoveryRef != null) {
-            stdout.writeln('  Recover with: git -C $dir show '
+            say.writeln('  Recover with: git -C $dir show '
                 '${outcome.recoveryRef}');
           }
         }
@@ -1646,7 +1646,7 @@ Future<int> _pullArbs(
         }
         return 0;
       }
-      stdout.writeln('Git mirror unavailable (${_skipReason(outcome)}) — '
+      say.writeln('Git mirror unavailable (${_skipReason(outcome)}) — '
           'writing the files from the API instead.');
     }
 
@@ -1655,6 +1655,7 @@ Future<int> _pullArbs(
       project,
       arbDir: arbDir,
       catalogDir: catalogDir,
+      stale: staged.isNotEmpty && adopt,
     );
     if (cmd.jsonOut) {
       return cmd.emit(
@@ -1685,10 +1686,16 @@ Future<OpResult> _exportFromApi(
   required final String arbDir,
   required final String catalogDir,
   final bool dryRun = false,
+  final bool stale = false,
 }) async {
+  // [project] is what the caller just fetched; asking again downloaded every
+  // translation a second time. [stale] says an import ran since.
+  final ProjectData? fetched = stale ? null : project;
   final List<OpResult> results = <OpResult>[
-    if (project.shipsFlutter) await ops.exportArbs(arbDir, dryRun: dryRun),
-    if (project.shipsIos) await ops.exportCatalogs(catalogDir, dryRun: dryRun),
+    if (project.shipsFlutter)
+      await ops.exportArbs(arbDir, dryRun: dryRun, fetched: fetched),
+    if (project.shipsIos)
+      await ops.exportCatalogs(catalogDir, dryRun: dryRun, fetched: fetched),
   ];
   final OpResult? failed = results
       .cast<OpResult?>()

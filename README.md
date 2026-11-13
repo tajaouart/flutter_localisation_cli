@@ -202,6 +202,65 @@ template ARB only, which is where gen_l10n reads it from.
 
 Prefer `pull` when the repo is linked — it is the path the backend pushes to.
 
+### In a CI pipeline
+
+A build needs three things: `flutterlocalisation.json` committed in the app (what `fl init`
+writes), a read-only API key in a secret named `FL_API_TOKEN`, and one command.
+
+```yaml
+# Azure Pipelines
+steps:
+  - script: |
+      dart pub global activate flutter_localisation_cli
+      dart pub global run flutter_localisation_cli:fl pull
+    displayName: Pull translations
+    env:
+      FL_API_TOKEN: $(FL_API_TOKEN)   # secret variables are not passed unless mapped
+```
+
+```yaml
+# GitHub Actions
+- name: Pull translations
+  run: |
+    dart pub global activate flutter_localisation_cli
+    dart pub global run flutter_localisation_cli:fl pull
+  env:
+    FL_API_TOKEN: ${{ secrets.FL_API_TOKEN }}
+```
+
+```yaml
+# GitLab CI (FL_API_TOKEN is a masked CI/CD variable)
+pull_translations:
+  script:
+    - dart pub global activate flutter_localisation_cli
+    - dart pub global run flutter_localisation_cli:fl pull
+```
+
+Run it after the Flutter or Dart SDK is installed and before the build. `flutter build`
+regenerates the Dart from the ARBs when `pubspec.yaml` has `generate: true`; an app on the
+`flutter_localisation` generator runs `dart run flutter_localisation <arb folder> <flavor>`.
+
+What to expect on an agent:
+
+- **It never asks anything.** No terminal, no prompt, and git is never left waiting for a
+  credential.
+- **Exit codes:** `0` done, `1` failed (the reason is on stderr), `64` wrong arguments. With
+  `--json`, stdout is one JSON object and nothing else.
+- **Your checkout is left alone.** When `arb_dir` sits inside the app's own repository, or the
+  project has no repository linked, the files are written from the API and no git command
+  touches the branch or commit the agent checked out.
+- **A key that exists only in the committed ARB fails the build**, with the key named. Import
+  it (`fl import`), or pass `--discard-local` to let the service win.
+- **Network:** 5xx answers, a short rate limit and a refused connection are retried. A request
+  with no answer after 150 seconds fails the step (`FL_HTTP_TIMEOUT=<seconds>` changes that).
+  `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are honoured.
+
+**Do you need the CLI in the pipeline at all?** Not when the project is linked to a GitHub,
+GitLab or Bitbucket repository: the service pushes every change there, so the pipeline can
+check that repository out like any other (a second checkout step, or a submodule). `fl pull`
+is for the other cases: no repository linked, a provider the dashboard does not link to
+(Azure Repos), or a pipeline that should not hold a second git credential.
+
 ### Native iOS (String Catalogs)
 
 A project can ship a Flutter app, a native iOS app, or both. Set its platforms in the

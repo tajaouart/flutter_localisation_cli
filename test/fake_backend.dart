@@ -79,8 +79,39 @@ class ReceivedImport {
       RegExp(r'filename="([^"]+)"').firstMatch(body)?.group(1);
 }
 
+/// One answer a test queues ahead of the normal routing.
+class Fault {
+  /// A status with a body, the way a failing service or a proxy answers.
+  const Fault(
+    this.status, {
+    this.body = '{"error": "unavailable"}',
+    this.contentType = 'application/json',
+    this.retryAfter,
+  }) : stall = false;
+
+  /// Accept the request and never answer it.
+  const Fault.stall()
+      : status = 0,
+        body = '',
+        contentType = '',
+        retryAfter = null,
+        stall = true;
+
+  final int status;
+  final String body;
+  final String contentType;
+  final int? retryAfter;
+  final bool stall;
+}
+
+/// A second token the backend accepts for reads only.
+const String kReadOnlyToken = 'flk_live_readonly';
+
 class FakeBackend {
   FakeBackend._(this._server);
+
+  /// Served in order, one per request, before anything else is looked at.
+  final List<Fault> faults = <Fault>[];
 
   final HttpServer _server;
 
@@ -164,9 +195,30 @@ class FakeBackend {
     final String path = req.uri.path;
     requests.add('${req.method} ${req.uri}');
     final HttpResponse res = req.response;
+    if (faults.isNotEmpty) {
+      final Fault fault = faults.removeAt(0);
+      if (fault.stall) return;
+      res.statusCode = fault.status;
+      res.headers.set('content-type', fault.contentType);
+      if (fault.retryAfter != null) {
+        res.headers.set('retry-after', '${fault.retryAfter}');
+      }
+      res.write(fault.body);
+      await res.close();
+      return;
+    }
     res.headers.contentType = ContentType.json;
 
-    if (req.headers.value('authorization') != 'Bearer flk_live_test') {
+    final String? auth = req.headers.value('authorization');
+    if (auth == 'Bearer $kReadOnlyToken' && req.method != 'GET') {
+      res.statusCode = HttpStatus.forbidden;
+      res.write(jsonEncode(<String, String>{
+        'error': "This token lacks the 'strings:write' scope.",
+      }));
+      await res.close();
+      return;
+    }
+    if (auth != 'Bearer flk_live_test' && auth != 'Bearer $kReadOnlyToken') {
       res.statusCode = HttpStatus.unauthorized;
       res.write(jsonEncode(<String, String>{'error': 'Invalid API token.'}));
       await res.close();

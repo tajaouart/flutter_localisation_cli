@@ -915,7 +915,10 @@ Future<void> _callTool(
         steps.add(imported.message);
       }
 
-      final GitSyncOutcome outcome = await GitMirror(dir).hardSync();
+      final GitSyncOutcome outcome = await GitMirror(dir).syncMirrorOf(
+        p.repository?.url,
+        appRoot: cfg.root ?? Directory.current.path,
+      );
       if (outcome.ok) {
         _toolResult(id, <String, dynamic>{
           'ok': true,

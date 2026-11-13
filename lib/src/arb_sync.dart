@@ -28,6 +28,10 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
+import 'package:flutter_localisation_cli/src/repo_url.dart';
+
 /// How the ARBs on disk were refreshed.
 enum ArbSyncMethod {
   /// `git fetch` + hard reset onto the upstream branch.
@@ -148,6 +152,43 @@ class GitMirror {
       url: '${url.stdout}'.trim(),
       root: '${root.stdout}'.trim(),
     );
+  }
+
+  /// [hardSync], but only when [dir] is a clone of [linkedUrl], the repo the
+  /// service pushes to, and that clone is not the app at [appRoot].
+  ///
+  /// Any other git around the directory is the app's own. Resetting it moved
+  /// a build agent off the commit it had checked out and left the ARBs as
+  /// committed, under a "Synced" line.
+  Future<GitSyncOutcome> syncMirrorOf(
+    final String? linkedUrl, {
+    required final String appRoot,
+  }) async {
+    if (linkedUrl == null) {
+      return const GitSyncOutcome.skipped(GitSkipReason.notARepo,
+          detail: 'no repository is linked to the project');
+    }
+    final ({String name, String url, String root})? clone = await remote();
+    if (clone != null && _isWithin(clone.root, appRoot)) {
+      return const GitSyncOutcome.skipped(GitSkipReason.notARepo,
+          detail: "arb_dir is in the app's own repo");
+    }
+    if (clone != null && !sameRepo(clone.url, linkedUrl)) {
+      return const GitSyncOutcome.skipped(GitSkipReason.notARepo,
+          detail: 'the clone is of another repository');
+    }
+    return hardSync();
+  }
+
+  /// Whether [other] is [root] or inside it, symlinks resolved.
+  static bool _isWithin(final String root, final String other) {
+    try {
+      final String a = Directory(root).resolveSymbolicLinksSync();
+      final String b = Directory(other).resolveSymbolicLinksSync();
+      return p.equals(a, b) || p.isWithin(a, b);
+    } on FileSystemException {
+      return false;
+    }
   }
 
   /// Bring the mirror to exactly what the remote holds.
