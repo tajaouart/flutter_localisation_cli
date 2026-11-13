@@ -356,7 +356,8 @@ String renderCopilotHookConfig() =>
                 'type': 'command',
                 'matcher': kCopilotWriteTools.join('|'),
                 'bash': 'sh $kCopilotHookSh || true',
-                'powershell': 'try { & ./$kCopilotHookPs1 } catch { exit 0 }',
+                'powershell':
+                    'try { \$input | & ./$kCopilotHookPs1 } catch { exit 0 }',
                 'cwd': '.',
                 'timeoutSec': 10,
               },
@@ -436,7 +437,11 @@ String renderCopilotHookPs1(final List<String> globs) {
 # Written by `fl guard`, rewritten on every run. Copilot runs it before a file
 # edit ($kCopilotHookFile) and refuses the edit when this prints a deny.
 try {
-  \$call = [Console]::In.ReadToEnd() | ConvertFrom-Json
+  # The tool call arrives on stdin. Depending on how PowerShell was started it
+  # shows up as pipeline input or on the console stream.
+  \$raw = @(\$input) -join "`n"
+  if (-not \$raw) { \$raw = [Console]::In.ReadToEnd() }
+  \$call = \$raw | ConvertFrom-Json
   \$tools = ${kCopilotWriteTools.map(psQuote).join(', ')}
   if (\$tools -notcontains \$call.toolName) { exit 0 }
   \$protected = ${globs.map(psQuote).join(', ')}
@@ -470,6 +475,7 @@ try {
     }
   }
 } catch {
+  [Console]::Error.WriteLine("fl-guard: \$_")
 }
 exit 0
 ''';

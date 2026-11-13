@@ -221,10 +221,13 @@ void main() {
             );
       p.stdin.write(jsonEncode(call));
       await p.stdin.close();
-      final String out = await p.stdout.transform(utf8.decoder).join();
-      await p.stderr.drain<void>();
+      final List<String> streams = await Future.wait(<Future<String>>[
+        p.stdout.transform(utf8.decoder).join(),
+        p.stderr.transform(utf8.decoder).join(),
+      ]);
       expect(await p.exitCode, 0, reason: 'a hook that fails blocks the call');
-      return out.trim();
+      expect(streams[1], isEmpty, reason: 'the script hit an error of its own');
+      return streams[0].trim();
     }
 
     String abs(final String relative) => Platform.isWindows
