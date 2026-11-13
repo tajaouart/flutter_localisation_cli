@@ -343,7 +343,12 @@ class InitCommand extends Command<int> with _ApiCommand {
   @override
   Future<int> run() async {
     final bool yes = argResults!['yes'] as bool;
-    final Prompter ask = Prompter(interactive: !yes && stdin.hasTerminal);
+    // FL_INTERACTIVE=1 asks the questions even when stdin is a pipe, so a
+    // script (or a test) can feed the answers line by line.
+    final Prompter ask = Prompter(
+        interactive: !yes &&
+            (stdin.hasTerminal ||
+                Platform.environment['FL_INTERACTIVE'] == '1'));
     final String baseUrl = (argResults!['base-url'] as String).trimRight();
     final Directory root = Directory.current;
     final File configFile = File('${root.path}/$kProjectConfigName');

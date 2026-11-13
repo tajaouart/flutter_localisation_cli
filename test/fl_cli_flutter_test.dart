@@ -41,6 +41,32 @@ void main() {
     return Run(r.exitCode, r.stdout as String, r.stderr as String);
   }
 
+  /// `fl` with [input] typed at its prompts and PATH replaced by [path].
+  Future<Run> flWith(
+    final List<String> args, {
+    final String input = '',
+    final String? path,
+  }) async {
+    final Process process = await Process.start(
+      Platform.resolvedExecutable,
+      <String>['run', p.join(packageRoot(), 'bin', 'fl.dart'), ...args],
+      workingDirectory: tmp.path,
+      environment: <String, String>{
+        'FL_API_TOKEN': 'flk_live_test',
+        'HOME': tmp.path,
+        if (input.isNotEmpty) 'FL_INTERACTIVE': '1',
+        if (path != null) 'PATH': path,
+      },
+    );
+    process.stdin.write(input);
+    await process.stdin.close();
+    final List<String> streams = await Future.wait(<Future<String>>[
+      process.stdout.transform(utf8.decoder).join(),
+      process.stderr.transform(utf8.decoder).join(),
+    ]);
+    return Run(await process.exitCode, streams[0], streams[1]);
+  }
+
   void writeConfig(final Map<String, Object> fields) =>
       File(p.join(tmp.path, 'flutterlocalisation.json'))
           .writeAsStringSync(jsonEncode(<String, Object>{
@@ -127,6 +153,66 @@ void main() {
       expect(r.err, contains('generate: true'),
           reason: 'the doctor check runs first');
       expect(r.err, contains('--no-codegen'));
+    });
+
+    group('an app on plain gen-l10n', () {
+      late String dartOnly;
+
+      /// A `flutter` on the PATH that prints [says] and exits with [code].
+      String fakeFlutter(final int code, final String says) {
+        final Directory bin = Directory(p.join(tmp.path, 'fakebin'))
+          ..createSync();
+        if (Platform.isWindows) {
+          File(p.join(bin.path, 'flutter.bat'))
+              .writeAsStringSync('@echo $says\r\n@exit /b $code\r\n');
+        } else {
+          final File script = File(p.join(bin.path, 'flutter'))
+            ..writeAsStringSync('#!/bin/sh\necho "$says"\nexit $code\n');
+          Process.runSync('chmod', <String>['+x', script.path]);
+        }
+        return '${bin.path}${Platform.isWindows ? ';' : ':'}$dartOnly';
+      }
+
+      setUp(() {
+        // The SDK's own bin folder holds dart and no flutter.
+        dartOnly = <String>[
+          p.dirname(Platform.resolvedExecutable),
+          if (Platform.isWindows)
+            p.join(Platform.environment['SystemRoot']!, 'System32')
+          else ...<String>['/usr/bin', '/bin'],
+        ].join(Platform.isWindows ? ';' : ':');
+        File(p.join(tmp.path, 'pubspec.yaml')).writeAsStringSync(pubspec);
+        File(p.join(tmp.path, 'l10n.yaml'))
+            .writeAsStringSync('arb-dir: lib/l10n\n');
+        writeConfig(<String, Object>{'arb_dir': 'lib/l10n'});
+      });
+
+      test('sync ends with flutter gen-l10n, not the package generator',
+          () async {
+        final Run r =
+            await flWith(<String>['sync'], path: fakeFlutter(0, 'generated'));
+        expect(r.code, 0, reason: r.err);
+        expect(r.out, contains('Regenerating Dart with `flutter gen-l10n`'));
+        expect('${r.out}${r.err}', isNot(contains('Could not find package')));
+      });
+
+      test('a failing gen-l10n fails the sync and shows what it said',
+          () async {
+        final Run r = await flWith(<String>['sync'],
+            path: fakeFlutter(3, 'template missing'));
+        expect(r.code, 3);
+        expect(r.err, contains('`flutter gen-l10n` failed (exit 3)'));
+        expect(r.err, contains('template missing'));
+      });
+
+      test('without flutter on the PATH the files are synced and it says so',
+          () async {
+        final Run r = await flWith(<String>['sync'], path: dartOnly);
+        expect(r.code, 0, reason: r.err);
+        expect(r.out, contains('`flutter` is not on the PATH here.'));
+        expect(File(p.join(tmp.path, 'lib', 'l10n', 'app_en.arb')).existsSync(),
+            isTrue);
+      });
     });
 
     test('the dependency hint is left out when the pubspec has it', () async {
@@ -366,6 +452,38 @@ void main() {
       expect('${r.out}${r.err}', isNot(contains('Either:')));
       expect('${r.out}${r.err}', isNot(contains('--discard-local')));
       expect(r.out, contains('app_en.arb (en):'));
+    });
+
+    test('answering no at the prompt imports nothing and says what to run',
+        () async {
+      final Run r = await flWith(
+        <String>['init', '--base-url', backend.url, '--arb-dir', 'lib/l10n'],
+        input: 'n\n',
+      );
+      expect(r.code, 1);
+      expect(r.out, contains('Import them (and the translations in the ARBs'));
+      expect(r.err, contains('Nothing was imported or pulled.'));
+      expect(r.err, contains('fl pull --adopt'));
+      expect(backend.imports, isEmpty);
+      expect(File(p.join(l10n.path, 'app_de.arb')).readAsStringSync(),
+          contains('Titel'));
+    });
+
+    test('answering yes at the prompt imports the base and its translations',
+        () async {
+      final Run r = await flWith(
+        <String>[
+          'init',
+          '--base-url',
+          backend.url,
+          '--arb-dir',
+          'lib/l10n',
+        ],
+        input: 'y\nn\nn\nn\n',
+      );
+      expect(r.code, 0, reason: r.err);
+      expect(backend.imports.map((final ReceivedImport i) => i.language),
+          containsAllInOrder(<String>['de', 'en']));
     });
 
     test('a plain pull still names both commands', () async {

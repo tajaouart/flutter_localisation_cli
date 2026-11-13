@@ -112,4 +112,9 @@ void main() {
     expect(normalizeRepoUrl(r'C:\repos\app.git'), isNot(startsWith('c/')));
     expect(sameRepo(r'file://C:\repos\app.git', r'C:\repos\app'), isTrue);
   });
+
+  test('a file URL names the same repo as its path, even a malformed one', () {
+    expect(sameRepo('file:///srv/git/app.git', '/srv/git/app/'), isTrue);
+    expect(normalizeRepoUrl('file://%zz/app.git'), '%zz/app');
+  });
 }

@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+### Added
+- `FL_INTERACTIVE=1` makes `fl init` ask its questions when stdin is a pipe, so a script can
+  feed the answers line by line.
+
 ## [1.17.5] - 2026-11-13
 ### Fixed
 - `fl pull --adopt` and `fl init` translate a key that was added to the base ARB only. 1.17.4

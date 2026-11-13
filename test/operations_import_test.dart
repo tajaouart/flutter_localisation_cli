@@ -760,6 +760,17 @@ void _languageTests() {
       expect(r.message, contains('so the base text is still in en'));
     });
 
+    test('a local file that is not JSON stops the adoption and is named',
+        () async {
+      File('${tmp.path}/app_en.arb').writeAsStringSync('{ not json');
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject(others: <String>['en']);
+      final OpResult r = await _ops(t.client).adoptArbs(template);
+      expect(r.ok, isFalse);
+      expect(r.message, contains('app_en.arb: Invalid ARB'));
+      expect(t.imports, <String>['de all']);
+    });
+
     test('with no local translations it is one import that translates',
         () async {
       final ({ManagementClient client, List<String> imports}) t =
