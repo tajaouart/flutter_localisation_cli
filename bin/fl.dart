@@ -1870,13 +1870,23 @@ Future<int> _regenerateDart(final ProjectConfig cfg,
 /// flutter_localisation package: its generator is `flutter gen-l10n`.
 Future<int> _runGenL10n(final String projectRoot) async {
   stdout.writeln('Regenerating Dart with `flutter gen-l10n` …');
+  const String missing = '`flutter` is not on the PATH here. The ARB files are '
+      'up to date; run `flutter gen-l10n` where Flutter is installed.';
+  // On Windows flutter is a .bat that only a shell can start, and a shell
+  // answers a missing command with an exit code, not an exception.
+  if (Platform.isWindows &&
+      (await Process.run('where', <String>['flutter'], runInShell: true))
+              .exitCode !=
+          0) {
+    stdout.writeln(missing);
+    return 0;
+  }
   final ProcessResult gen;
   try {
     gen = await Process.run('flutter', <String>['gen-l10n'],
         workingDirectory: projectRoot, runInShell: Platform.isWindows);
   } on ProcessException {
-    stdout.writeln('`flutter` is not on the PATH here. The ARB files are up to '
-        'date; run `flutter gen-l10n` where Flutter is installed.');
+    stdout.writeln(missing);
     return 0;
   }
   if (gen.exitCode != 0) {

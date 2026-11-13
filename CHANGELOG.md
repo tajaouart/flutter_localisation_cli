@@ -4,6 +4,9 @@
 ### Added
 - `FL_INTERACTIVE=1` makes `fl init` ask its questions when stdin is a pipe, so a script can
   feed the answers line by line.
+### Fixed
+- On Windows, `fl sync` and `fl init` in a gen-l10n app without Flutter on the PATH say so and
+  succeed, as on macOS and Linux, instead of failing on the shell's "not recognized" error.
 
 ## [1.17.5] - 2026-11-13
 ### Fixed
