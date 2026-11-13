@@ -26,24 +26,4 @@ jobs:
         run: dart format --output=none --set-exit-if-changed lib bin test
       - if: matrix.os == 'ubuntu-latest'
         run: dart analyze --fatal-infos lib bin test
-      - if: matrix.os == 'windows-latest'
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          Get-ExecutionPolicy -List
-          $d = Join-Path $env:RUNNER_TEMP 'hookdbg'
-          New-Item -ItemType Directory -Force $d | Out-Null
-          $repo = (Get-Location).Path
-          Set-Location $d
-          dart run "$repo/bin/fl.dart" guard
-          Set-Content -NoNewline -Encoding ascii payload.json '{"toolName":"edit","toolArgs":{"path":"lib/generated_translation_methods.dart"}}'
-          Write-Host '--- 1 what stdin looks like'
-          cmd /c 'type payload.json | pwsh -NoProfile -Command "$r=@($input) -join ''|''; Write-Host input=[$r]; Write-Host console=[$([Console]::In.ReadToEnd())]"'
-          Write-Host '--- 2 hook field, errors shown'
-          cmd /c 'type payload.json | pwsh -NoProfile -Command "try { $input | & ./.github/hooks/fl-guard.ps1 } catch { Write-Host CAUGHT $_; exit 0 }"'
-          Write-Host "--- 2 exit $LASTEXITCODE"
-          Write-Host '--- 3 traced'
-          cmd /c 'type payload.json | pwsh -NoProfile -Command "Set-PSDebug -Trace 1; $input | & ./.github/hooks/fl-guard.ps1"'
-          Write-Host '--- 4 file mode'
-          cmd /c 'type payload.json | pwsh -NoProfile -File ./.github/hooks/fl-guard.ps1'
       - run: dart test

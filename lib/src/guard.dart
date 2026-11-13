@@ -445,7 +445,19 @@ try {
   \$tools = ${kCopilotWriteTools.map(psQuote).join(', ')}
   if (\$tools -notcontains \$call.toolName) { exit 0 }
   \$protected = ${globs.map(psQuote).join(', ')}
-  \$root = ((Resolve-Path (Join-Path \$PSScriptRoot '../..')).Path -replace '\\\\', '/').TrimEnd('/') + '/'
+  # The long spelling of a path whose file may not exist yet: RUNNER~1 and
+  # runneradmin are one folder.
+  function Canon([string]\$path) {
+    \$rest = ''
+    \$dir = \$path
+    while (\$dir -and -not (Test-Path -LiteralPath \$dir)) {
+      \$rest = '/' + (Split-Path -Leaf \$dir) + \$rest
+      \$dir = Split-Path -Parent \$dir
+    }
+    if (-not \$dir) { return \$path -replace '\\\\', '/' }
+    return ((Get-Item -LiteralPath \$dir -Force).FullName -replace '\\\\', '/').TrimEnd('/') + \$rest
+  }
+  \$root = (Canon (Resolve-Path (Join-Path \$PSScriptRoot '../..')).Path) + '/'
 
   # edit and create carry the file as "path"; apply_patch names its files on
   # the "*** Update File:" lines of the patch.
@@ -459,19 +471,20 @@ try {
   }
 
   if (\$env:FL_GUARD_DEBUG) { [Console]::Error.WriteLine("fl-guard: root=\$root files=\$(\$files -join ' | ')") }
-  foreach (\$file in \$files) {
-    \$file = \$file -replace '\\\\', '/'
-    if (\$file.StartsWith(\$root, [StringComparison]::OrdinalIgnoreCase)) { \$file = \$file.Substring(\$root.Length) }
-    if (\$file.StartsWith('./')) { \$file = \$file.Substring(2) }
-    foreach (\$glob in \$protected) {
-      if (\$glob.EndsWith('/**')) {
-        \$hit = \$file.StartsWith(\$glob.Substring(0, \$glob.Length - 2), [StringComparison]::OrdinalIgnoreCase)
-      } else {
-        \$hit = \$file -ieq \$glob
-      }
-      if (\$hit) {
-        Write-Output '$_denyJson'
-        exit 0
+  foreach (\$given in \$files) {
+    foreach (\$file in (\$given -replace '\\\\', '/'), (Canon \$given)) {
+      if (\$file.StartsWith(\$root, [StringComparison]::OrdinalIgnoreCase)) { \$file = \$file.Substring(\$root.Length) }
+      if (\$file.StartsWith('./')) { \$file = \$file.Substring(2) }
+      foreach (\$glob in \$protected) {
+        if (\$glob.EndsWith('/**')) {
+          \$hit = \$file.StartsWith(\$glob.Substring(0, \$glob.Length - 2), [StringComparison]::OrdinalIgnoreCase)
+        } else {
+          \$hit = \$file -ieq \$glob
+        }
+        if (\$hit) {
+          Write-Output '$_denyJson'
+          exit 0
+        }
       }
     }
   }
