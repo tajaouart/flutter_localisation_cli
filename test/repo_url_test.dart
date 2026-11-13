@@ -107,4 +107,9 @@ void main() {
       expect(o.attempts.single.output, contains('Authentication failed'));
     });
   });
+
+  test('a Windows drive path is a local repo, not an scp host', () {
+    expect(normalizeRepoUrl(r'C:\repos\app.git'), isNot(startsWith('c/')));
+    expect(sameRepo(r'file://C:\repos\app.git', r'C:\repos\app'), isTrue);
+  });
 }

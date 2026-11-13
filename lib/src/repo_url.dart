@@ -13,6 +13,7 @@ const Set<String> kSshHosts = <String>{
   'bitbucket.org',
 };
 
+final RegExp _drivePath = RegExp(r'^[A-Za-z]:[\\/]');
 final RegExp _scp = RegExp(r'^(?:[^@/\s]+@)?([^:/\s]+):(?!//)(.+)$');
 
 /// `git@github.com:owner/repo.git` for an https URL on one of [kSshHosts],
@@ -33,7 +34,8 @@ String? sshFormOf(final String url) {
 /// port or `.git`, host and path lowercased. A local path stays as it is.
 String normalizeRepoUrl(final String url) {
   final String s = url.trim();
-  final RegExpMatch? scp = _scp.firstMatch(s);
+  // `C:\\dir` is a path, though it reads like the scp form `host:path`.
+  final RegExpMatch? scp = _drivePath.hasMatch(s) ? null : _scp.firstMatch(s);
   if (scp != null && !s.contains('://')) {
     return '${scp.group(1)!.toLowerCase()}/'
         '${_trimPath(scp.group(2)!).toLowerCase()}';
@@ -83,7 +85,7 @@ bool looksLikeAccessDenied(final String gitOutput) {
 /// accepts on Windows, which is not a URI and makes `Uri.toFilePath` throw.
 String _fileUrlPath(final String url) {
   final String rest = url.substring('file://'.length);
-  if (RegExp(r'^[A-Za-z]:[\\/]').hasMatch(rest)) return rest;
+  if (_drivePath.hasMatch(rest)) return rest;
   try {
     return Uri.parse(url).toFilePath();
   } on Object {
