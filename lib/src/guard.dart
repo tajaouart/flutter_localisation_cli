@@ -1,5 +1,5 @@
-/// Installs a Claude Code guard into a consuming project so AI agents cannot
-/// hand-edit the FlutterLocalisation-managed files.
+/// Installs a guard for Claude Code and GitHub Copilot into a consuming project
+/// so AI agents cannot hand-edit the FlutterLocalisation-managed files.
 ///
 /// The ARB repo and the generated Dart are owned by the backend + codegen: they
 /// only ever change through `fl` / `flutter_localisation` + git pull. If an AI
@@ -7,13 +7,16 @@
 /// the gitignored ARB repo, the edit is lost entirely). This writes matching
 /// `permissions.deny` rules into the project's `.claude/settings.json` — the
 /// native, portable Claude Code mechanism — so `Edit`/`Write` on those paths is
-/// refused for everyone on the repo.
+/// refused for everyone on the repo. Copilot has no deny rules, so it gets a
+/// `preToolUse` hook under `.github/hooks/` that refuses the same paths.
 ///
 /// Pure Dart, no network — safe to run anywhere.
 library;
 
 import 'dart:convert';
 import 'dart:io';
+
+import 'package:path/path.dart' as p;
 
 class GuardResult {
   GuardResult({
@@ -30,7 +33,7 @@ class GuardResult {
   /// existing one.
   final bool created;
 
-  /// The glob patterns now protected (without the `Edit(...)`/`Write(...)` wrapper).
+  /// The glob patterns now protected (without the `Edit(...)` wrapper).
   final List<String> protected;
 
   /// The deny rules newly added this run (already-present rules are not repeated).
@@ -58,7 +61,15 @@ List<String> deriveGuardGlobs(
 }) {
   final Set<String> dirs = <String>{};
   if (arbDirFromConfig != null && arbDirFromConfig.trim().isNotEmpty) {
-    dirs.add(_normalizeDir(arbDirFromConfig));
+    // The config hands the folder over as an absolute path. The rules are
+    // committed and read from the project root, so they need it relative, and
+    // a folder outside the project is not this repo's to protect.
+    final String dir = p.isAbsolute(arbDirFromConfig)
+        ? p.relative(arbDirFromConfig, from: projectRoot.absolute.path)
+        : arbDirFromConfig;
+    if (!p.split(dir).contains('..')) {
+      dirs.add(_normalizeDir(p.split(dir).join('/')));
+    }
   }
 
   final File l10n = File('${projectRoot.path}/l10n.yaml');
@@ -79,7 +90,7 @@ List<String> deriveGuardGlobs(
   return globs.toSet().toList()..sort();
 }
 
-/// Merge `Edit`/`Write` deny rules for [globs] into `<projectRoot>/.claude/settings.json`,
+/// Merge `Edit` deny rules for [globs] into `<projectRoot>/.claude/settings.json`,
 /// creating the file (and `.claude/`) if needed. Existing settings and any existing
 /// deny rules are preserved; only missing rules are appended.
 GuardResult installGuard(
@@ -109,9 +120,19 @@ GuardResult installGuard(
         .map((final dynamic e) => e.toString()),
   ];
 
+  // An `Edit` rule covers every file-editing tool. Claude Code warns on each
+  // start about a `Write(path)` rule, so the ones older versions wrote go too,
+  // with the ARB folder they spelled as this machine's absolute path (read from
+  // the project root, so it matched nothing).
   final List<String> wanted = <String>[
-    for (final String g in globs) ...<String>['Edit($g)', 'Write($g)'],
+    for (final String g in globs) 'Edit($g)'
   ];
+  final String stale = '(${projectRoot.absolute.path}';
+  deny.removeWhere((final String rule) =>
+      globs.any((final String g) => rule == 'Write($g)') ||
+      rule.startsWith('Edit$stale') ||
+      rule.startsWith('Write$stale'));
+
   final List<String> added = <String>[];
   for (final String rule in wanted) {
     if (!deny.contains(rule)) {
@@ -143,9 +164,10 @@ GuardResult installGuard(
 // refusal teaches nothing — an agent that hits it tends to route *around* the
 // guard (write the string elsewhere) instead of using the SaaS. These docs turn
 // the block into an instruction: they state that FlutterLocalisation is the
-// source of truth and show the correct `fl` workflow. Written to the two files
-// coding agents read by convention — `AGENTS.md` (cross-tool) and `CLAUDE.md`
-// (Claude Code, loaded automatically).
+// source of truth and show the correct `fl` workflow. Written to the files
+// coding agents read by convention: `AGENTS.md` (cross-tool), `CLAUDE.md`
+// (Claude Code) and `.github/copilot-instructions.md` (GitHub Copilot in every
+// editor, on github.com and in code review).
 // --------------------------------------------------------------------------- //
 
 /// Markers delimiting the `fl guard`-managed region inside AGENTS.md / CLAUDE.md.
@@ -154,11 +176,18 @@ GuardResult installGuard(
 const String kGuardDocStart = '<!-- fl:guard:start -->';
 const String kGuardDocEnd = '<!-- fl:guard:end -->';
 
+/// The guidance files, relative to the project root.
+const List<String> kAgentDocFiles = <String>[
+  'AGENTS.md',
+  'CLAUDE.md',
+  '.github/copilot-instructions.md',
+];
+
 /// Result of writing/merging the agent guidance docs.
 class AgentDocsResult {
   AgentDocsResult({required this.files, required this.created});
 
-  /// Absolute paths of the doc files written (AGENTS.md, CLAUDE.md).
+  /// Absolute paths of the doc files written, one per [kAgentDocFiles] entry.
   final List<String> files;
 
   /// Subset of [files] that were created fresh (vs. merged into an existing file).
@@ -186,9 +215,10 @@ $kGuardDocStart
 Dashboard: https://app.flutterlocalisation.com · CLI: `fl`
 
 The ARB files and the generated localization Dart are produced by the backend and
-`fl` codegen. They are write-protected in `.claude/settings.json` (Edit/Write are
-denied) because the next sync silently overwrites any manual change — or drops it
-entirely, for the git-ignored ARB repo. Protected paths:
+`fl` codegen. They are write-protected for Claude Code (`.claude/settings.json`
+deny rules) and for GitHub Copilot (`$kCopilotHookFile`), because the next sync
+silently overwrites any manual change, or drops it entirely for the git-ignored
+ARB repo. Protected paths:
 $protectedList
 
 **Never hand-edit, create, or regenerate those files, and never route around the
@@ -225,7 +255,7 @@ dashboard so it syncs automatically. Do not fabricate the ARB by hand instead.
 $kGuardDocEnd''';
 }
 
-/// Write/merge the managed guidance block into `AGENTS.md` and `CLAUDE.md` at
+/// Write/merge the managed guidance block into every [kAgentDocFiles] file at
 /// [projectRoot]. Idempotent: an existing managed block is replaced in place,
 /// surrounding project content is preserved, a file without the block gets it
 /// appended, and a missing file is created with just the block.
@@ -238,9 +268,10 @@ AgentDocsResult installAgentDocs(
       renderAgentDocBlock(projectLabel: projectLabel, globs: globs);
   final List<String> written = <String>[];
   final List<String> created = <String>[];
-  for (final String name in <String>['AGENTS.md', 'CLAUDE.md']) {
+  for (final String name in kAgentDocFiles) {
     final File f = File('${projectRoot.path}/$name');
     final bool existed = f.existsSync();
+    f.parent.createSync(recursive: true);
     final String next =
         _mergeManagedBlock(existed ? f.readAsStringSync() : null, block);
     f.writeAsStringSync(next);
@@ -265,6 +296,207 @@ String _mergeManagedBlock(final String? existing, final String block) {
     return '$before$block$after';
   }
   return '${existing.trimRight()}\n\n$block\n';
+}
+
+// --------------------------------------------------------------------------- //
+// GitHub Copilot hook
+//
+// Copilot (the CLI and the cloud agent) runs the `preToolUse` hooks found in
+// `.github/hooks/*.json` before every tool call and refuses the call when a hook
+// answers "deny". The hook cannot rely on `fl` being installed: the cloud agent
+// runs in a bare Linux sandbox and a hook that errors blocks the call. So the
+// check is two small scripts with the protected paths written into them, sh for
+// macOS and Linux, PowerShell for Windows, and both let the edit through on any
+// error of their own.
+// --------------------------------------------------------------------------- //
+
+const String kCopilotHookFile = '.github/hooks/fl-guard.json';
+const String kCopilotHookSh = '.github/hooks/fl-guard.sh';
+const String kCopilotHookPs1 = '.github/hooks/fl-guard.ps1';
+
+/// Copilot's file-writing tools. `apply_patch` is what the GPT models edit with.
+const List<String> kCopilotWriteTools = <String>[
+  'edit',
+  'create',
+  'str_replace_editor',
+  'apply_patch',
+];
+
+/// What the agent reads when an edit is refused. No quote or backslash: it is
+/// pasted as is into JSON inside both scripts.
+const String kCopilotDenyReason =
+    'FlutterLocalisation owns this file and the next sync overwrites a manual '
+    'edit. Change the string with fl add, fl edit or fl import, then run '
+    'fl pull. AGENTS.md has the workflow.';
+
+const String _denyJson = '{"permissionDecision":"deny",'
+    '"permissionDecisionReason":"$kCopilotDenyReason"}';
+
+class CopilotGuardResult {
+  CopilotGuardResult({required this.files, required this.created});
+
+  /// Absolute paths of the three hook files.
+  final List<String> files;
+
+  /// Subset of [files] that did not exist before.
+  final List<String> created;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'copilot': files,
+        'copilotCreated': created,
+      };
+}
+
+String renderCopilotHookConfig() =>
+    '${const JsonEncoder.withIndent('  ').convert(<String, dynamic>{
+          'version': 1,
+          'hooks': <String, dynamic>{
+            'preToolUse': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'type': 'command',
+                'matcher': kCopilotWriteTools.join('|'),
+                'bash': 'sh $kCopilotHookSh || true',
+                'powershell': 'try { & ./$kCopilotHookPs1 } catch { exit 0 }',
+                'cwd': '.',
+                'timeoutSec': 10,
+              },
+            ],
+          },
+        })}\n';
+
+String _shQuote(final String s) => "'${s.replaceAll("'", r"'\''")}'";
+
+String renderCopilotHookSh(final List<String> globs) {
+  final String patterns = globs
+      .map((final String g) => g.endsWith('/**')
+          ? '${_shQuote(g.substring(0, g.length - 3))}/*'
+          : _shQuote(g))
+      .join('|');
+  final String tools = kCopilotWriteTools
+      .map((final String t) => '''*'"toolName":"$t"'*''')
+      .join('|');
+  return '''
+#!/bin/sh
+# Written by `fl guard`, rewritten on every run. Copilot runs it before a file
+# edit ($kCopilotHookFile) and refuses the edit when this prints a deny.
+root=\$(cd "\$(dirname "\$0")/../.." && pwd) || exit 0
+real=\$(cd "\$root" && pwd -P) || exit 0
+input=\$(cat)
+case "\$input" in
+  $tools) ;;
+  *) exit 0 ;;
+esac
+
+check() {
+  case "\$1" in
+    $patterns)
+      printf '%s\\n' '$_denyJson'
+      exit 0
+      ;;
+  esac
+}
+
+# The path with its symlinked folders resolved, for a file that may not exist
+# yet: /var/x and /private/var/x are one file on macOS.
+resolved() {
+  dir=\$(dirname "\$1")
+  rest=\$(basename "\$1")
+  while [ ! -d "\$dir" ] && [ "\$dir" != / ]; do
+    rest="\$(basename "\$dir")/\$rest"
+    dir=\$(dirname "\$dir")
+  done
+  dir=\$(cd "\$dir" 2>/dev/null && pwd -P) || return 1
+  printf '%s/%s' "\$dir" "\$rest"
+}
+
+{
+  # edit and create carry the file as "path"; apply_patch names its files on
+  # the "*** Update File:" lines of the patch.
+  printf '%s' "\$input" | grep -o '"path":"[^"]*"' | sed 's/^"path":"//; s/"\$//'
+  printf '%s' "\$input" |
+    grep -oE '\\\\n\\*\\*\\* (Add File|Update File|Delete File|Move to): [^\\\\"]*' |
+    sed 's/^[^:]*: //'
+} | while IFS= read -r file; do
+  case "\$file" in
+    /*)
+      check "\${file#"\$root"/}"
+      check "\${file#"\$real"/}"
+      if file=\$(resolved "\$file"); then check "\${file#"\$real"/}"; fi
+      ;;
+    *) check "\${file#./}" ;;
+  esac
+done
+exit 0
+''';
+}
+
+String renderCopilotHookPs1(final List<String> globs) {
+  String psQuote(final String s) => "'${s.replaceAll("'", "''")}'";
+  return '''
+# Written by `fl guard`, rewritten on every run. Copilot runs it before a file
+# edit ($kCopilotHookFile) and refuses the edit when this prints a deny.
+try {
+  \$call = [Console]::In.ReadToEnd() | ConvertFrom-Json
+  \$tools = ${kCopilotWriteTools.map(psQuote).join(', ')}
+  if (\$tools -notcontains \$call.toolName) { exit 0 }
+  \$protected = ${globs.map(psQuote).join(', ')}
+  \$root = ((Resolve-Path (Join-Path \$PSScriptRoot '../..')).Path -replace '\\\\', '/').TrimEnd('/') + '/'
+
+  # edit and create carry the file as "path"; apply_patch names its files on
+  # the "*** Update File:" lines of the patch.
+  \$files = @()
+  \$toolArgs = \$call.toolArgs
+  if (\$toolArgs -is [string]) {
+    \$headers = '(?m)^\\*\\*\\* (?:Add File|Update File|Delete File|Move to): (.+?)\\s*\$'
+    foreach (\$m in [regex]::Matches(\$toolArgs, \$headers)) { \$files += \$m.Groups[1].Value }
+  } elseif (\$toolArgs.path) {
+    \$files += [string]\$toolArgs.path
+  }
+
+  foreach (\$file in \$files) {
+    \$file = \$file -replace '\\\\', '/'
+    if (\$file.StartsWith(\$root, [StringComparison]::OrdinalIgnoreCase)) { \$file = \$file.Substring(\$root.Length) }
+    if (\$file.StartsWith('./')) { \$file = \$file.Substring(2) }
+    foreach (\$glob in \$protected) {
+      if (\$glob.EndsWith('/**')) {
+        \$hit = \$file.StartsWith(\$glob.Substring(0, \$glob.Length - 2), [StringComparison]::OrdinalIgnoreCase)
+      } else {
+        \$hit = \$file -ieq \$glob
+      }
+      if (\$hit) {
+        Write-Output '$_denyJson'
+        exit 0
+      }
+    }
+  }
+} catch {
+}
+exit 0
+''';
+}
+
+/// Write the Copilot hook and its two scripts under `.github/hooks/`. The three
+/// files belong to `fl guard` and are replaced on every run, so a changed
+/// `arb_dir` is picked up by running the guard again.
+CopilotGuardResult installCopilotGuard(
+  final Directory projectRoot, {
+  required final List<String> globs,
+}) {
+  final Map<String, String> wanted = <String, String>{
+    kCopilotHookFile: renderCopilotHookConfig(),
+    kCopilotHookSh: renderCopilotHookSh(globs),
+    kCopilotHookPs1: renderCopilotHookPs1(globs),
+  };
+  final List<String> written = <String>[];
+  final List<String> created = <String>[];
+  wanted.forEach((final String name, final String body) {
+    final File f = File('${projectRoot.path}/$name');
+    if (!f.existsSync()) created.add(f.path);
+    f.parent.createSync(recursive: true);
+    f.writeAsStringSync(body);
+    written.add(f.path);
+  });
+  return CopilotGuardResult(files: written, created: created);
 }
 
 String _normalizeDir(final String raw) {

@@ -110,6 +110,25 @@ void main() {
         reason: '--yes does not write the guard unless asked');
   });
 
+  test('init --yes --guard writes the rules for Claude Code and Copilot',
+      () async {
+    File(p.join(tmp.path, 'flutterlocalisation.json')).deleteSync();
+    File(p.join(tmp.path, 'App', 'Localizable.xcstrings'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync(kServedCatalog);
+
+    final Run r = await fl(
+        <String>['init', '--yes', '--guard', '--base-url', backend.url]);
+    expect(r.code, 0, reason: '${r.out}\n${r.err}');
+    for (final String name in <String>[
+      p.join('.claude', 'settings.json'),
+      p.join('.github', 'hooks', 'fl-guard.json'),
+      p.join('.github', 'copilot-instructions.md'),
+    ]) {
+      expect(File(p.join(tmp.path, name)).existsSync(), isTrue, reason: name);
+    }
+  });
+
   test(
       'init refuses to overwrite a config without --force when not interactive',
       () async {

@@ -2,7 +2,7 @@
 
 /// `fl_mcp` — Model Context Protocol server for FlutterLocalisation.
 ///
-/// Exposes translation-key management to Claude (or any MCP client) over stdio, reusing the
+/// Exposes translation-key management to Claude, GitHub Copilot or any MCP client over stdio, reusing the
 /// same `Operations` core as the `fl` CLI. The token is a *workspace* credential, so the
 /// server discovers projects itself — users pick a project **by name** (via `list_projects`
 /// or a `project` argument); they never hand-type a numeric id.

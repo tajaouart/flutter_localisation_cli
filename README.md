@@ -2,7 +2,7 @@
 
 Terminal **CLI** (`fl`) and **MCP server** (`fl_mcp`) for
 [FlutterLocalisation](https://flutterlocalisation.com) — add, edit, delete and AI-translate
-your app's localization keys from the shell or from Claude, then pull the ARBs. No dashboard
+your app's localization keys from the shell or from an AI agent (Claude, GitHub Copilot), then pull the ARBs. No dashboard
 round-trip.
 
 Pure Dart — no Flutter SDK required. This is the tooling companion to the
@@ -325,11 +325,21 @@ syncing the old clone: it prints the clone's origin and the new repo, and the
 `fl clone` again). `--json` reports it as `{"ok": false, "error": "repo_mismatch", ...}`.
 https, SSH and `.git` spellings of one repo count as the same repo.
 
-`fl guard` writes `permissions.deny` rules into `.claude/settings.json` so Claude Code refuses
-to `Edit`/`Write` the backend-managed files — the ARB directory (`arb_dir` + `l10n.yaml`
-`arb-dir`/`output-dir`) and `lib/generated_translation_methods.dart`. Those may only change via
-`fl` / `flutter_localisation` + `fl pull`; a direct AI edit is silently overwritten on the next
-sync (or lost, for the gitignored ARB repo). Run it once per project (`--dry-run` to preview).
+`fl guard` stops AI agents from editing the backend-managed files: the ARB directory (`arb_dir`
++ `l10n.yaml` `arb-dir`/`output-dir`) and `lib/generated_translation_methods.dart`. Those may
+only change via `fl` / `flutter_localisation` + `fl pull`; a direct AI edit is silently
+overwritten on the next sync (or lost, for the gitignored ARB repo). Run it once per project
+(`--dry-run` to preview) and commit what it writes:
+
+| Agent | What refuses the edit | What explains the workflow |
+| --- | --- | --- |
+| Claude Code | `permissions.deny` rules in `.claude/settings.json` | `CLAUDE.md`, `AGENTS.md` |
+| GitHub Copilot (CLI, cloud agent) | a `preToolUse` hook, `.github/hooks/fl-guard.json` with its sh and PowerShell script | `.github/copilot-instructions.md`, `AGENTS.md` |
+| Other agents | | `AGENTS.md` |
+
+The Copilot CLI loads a repository's hooks once the folder is trusted. The hook needs nothing
+installed, so it also runs in the cloud agent's sandbox. Run `fl guard` again after changing
+`arb_dir`.
 
 A project-local `flutterlocalisation.json` is **optional** — set it to avoid `--project` each
 time:
@@ -347,10 +357,11 @@ it the catalogs go beside the ARBs.
 
 Global flags: `--project <name|id>`, `--flavor`, `--config`, `--dry-run`, `--json`.
 
-## MCP server (Claude)
+## MCP server (Claude, GitHub Copilot)
 
-`fl_mcp` lets Claude manage your translations. Mutating tools are **preview-by-default** — they
-only write when Claude passes `apply: true`.
+`fl_mcp` lets an AI agent manage your translations. Mutating tools are **preview-by-default**:
+they only write when the agent passes `apply: true`. The token is optional once you have run
+`fl login`.
 
 **Claude Code:**
 
@@ -367,6 +378,23 @@ claude mcp add flutter-localisation --env FL_API_TOKEN=flk_live_xxx -- fl_mcp
       "command": "/Users/you/.pub-cache/bin/fl_mcp",
       "env": { "FL_API_TOKEN": "flk_live_xxx" }
     }
+  }
+}
+```
+
+**GitHub Copilot CLI:**
+
+```bash
+copilot mcp add flutter-localisation --env FL_API_TOKEN=flk_live_xxx -- fl_mcp
+```
+
+**GitHub Copilot, for the whole team:** commit a `.mcp.json` at the root of the app. Each
+developer runs `fl login` once, or exports `FL_API_TOKEN`, so no token is committed:
+
+```json
+{
+  "mcpServers": {
+    "flutter-localisation": { "type": "stdio", "command": "fl_mcp" }
   }
 }
 ```
@@ -412,10 +440,12 @@ never editing the generated files by hand. Install it into an app with:
 npx skills add tajaouart/flutter_localisation_cli --skill flutter-localisation
 ```
 
+It asks which agents to install for; `-a github-copilot` or `-a claude-code` answers it.
+
 ## How strings reach your app
 
 ```
-fl add / Claude ─▶ backend creates/translates ─▶ backend pushes ARBs to your git repo
+fl add / AI agent ─▶ backend creates/translates ─▶ backend pushes ARBs to your git repo
                                                             │
                                      fl pull / fl sync  ◀───┘ ─▶ codegen ─▶ typed strings
 ```

@@ -34,7 +34,7 @@ When Dart's own MCP server (`dart mcp-server`) is also connected, use it to chec
 
 ## Rules
 
-- **Never edit ARB files or generated Dart by hand.** The backend owns the ARB directory, `l10n.yaml`'s `output-dir` and `lib/generated_translation_methods.dart`. A direct edit is overwritten on the next sync. Change strings through `fl` or `fl_mcp`, then `fl pull` or `fl sync`. `fl guard` makes Claude Code refuse those edits; run it once per project.
+- **Never edit ARB files or generated Dart by hand.** The backend owns the ARB directory, `l10n.yaml`'s `output-dir` and `lib/generated_translation_methods.dart`. A direct edit is overwritten on the next sync. Change strings through `fl` or `fl_mcp`, then `fl pull` or `fl sync`. `fl guard` makes Claude Code and GitHub Copilot refuse those edits; run it once per project.
 - **Bulk work costs one request, not one per key.** For more than a few keys write them into one ARB and run `fl import file.arb -t` (MCP: `import_arb`). Add several languages in one `fl languages add de fr it -t`. Never loop `fl add`, `fl edit`, `fl translate` or `fl languages add`: the backend rate-limits single-key writes and the CLI refuses the fourth single-key call within 15 minutes. A 429 means switch to the bulk command, not sleep and retry.
 - **Never set `synthetic-package` in `l10n.yaml`** and never import `package:flutter_gen/gen_l10n/...`. Current Flutter rejects both. Import the generated file by its path in the app: `package:<app_name>/<output-dir minus lib/>/app_localizations.dart`.
 - **Never commit a live update key** (`sk_live_...`). Pass it with `--dart-define`.

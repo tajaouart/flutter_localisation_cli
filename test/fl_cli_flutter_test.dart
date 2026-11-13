@@ -310,6 +310,68 @@ void main() {
     });
   });
 
+  group('guard', () {
+    const List<String> written = <String>[
+      '.claude/settings.json',
+      '.github/hooks/fl-guard.json',
+      '.github/hooks/fl-guard.sh',
+      '.github/hooks/fl-guard.ps1',
+      '.github/copilot-instructions.md',
+      'AGENTS.md',
+      'CLAUDE.md',
+    ];
+
+    setUp(() => writeConfig(
+        <String, Object>{'project_id': 7, 'arb_dir': 'arbs/Default'}));
+
+    test('writes the Claude Code rules, the Copilot hook and the docs',
+        () async {
+      final Run r = await fl(<String>['guard']);
+      expect(r.code, 0, reason: r.err);
+      for (final String name in written) {
+        expect(File(p.join(tmp.path, name)).existsSync(), isTrue, reason: name);
+      }
+      expect(r.out, contains('GitHub Copilot hook'));
+      expect(r.out, contains('copilot-instructions.md'));
+      expect(
+          File(p.join(tmp.path, '.github', 'hooks', 'fl-guard.sh'))
+              .readAsStringSync(),
+          contains("'arbs/Default'/*"));
+      expect(
+          File(p.join(tmp.path, '.github', 'copilot-instructions.md'))
+              .readAsStringSync(),
+          contains('project "Gush"'));
+
+      final Run again = await fl(<String>['guard']);
+      expect(again.code, 0, reason: again.err);
+      expect(again.out, contains('Updated the GitHub Copilot hook'));
+    });
+
+    test('--dry-run names both agents and writes nothing', () async {
+      final Run r = await fl(<String>['--dry-run', 'guard']);
+      expect(r.code, 0, reason: r.err);
+      expect(r.out, contains('(Claude Code)'));
+      expect(r.out, contains('(GitHub Copilot)'));
+      expect(r.out, contains('.github/copilot-instructions.md'));
+      for (final String name in written) {
+        expect(File(p.join(tmp.path, name)).existsSync(), isFalse,
+            reason: name);
+      }
+    });
+
+    test('--json lists the Copilot files', () async {
+      final Run dry = await fl(<String>['--json', '--dry-run', 'guard']);
+      expect(dry.json['copilot'], contains('.github/hooks/fl-guard.json'));
+      expect(dry.json['docs'], contains('.github/copilot-instructions.md'));
+
+      final Run r = await fl(<String>['--json', 'guard']);
+      expect(r.code, 0, reason: r.err);
+      expect(r.json['copilot'], hasLength(3));
+      expect(r.json['copilotCreated'], hasLength(3));
+      expect(r.json['docs'], hasLength(3));
+    });
+  });
+
   group('clone', () {
     test('clones into the folder above the flavor folder arb_dir names',
         () async {
@@ -482,6 +544,8 @@ void main() {
         input: 'y\nn\nn\nn\n',
       );
       expect(r.code, 0, reason: r.err);
+      expect(r.out, contains('Claude Code and GitHub Copilot'),
+          reason: 'the guard question names both agents');
       expect(backend.imports.map((final ReceivedImport i) => i.language),
           containsAllInOrder(<String>['de', 'en']));
     });

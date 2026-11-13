@@ -473,8 +473,8 @@ class InitCommand extends Command<int> with _ApiCommand {
     // Enter means yes at the prompt; `--yes` means no unless --guard says so.
     final bool guard = (argResults!['guard'] as bool) ||
         ask.confirm(
-            'Write Claude Code rules so AI edits go through fl, '
-            'not the ARBs (fl guard)?',
+            'Write rules for Claude Code and GitHub Copilot so AI edits go '
+            'through fl, not the ARBs (fl guard)?',
             fallback: ask.interactive);
     if (guard) await runner!.run(<String>['guard']);
     if (findIosTargetDir(root) != null &&
@@ -1899,9 +1899,10 @@ Future<int> _runGenL10n(final String projectRoot) async {
   return 0;
 }
 
-/// Install a Claude Code guard so AI agents cannot hand-edit the
+/// Install the guard so AI agents cannot hand-edit the
 /// FlutterLocalisation-managed files (the ARB repo + generated Dart). Purely
-/// local — writes `.claude/settings.json` deny rules in the current project.
+/// local: `.claude/settings.json` deny rules for Claude Code, a
+/// `.github/hooks` hook for GitHub Copilot, and the guidance docs.
 class GuardCommand extends Command<int> {
   bool get _jsonOut => (globalResults?['json'] as bool?) ?? false;
   bool get _dryRun => (globalResults?['dry-run'] as bool?) ?? false;
@@ -1910,8 +1911,9 @@ class GuardCommand extends Command<int> {
   String get name => 'guard';
   @override
   String get description =>
-      'Protect ARBs + generated Dart from AI edits: writes .claude deny rules '
-      'and AI-guidance docs (AGENTS.md / CLAUDE.md).';
+      'Protect ARBs + generated Dart from AI edits: Claude Code deny rules, a '
+      'GitHub Copilot hook and AI-guidance docs (AGENTS.md, CLAUDE.md, '
+      '.github/copilot-instructions.md).';
   @override
   String get invocation => 'fl guard';
 
@@ -1927,7 +1929,7 @@ class GuardCommand extends Command<int> {
 
     if (_dryRun) {
       final List<String> rules = <String>[
-        for (final String g in globs) ...<String>['Edit($g)', 'Write($g)'],
+        for (final String g in globs) 'Edit($g)',
       ];
       if (_jsonOut) {
         stdout.writeln(
@@ -1936,7 +1938,12 @@ class GuardCommand extends Command<int> {
               'dryRun': true,
               'protected': globs,
               'rules': rules,
-              'docs': <String>['AGENTS.md', 'CLAUDE.md'],
+              'copilot': <String>[
+                kCopilotHookFile,
+                kCopilotHookSh,
+                kCopilotHookPs1,
+              ],
+              'docs': kAgentDocFiles,
             },
           ),
         );
@@ -1945,19 +1952,26 @@ class GuardCommand extends Command<int> {
         for (final String g in globs) {
           stdout.writeln('  · $g');
         }
-        stdout.writeln('in ${root.path}/.claude/settings.json');
-        stdout.writeln('and write AI-guidance docs: AGENTS.md, CLAUDE.md');
+        stdout.writeln('in ${root.path}/.claude/settings.json (Claude Code)');
+        stdout.writeln('and ${root.path}/$kCopilotHookFile (GitHub Copilot)');
+        stdout.writeln(
+            'and write AI-guidance docs: ${kAgentDocFiles.join(', ')}');
       }
       return 0;
     }
 
     final GuardResult r = installGuard(root, globs: globs);
+    final CopilotGuardResult copilot = installCopilotGuard(root, globs: globs);
     final AgentDocsResult docs =
         installAgentDocs(root, projectLabel: projectLabel, globs: globs);
     if (_jsonOut) {
       stdout.writeln(
         const JsonEncoder.withIndent('  ').convert(
-          <String, dynamic>{...r.toJson(), ...docs.toJson()},
+          <String, dynamic>{
+            ...r.toJson(),
+            ...copilot.toJson(),
+            ...docs.toJson(),
+          },
         ),
       );
       return 0;
@@ -1968,11 +1982,14 @@ class GuardCommand extends Command<int> {
     if (r.added.isEmpty) {
       stdout.writeln('  (already protected — no new rules)');
     } else {
-      stdout.writeln('  Protected from AI Edit/Write:');
+      stdout.writeln('  Protected from AI edits:');
       for (final String g in r.protected) {
         stdout.writeln('    · $g');
       }
     }
+    stdout.writeln(copilot.created.isEmpty
+        ? '✓ Updated the GitHub Copilot hook → ${root.path}/$kCopilotHookFile'
+        : '✓ Wrote the GitHub Copilot hook → ${root.path}/$kCopilotHookFile');
     for (final String path in docs.files) {
       stdout.writeln(docs.created.contains(path)
           ? '✓ Wrote AI guidance → $path'

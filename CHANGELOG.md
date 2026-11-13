@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.18.0] - 2026-11-13
+### Added
+- **GitHub Copilot support in `fl guard`.** It now also writes a `preToolUse` hook
+  (`.github/hooks/fl-guard.json`, with an sh and a PowerShell script) that makes the Copilot
+  CLI and the Copilot cloud agent refuse an edit, a new file or a patch inside the ARB folder,
+  the generated l10n folder and `lib/generated_translation_methods.dart`, and the guidance
+  block goes into `.github/copilot-instructions.md` beside `AGENTS.md` and `CLAUDE.md`. The
+  hook needs nothing installed and lets the edit through if it fails itself.
+- README: `fl_mcp` setup for the Copilot CLI (`copilot mcp add`) and a token-free `.mcp.json`
+  for a team; the agent skill installs for Copilot with `-a github-copilot`.
+### Fixed
+- `fl guard` wrote the `arb_dir` of `flutterlocalisation.json` into `.claude/settings.json` as
+  the absolute path of the machine it ran on. Claude Code reads such a rule from the project
+  root, so the ARB folder was not protected unless `l10n.yaml` named it too. The rule is now
+  relative to the project, and the old one is removed on the next run.
+- `fl guard` no longer writes `Write(path)` rules, which Claude Code reports as unmatched on
+  every start. The `Edit(path)` rule already covers new files. Old ones are removed.
+### Changed
+- The `fl init` question and the command help name both agents.
+
 ## [1.17.6] - 2026-11-13
 ### Added
 - `FL_INTERACTIVE=1` makes `fl init` ask its questions when stdin is a pipe, so a script can
