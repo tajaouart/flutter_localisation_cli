@@ -458,6 +458,7 @@ try {
     \$files += [string]\$toolArgs.path
   }
 
+  if (\$env:FL_GUARD_DEBUG) { [Console]::Error.WriteLine("fl-guard: root=\$root files=\$(\$files -join ' | ')") }
   foreach (\$file in \$files) {
     \$file = \$file -replace '\\\\', '/'
     if (\$file.StartsWith(\$root, [StringComparison]::OrdinalIgnoreCase)) { \$file = \$file.Substring(\$root.Length) }

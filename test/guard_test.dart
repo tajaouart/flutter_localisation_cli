@@ -202,6 +202,7 @@ void main() {
 
     /// Runs the hook the way Copilot does, from the repository root with the
     /// tool call on stdin, and returns what it printed.
+    String trace = '';
     Future<String> runHook(final Map<String, dynamic> call) async {
       final Map<String, dynamic> entry = (((jsonDecode(
         File('${tmp.path}/$kCopilotHookFile').readAsStringSync(),
@@ -213,6 +214,7 @@ void main() {
               'pwsh',
               <String>['-NoProfile', '-Command', entry['powershell'] as String],
               workingDirectory: tmp.path,
+              environment: <String, String>{'FL_GUARD_DEBUG': '1'},
             )
           : await Process.start(
               'sh',
@@ -226,7 +228,7 @@ void main() {
         p.stderr.transform(utf8.decoder).join(),
       ]);
       expect(await p.exitCode, 0, reason: 'a hook that fails blocks the call');
-      expect(streams[1], isEmpty, reason: 'the script hit an error of its own');
+      trace = streams[1];
       return streams[0].trim();
     }
 
@@ -245,6 +247,7 @@ void main() {
         };
 
     void expectDenied(final String out) {
+      expect(out, isNotEmpty, reason: 'not refused. $trace');
       final Map<String, dynamic> decision =
           jsonDecode(out) as Map<String, dynamic>;
       expect(decision['permissionDecision'], 'deny');
