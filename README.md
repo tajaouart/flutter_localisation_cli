@@ -255,6 +255,14 @@ What to expect on an agent:
   with no answer after 150 seconds fails the step (`FL_HTTP_TIMEOUT=<seconds>` changes that).
   `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are honoured.
 
+**Which version runs in the pipeline?** The steps above install the latest release on each
+run, which is what we recommend: fixes reach the build without anyone editing the pipeline. To
+pin one, name it (`dart pub global activate flutter_localisation_cli 1.19.0`), and update the
+line when the log ends with `fl x.y.z is available`. That line is printed on stderr and never
+fails a build. Only a version withdrawn for doing harm is refused, with exit code 1 and the
+command to run; the dashboard shows which version each API key was last used by, so you can
+see it coming.
+
 **Do you need the CLI in the pipeline at all?** Not when the project is linked to a GitHub,
 GitLab or Bitbucket repository: the service pushes every change there, so the pipeline can
 check that repository out like any other (a second checkout step, or a submodule). `fl pull`
@@ -415,6 +423,17 @@ config file like `arb_dir`; an iOS-only app points it at its Xcode resources fol
 it the catalogs go beside the ARBs.
 
 Global flags: `--project <name|id>`, `--flavor`, `--config`, `--dry-run`, `--json`.
+
+## Staying up to date
+
+```bash
+fl --version     # the version in use
+fl upgrade       # install the latest one (dart pub global activate flutter_localisation_cli)
+```
+
+`fl` and `fl_mcp` tell the service which version they are, and the service tells them when a
+newer one is published. `fl` prints one line after the command; `fl_mcp` hands it to the agent
+once per session. Set `FL_NO_UPDATE_NOTICE=1` to silence it.
 
 ## MCP server (Claude, GitHub Copilot)
 

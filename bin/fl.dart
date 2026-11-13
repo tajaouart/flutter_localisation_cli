@@ -17,6 +17,7 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:args/args.dart';
 import 'package:args/command_runner.dart';
 import 'package:path/path.dart' as path;
 
@@ -34,6 +35,7 @@ import 'package:flutter_localisation_cli/src/native_sync.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:flutter_localisation_cli/src/project_resolver.dart';
 import 'package:flutter_localisation_cli/src/repo_url.dart';
+import 'package:flutter_localisation_cli/src/version.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
 
 Future<void> main(final List<String> args) async {
@@ -59,6 +61,11 @@ Future<void> main(final List<String> args) async {
       'json',
       negatable: false,
       help: 'Emit machine-readable JSON.',
+    )
+    ..argParser.addFlag(
+      'version',
+      negatable: false,
+      help: 'Print the version of fl.',
     );
 
   runner.addCommand(LoginCommand());
@@ -84,9 +91,16 @@ Future<void> main(final List<String> args) async {
   runner.addCommand(StyleCommand());
   runner.addCommand(LockCommand(lock: true));
   runner.addCommand(LockCommand(lock: false));
+  runner.addCommand(UpgradeCommand());
 
   try {
-    final int? code = await runner.run(args);
+    final ArgResults top = runner.parse(args);
+    if (top['version'] as bool) {
+      stdout.writeln('fl $kCliVersion');
+      exit(0);
+    }
+    final int? code = await runner.runCommand(top);
+    _announceUpdate();
     exit(code ?? 0);
   } on UsageException catch (e) {
     stderr.writeln(e);
@@ -98,6 +112,9 @@ Future<void> main(final List<String> args) async {
     exit(64);
   } on ManagementException catch (e) {
     stderr.writeln('Error: ${e.message}');
+    // A refused version already names the update in its message.
+    if (e is ApiException && e.isClientOutdated) exit(1);
+    _announceUpdate();
     if (e is ApiException) _writeRowErrors(e);
     final String msg = e.message.toLowerCase();
     if (msg.contains('re-auth') || msg.contains('token expired')) {
@@ -118,6 +135,47 @@ Future<void> main(final List<String> args) async {
           'run `fl login --token flk_live_...`, or set \$FL_API_TOKEN.');
     }
     exit(1);
+  }
+}
+
+/// One line on stderr when the service named a newer version, after the
+/// command's own output so a build log ends with it. stdout is left alone:
+/// `--json` output stays parseable.
+void _announceUpdate() {
+  final UpdateNotice? notice = UpdateNotice.current;
+  if (notice == null ||
+      Platform.environment.containsKey(kNoUpdateNoticeEnvVar)) {
+    return;
+  }
+  stderr.writeln('\n${notice.describe('fl')}  (or: fl upgrade)');
+}
+
+/// Installs the latest published version over this one.
+class UpgradeCommand extends Command<int> {
+  @override
+  String get name => 'upgrade';
+  @override
+  String get description =>
+      'Install the latest fl and fl_mcp from pub.dev over this version.';
+
+  @override
+  Future<int> run() async {
+    if ((globalResults?['dry-run'] as bool?) ?? false) {
+      stdout.writeln('DRY RUN: would run `$kUpgradeCommand`.');
+      return 0;
+    }
+    stdout.writeln('fl $kCliVersion: running `$kUpgradeCommand` …');
+    // The VM that runs this script, unless fl was compiled to a binary of
+    // its own, in which case `dart` has to come from the PATH.
+    final String self = Platform.resolvedExecutable;
+    final bool isDart = path.basenameWithoutExtension(self) == 'dart';
+    final Process process = await Process.start(
+      isDart ? self : 'dart',
+      kUpgradeCommand.split(' ').skip(1).toList(),
+      runInShell: !isDart && Platform.isWindows,
+      mode: ProcessStartMode.inheritStdio,
+    );
+    return process.exitCode;
   }
 }
 

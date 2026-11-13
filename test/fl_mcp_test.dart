@@ -280,6 +280,36 @@ void main() {
     expect(data['error'], contains('File not found'));
   });
 
+  test('a newer version is told to the agent once, in a tool result', () async {
+    backend.latestVersion = '99.0.0';
+    addTearDown(() => backend.latestVersion = null);
+    final Map<String, dynamic> first = await mcp.call('list_projects');
+    expect(first['update_notice'], contains('fl_mcp 99.0.0 is available'));
+    expect(first['update_notice'],
+        contains('dart pub global activate flutter_localisation_cli'));
+    expect(first['_isError'], isFalse);
+    final Map<String, dynamic> second = await mcp.call('list_projects');
+    expect(second.containsKey('update_notice'), isFalse);
+    expect(backend.clients.last, startsWith('fl_mcp/'));
+  });
+
+  test('a withdrawn version comes back as a tool error with the command',
+      () async {
+    backend
+      ..latestVersion = '99.0.0'
+      ..minimumVersion = '99.0.0';
+    addTearDown(() {
+      backend
+        ..latestVersion = null
+        ..minimumVersion = null;
+    });
+    final Map<String, dynamic> data = await mcp.call('list_projects');
+    expect(data['_isError'], isTrue);
+    expect(data['error'], contains('is no longer supported'));
+    expect(data['error'],
+        contains('dart pub global activate flutter_localisation_cli'));
+  });
+
   // Last: it turns the shared folder into a git repository.
   test('pull_arbs inside the app\'s own git repository leaves its HEAD alone',
       () async {

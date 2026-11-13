@@ -27,3 +27,6 @@ jobs:
       - if: matrix.os == 'ubuntu-latest'
         run: dart analyze --fatal-infos lib bin test
       - run: dart test
+        env:
+          # Runs the one test that installs from pub.dev (`fl upgrade`).
+          FL_TEST_NETWORK: '1'

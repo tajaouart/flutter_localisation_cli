@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.19.0] - 2026-11-13
+### Added
+- **Update notices.** Every request now names the client and its version (`fl/1.19.0`,
+  `fl_mcp/1.19.0`), and the service answers with the latest published one. When a newer version
+  exists, `fl` says so in one line on stderr after the command's own output; the command and its
+  exit code are not affected, and `--json` output stays clean. `fl_mcp` puts the same line in a
+  tool result, once per session, for the agent to pass on. `FL_NO_UPDATE_NOTICE=1` turns it off.
+- **A withdrawn version is refused.** When a release turns out to do harm the service can stop
+  accepting it: the command exits 1 with the reason and the command that updates it.
+- `fl upgrade` installs the latest published version; `fl --version` prints the one in use.
+- The dashboard shows, beside each API key, which CLI version last used it.
+
 ## [1.18.1] - 2026-11-13
 ### Fixed
 - **`fl pull` no longer runs git in the app's own repository.** With no repository linked to the

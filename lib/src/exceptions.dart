@@ -27,6 +27,10 @@ class ApiException extends ManagementException {
   bool get isRateLimited => statusCode == 429;
   bool get isServer => statusCode >= 500;
 
+  /// The service no longer accepts this version of the client. The message
+  /// carries the command that updates it.
+  bool get isClientOutdated => statusCode == 426;
+
   /// The import endpoint refusing `auto_translate` for a token without the
   /// Translate scope. Nothing was imported when this comes back.
   bool get isTranslateScopeRefusal =>

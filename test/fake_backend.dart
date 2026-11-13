@@ -113,6 +113,32 @@ class FakeBackend {
   /// Served in order, one per request, before anything else is looked at.
   final List<Fault> faults = <Fault>[];
 
+  /// What the service says about client versions; null sends no header, as
+  /// a service from before the CLI named itself.
+  String? latestVersion;
+  String? minimumVersion;
+  String? notice;
+
+  /// `X-FL-Client` and `User-Agent` of every request, in order.
+  final List<String?> clients = <String?>[];
+  final List<String?> userAgents = <String?>[];
+
+  static const String _upgrade =
+      'dart pub global activate flutter_localisation_cli';
+
+  static List<int> _numbers(final String version) => <int>[
+        for (final String part in version.split('.').take(3))
+          int.tryParse(part) ?? 0,
+      ];
+
+  static bool _older(final String version, final String than) {
+    final List<int> a = _numbers(version), b = _numbers(than);
+    for (int i = 0; i < 3; i++) {
+      if (a[i] != b[i]) return a[i] < b[i];
+    }
+    return false;
+  }
+
   final HttpServer _server;
 
   /// What the project ships; tests change it between calls.
@@ -195,6 +221,27 @@ class FakeBackend {
     final String path = req.uri.path;
     requests.add('${req.method} ${req.uri}');
     final HttpResponse res = req.response;
+    final String? client = req.headers.value('x-fl-client');
+    clients.add(client);
+    userAgents.add(req.headers.value('user-agent'));
+    if (latestVersion != null) {
+      res.headers.set('X-FL-Latest-Version', latestVersion!);
+      res.headers.set('X-FL-Upgrade-Command', _upgrade);
+      if (notice != null) res.headers.set('X-FL-Notice', notice!);
+    }
+    final String sent = client?.split('/').last ?? '0.0.0';
+    if (minimumVersion != null && _older(sent, minimumVersion!)) {
+      res.statusCode = 426;
+      res.headers.contentType = ContentType.json;
+      res.write(jsonEncode(<String, String>{
+        'status': 'error',
+        'code': 'client_outdated',
+        'message': '${client?.replaceAll('/', ' ')} is no longer supported; '
+            '$minimumVersion or newer is required. Update with: $_upgrade',
+      }));
+      await res.close();
+      return;
+    }
     if (faults.isNotEmpty) {
       final Fault fault = faults.removeAt(0);
       if (fault.stall) return;

@@ -16,6 +16,7 @@ import 'package:http/io_client.dart';
 
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
+import 'package:flutter_localisation_cli/src/version.dart';
 
 // --------------------------------------------------------------------------- //
 // Data models
@@ -456,6 +457,7 @@ class ManagementClient {
     required this.token,
     final http.Client? httpClient,
     this.maxRetries = 3,
+    this.clientName = 'fl',
     final Duration? requestTimeout,
   })  : _http = httpClient ?? _defaultHttpClient(),
         requestTimeout = requestTimeout ?? _timeoutFromEnvironment();
@@ -464,6 +466,20 @@ class ManagementClient {
   final String token;
   final int maxRetries;
   final http.Client _http;
+
+  /// `fl` or `fl_mcp`: who the service is told is calling.
+  final String clientName;
+
+  /// Sent on every request so the service knows which version runs where and
+  /// can answer with the one to update to.
+  Map<String, String> get _identity {
+    final String dart = Platform.version.split(' ').first;
+    return <String, String>{
+      'X-FL-Client': '$clientName/$kCliVersion',
+      'User-Agent':
+          '$clientName/$kCliVersion (dart $dart; ${Platform.operatingSystem})',
+    };
+  }
 
   /// How long one request may take, connection to last byte.
   ///
@@ -495,11 +511,14 @@ class ManagementClient {
     final http.BaseRequest req,
     final String label,
   ) async {
+    req.headers.addAll(_identity);
     try {
-      return await _http
+      final http.Response res = await _http
           .send(req)
           .then(http.Response.fromStream)
           .timeout(requestTimeout);
+      UpdateNotice.read(res.headers);
+      return res;
     } on TimeoutException {
       throw ManagementException(
         'No answer from $baseUrl after ${requestTimeout.inSeconds}s '

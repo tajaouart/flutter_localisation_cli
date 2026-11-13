@@ -96,6 +96,11 @@ void main() {
     backend.languages = <String>['en', 'de'];
     backend.repoUrl = null;
     backend.faults.clear();
+    backend.latestVersion = null;
+    backend.minimumVersion = null;
+    backend.notice = null;
+    backend.clients.clear();
+    backend.userAgents.clear();
     backend.requests.clear();
     backend.imports.clear();
     tmp = Directory(Directory.systemTemp
@@ -272,6 +277,106 @@ void main() {
       expect(r.code, 0, reason: r.err);
       expect(arbFile('app_en.arb').existsSync(), isTrue);
     });
+  });
+
+  group('versions', () {
+    final String version = RegExp(r'^version: (\S+)', multiLine: true)
+        .firstMatch(
+            File(p.join(packageRoot(), 'pubspec.yaml')).readAsStringSync())!
+        .group(1)!;
+
+    test('--version prints the version in pubspec.yaml', () async {
+      final Run r = await fl(<String>['--version']);
+      expect(r.code, 0);
+      expect(r.out.trim(), 'fl $version');
+      expect(backend.requests, isEmpty);
+    });
+
+    test('every request names the client and its version', () async {
+      expect((await fl(<String>['pull'])).code, 0);
+      expect(backend.clients, everyElement('fl/$version'));
+      expect(backend.userAgents,
+          everyElement(matches('^fl/$version \\(dart [0-9.]+; [a-z]+\\)\$')));
+    });
+
+    test('a newer version is announced on stderr and the build passes',
+        () async {
+      backend
+        ..latestVersion = '99.0.0'
+        ..notice = 'Fixes stale strings in CI.';
+      final Run r = await fl(<String>['--json', 'pull']);
+      expect(r.code, 0, reason: r.err);
+      expect(r.json['ok'], isTrue);
+      expect(
+        r.err,
+        contains('fl 99.0.0 is available (this is $version). '
+            'Fixes stale strings in CI.\n'
+            'Update with: dart pub global activate flutter_localisation_cli'),
+      );
+      expect('fl 99.0.0 is available'.allMatches(r.err), hasLength(1));
+    });
+
+    test('nothing is announced when this is the latest, or an older one',
+        () async {
+      backend.latestVersion = version;
+      expect((await fl(<String>['pull'])).err, isNot(contains('available')));
+      backend.latestVersion = '1.9.0';
+      expect((await fl(<String>['pull'])).err, isNot(contains('available')));
+    });
+
+    test('FL_NO_UPDATE_NOTICE keeps the line out of the log', () async {
+      backend.latestVersion = '99.0.0';
+      final Run r = await fl(
+        <String>['pull'],
+        env: <String, String>{'FL_NO_UPDATE_NOTICE': '1'},
+      );
+      expect(r.code, 0, reason: r.err);
+      expect(r.err, isNot(contains('available')));
+    });
+
+    test('the notice also follows a command that failed', () async {
+      backend.latestVersion = '99.0.0';
+      arbFile('app_en.arb')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('{"@@locale": "en", "addedByHand": "New"}');
+      final Run r = await fl(<String>['pull']);
+      expect(r.code, 1);
+      expect(r.err, contains('addedByHand'));
+      expect(r.err, contains('fl 99.0.0 is available'));
+    });
+
+    test('a withdrawn version is refused: exit 1 and the command to run',
+        () async {
+      backend
+        ..latestVersion = '99.0.0'
+        ..minimumVersion = '99.0.0';
+      final Run r = await fl(<String>['pull']);
+      expect(r.code, 1);
+      expect(r.err, contains('fl $version is no longer supported'));
+      expect(
+          r.err, contains('dart pub global activate flutter_localisation_cli'));
+      // Said once, by the refusal; not retried.
+      expect(r.err, isNot(contains('is available')));
+      expect(backend.requests, hasLength(1));
+      expect(arbFile('app_en.arb').existsSync(), isFalse);
+      expectNoTrace(r);
+    });
+
+    test('upgrade --dry-run names the command and runs nothing', () async {
+      final Run r = await fl(<String>['--dry-run', 'upgrade']);
+      expect(r.code, 0);
+      expect(
+          r.out, contains('dart pub global activate flutter_localisation_cli'));
+    });
+
+    test('upgrade installs the published version', () async {
+      final Run r = await fl(<String>['upgrade']);
+      expect(r.code, 0, reason: r.err);
+      expect(r.out, contains('Activated flutter_localisation_cli'));
+    },
+        skip: Platform.environment['FL_TEST_NETWORK'] == '1'
+            ? false
+            : 'installs from pub.dev; CI sets FL_TEST_NETWORK=1');
   });
 
   group('the checkout is the app\'s own git repository', () {
