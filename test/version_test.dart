@@ -13,7 +13,11 @@ void main() {
       () {
     final String pubspec =
         File(p.join(packageRoot(), 'pubspec.yaml')).readAsStringSync();
-    expect(pubspec, contains('\nversion: $kCliVersion\n'));
+    // A Windows checkout has CRLF line ends.
+    expect(
+      RegExp(r'^version: (\S+)', multiLine: true).firstMatch(pubspec)!.group(1),
+      kCliVersion,
+    );
     expect(File(p.join(packageRoot(), 'CHANGELOG.md')).readAsStringSync(),
         contains('## [$kCliVersion]'));
   });
