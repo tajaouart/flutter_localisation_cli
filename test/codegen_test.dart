@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_localisation_cli/src/codegen.dart';
 import 'package:test/test.dart';
 
@@ -30,5 +32,20 @@ void main() {
         List<String>.generate(30, (final int i) => 'line $i').join('\n\n');
     expect(tail(text, lines: 2), 'line 28\nline 29');
     expect(tail('one\n\n'), 'one');
+  });
+
+  test('an app with l10n.yaml and no flutter_localisation uses gen-l10n', () {
+    final Directory root = Directory.systemTemp.createTempSync('fl_codegen');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final File pubspec = File('${root.path}/pubspec.yaml')
+      ..writeAsStringSync('name: app\ndependencies:\n  intl: any\n');
+    expect(usesPlainGenL10n(root), isFalse);
+
+    File('${root.path}/l10n.yaml').writeAsStringSync('arb-dir: lib/l10n\n');
+    expect(usesPlainGenL10n(root), isTrue);
+
+    pubspec.writeAsStringSync(
+        'name: app\ndependencies:\n  flutter_localisation: ^2.7.2\n');
+    expect(usesPlainGenL10n(root), isFalse);
   });
 }

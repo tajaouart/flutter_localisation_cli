@@ -80,7 +80,7 @@ Read strings with `context.tr.someKey`. `TranslationProvider` must sit below `Ma
 - [ ] Use the key in code: `context.tr.checkoutButton`.
 - [ ] Check: `fl status` shows completion per locale.
 
-A pull refuses when a key exists only on disk. `fl pull --adopt` imports it first; `--discard-local` drops it.
+A pull refuses when a key exists only on disk. `fl pull --adopt` imports it first, along with the ARBs of the other languages beside the template; `--discard-local` drops it. `fl import app_en.arb` without `--language` imports as the language the file names (`@@locale`, else the file name), not as the base.
 
 ## Workflow: Add a language
 

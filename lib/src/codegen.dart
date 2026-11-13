@@ -2,7 +2,11 @@
 /// generator `fl sync` and `fl init` end with.
 library;
 
+import 'dart:io';
+
 import 'package:path/path.dart' as p;
+
+import 'package:flutter_localisation_cli/src/l10n_doctor.dart';
 
 /// The generator's two arguments for [arbDir]: the folder holding the flavor
 /// folders and the flavor folder's name.
@@ -36,3 +40,11 @@ String tail(final String text, {final int lines = 20}) {
       .toList();
   return all.skip(all.length > lines ? all.length - lines : 0).join('\n');
 }
+
+/// True for an app set up for Flutter's own gen-l10n (it has an `l10n.yaml`)
+/// that does not depend on the flutter_localisation package. Running the
+/// package's generator there fails with "Could not find package", which reads
+/// as a broken setup when the app is fine.
+bool usesPlainGenL10n(final Directory root) =>
+    File(p.join(root.path, 'l10n.yaml')).existsSync() &&
+    !dependsOn(root, 'flutter_localisation');

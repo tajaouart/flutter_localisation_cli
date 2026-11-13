@@ -77,6 +77,54 @@ List<String> splitLocaleArgs(final Iterable<String> args) => args
 String arbSuffix(final String code) =>
     canonicalizeOrKeep(code).replaceAll('-', '_');
 
+/// The locale an ARB file says it holds: `@@locale` inside it, else the
+/// suffix of its name (`app_en.arb` -> `en`, `app_pt_BR.arb` -> `pt-BR`).
+///
+/// The name only counts when the suffix is spelled the way `gen_l10n` reads
+/// it (`pt_BR`, not `pt_br`), which keeps most ordinary words out.
+({String code, String source})? inferArbLocale(
+  final Object? parsed,
+  final String? fileName,
+) {
+  final Object? declared = parsed is Map ? parsed['@@locale'] : null;
+  if (declared is String) {
+    try {
+      return (code: canonicalize(declared), source: '@@locale');
+    } on InvalidLocaleCode {
+      // Fall through to the name.
+    }
+  }
+  if (fileName == null || !fileName.endsWith('.arb')) return null;
+  final List<String> parts =
+      fileName.substring(0, fileName.length - 4).split('_');
+  for (int i = parts.length > 3 ? parts.length - 3 : 0; i < parts.length; i++) {
+    final String suffix = parts.sublist(i).join('_');
+    try {
+      final String code = canonicalize(suffix);
+      if (arbSuffix(code) == suffix) {
+        return (code: code, source: 'the file name');
+      }
+    } on InvalidLocaleCode {
+      continue;
+    }
+  }
+  return null;
+}
+
+/// The ARB of [code] beside the base language's [templateName]: same
+/// prefix, the other locale's suffix (`app_de.arb` -> `app_en.arb`).
+String siblingArbName(
+  final String templateName,
+  final String baseCode,
+  final String code,
+) {
+  final String baseTail = '${arbSuffix(baseCode)}.arb';
+  final String prefix = templateName.endsWith(baseTail)
+      ? templateName.substring(0, templateName.length - baseTail.length)
+      : 'app_';
+  return '$prefix${arbSuffix(code)}.arb';
+}
+
 /// The language subtag: `en` for `en-GB`, `pt` for `pt_BR`.
 String languageOf(final String code) =>
     canonicalizeOrKeep(code).split('-').first.toLowerCase();

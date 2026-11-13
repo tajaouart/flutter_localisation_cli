@@ -86,6 +86,9 @@ void main() {
     backend.platforms = <String>['flutter'];
     backend.flavors = <String>['Default'];
     backend.repoUrl = null;
+    backend.languages = <String>['en'];
+    backend.translateScope = true;
+    backend.imports.clear();
     tmp = Directory(Directory.systemTemp
         .createTempSync('fl_cli_flutter_test')
         .resolveSymbolicLinksSync());
@@ -330,6 +333,116 @@ void main() {
       backend.repoUrl = serviceRepo('gitlab');
       final Run r = await fl(<String>['pull', '--no-git']);
       expect(r.code, 0, reason: r.err);
+    });
+  });
+
+  group('an app that already has ARBs', () {
+    late Directory l10n;
+
+    void arb(final String name, final Map<String, String> strings) =>
+        File(p.join(l10n.path, name)).writeAsStringSync(jsonEncode(strings));
+
+    setUp(() {
+      backend.languages = <String>['de', 'en', 'fr'];
+      l10n = Directory(p.join(tmp.path, 'lib', 'l10n'))
+        ..createSync(recursive: true);
+      arb('app_de.arb', <String, String>{'@@locale': 'de', 'title': 'Titel'});
+      arb('app_en.arb', <String, String>{'@@locale': 'en', 'title': 'Title'});
+    });
+
+    test('init imports them without first telling the user to pick a command',
+        () async {
+      final Run r = await fl(<String>[
+        'init',
+        '--yes',
+        '--base-url',
+        backend.url,
+        '--arb-dir',
+        'lib/l10n',
+      ]);
+      expect(r.code, 0, reason: r.err);
+      expect(r.out,
+          contains('app_de.arb has 1 key(s) the service does not have yet.'));
+      expect('${r.out}${r.err}', isNot(contains('Either:')));
+      expect('${r.out}${r.err}', isNot(contains('--discard-local')));
+      expect(r.out, contains('app_en.arb (en):'));
+    });
+
+    test('a plain pull still names both commands', () async {
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'lib/l10n'});
+      final Run r = await fl(<String>['pull']);
+      expect(r.code, 1);
+      expect(r.err, contains('Either:'));
+      expect(r.err, contains('fl pull --adopt'));
+      expect(r.err, contains('fl pull --discard-local'));
+      expect(backend.imports, isEmpty);
+    });
+
+    test(
+        'adopt imports each local ARB as its own language and asks for '
+        'translation only for the language with no file', () async {
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'lib/l10n'});
+      final Run r = await fl(<String>['pull', '--adopt']);
+      expect(r.code, 0, reason: r.err);
+      expect(
+          backend.imports
+              .map((final ReceivedImport i) =>
+                  '${i.language}${i.autoTranslate ? ' +translate' : ''}')
+              .toList(),
+          <String>['de', 'en', 'de +translate']);
+      expect(r.out, contains('app_de.arb (de, base):'));
+      expect(r.out, contains('app_en.arb (en):'));
+      expect(r.out, isNot(contains('Not translated')));
+    });
+
+    test('a token without the Translate scope still gets its strings imported',
+        () async {
+      backend.translateScope = false;
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'lib/l10n'});
+      final Run r = await fl(<String>['pull', '--adopt']);
+      expect(r.code, 0, reason: r.err);
+      expect(
+          backend.imports.map((final ReceivedImport i) => i.language).toList(),
+          <String>['de', 'en']);
+      expect(
+          r.out,
+          contains('Not translated: this token does not have the Translate '
+              'scope, so the base text is still in fr.'));
+      expect(r.out, contains('fl retranslate'));
+      expect(r.err, isNot(contains('Hint: your token may lack')));
+    });
+
+    test('import reads the language of the file from its name', () async {
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'lib/l10n'});
+      arb('app_en.arb', <String, String>{'title': 'Title'});
+      final Run r = await fl(<String>['import', 'lib/l10n/app_en.arb']);
+      expect(r.code, 0, reason: r.err);
+      expect(backend.imports.single.language, 'en');
+      expect(
+          r.out,
+          contains('Imported as "en" (from the file name). Pass --language to '
+              'choose another.'));
+    });
+
+    test('--language wins over what the file says', () async {
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'lib/l10n'});
+      final Run r = await fl(
+          <String>['import', 'lib/l10n/app_en.arb', '--language', 'de']);
+      expect(r.code, 0, reason: r.err);
+      expect(backend.imports.single.language, 'de');
+      expect(r.out, isNot(contains('Imported as')));
+    });
+
+    test('import refuses a file in a language the project does not have',
+        () async {
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'lib/l10n'});
+      arb('app_it.arb', <String, String>{'@@locale': 'it', 'title': 'Titolo'});
+      final Run r = await fl(<String>['import', 'lib/l10n/app_it.arb']);
+      expect(r.code, 1);
+      expect(backend.imports, isEmpty);
+      expect(r.out, contains('app_it.arb holds "it" (from @@locale)'));
+      expect(r.out, contains('fl languages add it'));
+      expect(r.out, contains('--language de'));
     });
   });
 

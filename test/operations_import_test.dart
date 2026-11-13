@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/call_budget.dart';
+import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -29,6 +31,8 @@ http.Response _project(final http.Request req) => http.Response(
     );
 
 void main() {
+  _languageTests();
+
   test('importArb posts the ARB to the import endpoint and counts keys',
       () async {
     final List<String> hits = <String>[];
@@ -529,6 +533,255 @@ void main() {
     expect(r.message, contains('Imported'));
     expect(r.message, contains('fl retranslate'),
         reason: 'the message must name the remedy');
+  });
+}
+
+/// A German project with [others] as its translated languages; records what
+/// each import asked for and refuses translation when [translateScope] is off.
+({ManagementClient client, List<String> imports}) _germanProject({
+  final List<String> others = const <String>['en'],
+  final bool translateScope = true,
+  final String refusalBody =
+      "auto_translate requires the 'translate' scope; this token only has "
+          "'strings:write'. Import without it, then translate with a token "
+          'that has the scope.',
+}) {
+  final List<String> imports = <String>[];
+  final MockClient mock = MockClient((final http.Request req) async {
+    if (req.url.path == '/api/projects/7/') {
+      return http.Response(
+        jsonEncode(<String, dynamic>{
+          'id': 7,
+          'name': 'P',
+          'flavors': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 3,
+              'name': 'default',
+              'languages': <Map<String, dynamic>>[
+                for (final String code in <String>['de', ...others])
+                  <String, dynamic>{
+                    'code': code,
+                    'is_base_language': code == 'de',
+                    'translations': <Map<String, dynamic>>[],
+                  },
+              ],
+            },
+          ],
+        }),
+        200,
+      );
+    }
+    final bool translate = _field(req.body, 'auto_translate') == 'true';
+    if (translate && !translateScope) {
+      return http.Response(
+          jsonEncode(<String, String>{'error': refusalBody}), 403);
+    }
+    imports.add('${_field(req.body, 'selected_language_code')}'
+        '${_field(req.body, 'apply_to_all_languages') == 'true' ? ' all' : ''}'
+        '${translate ? ' +translate' : ''}');
+    return http.Response(
+      jsonEncode(<String, dynamic>{
+        'import_status': 'success',
+        if (translate)
+          'translation': <String, dynamic>{
+            'status': 'success',
+            'translated': 4,
+            'failed': 0,
+          },
+      }),
+      200,
+    );
+  });
+  return (
+    client: ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock),
+    imports: imports,
+  );
+}
+
+Operations _ops(final ManagementClient client) =>
+    Operations(client, 7, flavor: 'default', budget: CallBudget.disabled());
+
+void _languageTests() {
+  group('the language of an ARB imported without --language', () {
+    test('comes from @@locale when that is another language of the flavor',
+        () async {
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject();
+      final OpResult r = await _ops(t.client).importArb(
+          jsonEncode(<String, dynamic>{'@@locale': 'en', 'k': 'v'}),
+          fileName: 'strings.arb');
+      expect(r.ok, isTrue);
+      expect(t.imports, <String>['en']);
+      expect(
+          r.message,
+          endsWith('Imported as "en" (from @@locale). Pass --language to '
+              'choose another.'));
+      expect(r.data['language'], 'en');
+    });
+
+    test('comes from the file name when the file has no @@locale', () async {
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject(others: <String>['en', 'pt-BR']);
+      final OpResult r = await _ops(t.client).importArb(
+          jsonEncode(<String, dynamic>{'k': 'v'}),
+          fileName: 'app_pt_BR.arb');
+      expect(t.imports, <String>['pt-BR']);
+      expect(r.message, contains('Imported as "pt-BR" (from the file name).'));
+    });
+
+    test('the base language, or no hint at all, imports as before', () async {
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject();
+      final OpResult named = await _ops(t.client).importArb(
+          jsonEncode(<String, dynamic>{'@@locale': 'de', 'k': 'v'}),
+          fileName: 'app_de.arb');
+      final OpResult plain = await _ops(t.client).importArb(
+          jsonEncode(<String, dynamic>{'k': 'v'}),
+          fileName: 'new_keys.arb');
+      expect(t.imports, <String>['de all', 'de all']);
+      expect(named.message, isNot(contains('Imported as')));
+      expect(plain.message, isNot(contains('Imported as')));
+    });
+
+    test('an explicit language wins and says nothing extra', () async {
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject();
+      final OpResult r = await _ops(t.client).importArb(
+          jsonEncode(<String, dynamic>{'@@locale': 'en', 'k': 'v'}),
+          languageCode: 'de',
+          fileName: 'app_en.arb');
+      expect(t.imports, <String>['de all']);
+      expect(r.message, isNot(contains('Imported as')));
+    });
+
+    test('a language the flavor does not have is refused with both fixes',
+        () async {
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject();
+      final OpResult r = await _ops(t.client).importArb(
+          jsonEncode(<String, dynamic>{'k': 'v'}),
+          fileName: 'app_fr.arb');
+      expect(r.ok, isFalse);
+      expect(t.imports, isEmpty);
+      expect(
+          r.message,
+          'app_fr.arb holds "fr" (from the file name), and flavor "default" '
+          'has no such language (base "de", also en). Nothing was imported. '
+          'Add it with `fl languages add fr`, or pass --language de to import '
+          'the file as the base text on purpose.');
+    });
+
+    test('a three-letter word ending the file name is not taken for one',
+        () async {
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject();
+      final OpResult r = await _ops(t.client).importArb(
+          jsonEncode(<String, dynamic>{'k': 'v'}),
+          fileName: 'keys_new.arb');
+      expect(r.ok, isTrue);
+      expect(t.imports, <String>['de all']);
+    });
+
+    test('a dry run names the language it would use', () async {
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject();
+      final OpResult r = await _ops(t.client).importArb(
+          jsonEncode(<String, dynamic>{'k': 'v'}),
+          fileName: 'app_en.arb',
+          dryRun: true);
+      expect(t.imports, isEmpty);
+      expect(r.message, contains('language "en"'));
+      expect(r.message, contains('Would import as "en" (from the file name).'));
+    });
+  });
+
+  group('adoptArbs', () {
+    late Directory tmp;
+    late File template;
+
+    void arb(final String name, final String locale) =>
+        File('${tmp.path}/$name').writeAsStringSync(
+            jsonEncode(<String, String>{'@@locale': locale, 'k': 'v'}));
+
+    setUp(() {
+      tmp = Directory.systemTemp.createTempSync('fl_adopt_test');
+      arb('app_de.arb', 'de');
+      template = File('${tmp.path}/app_de.arb');
+    });
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    test('imports every local ARB as its language and translates nothing',
+        () async {
+      arb('app_en.arb', 'en');
+      arb('app_pt_BR.arb', 'pt-BR');
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject(others: <String>['en', 'pt-BR']);
+      final OpResult r = await _ops(t.client).adoptArbs(template);
+      expect(r.ok, isTrue);
+      expect(t.imports, <String>['de all', 'en', 'pt-BR']);
+      expect(r.message.split('\n'), hasLength(3));
+      expect(r.message, contains('app_pt_BR.arb (pt-BR):'));
+      expect(r.message, isNot(contains('--translate')));
+    });
+
+    test('translates after the local files, for the language with no file',
+        () async {
+      arb('app_en.arb', 'en');
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject(others: <String>['en', 'fr']);
+      final OpResult r = await _ops(t.client).adoptArbs(template);
+      expect(r.ok, isTrue);
+      expect(t.imports, <String>['de all', 'en', 'de all +translate']);
+      expect(r.message, contains('Translated 4 locale-string(s)'));
+    });
+
+    test('with no local translations it is one import that translates',
+        () async {
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject(others: <String>['en', 'fr']);
+      final OpResult r = await _ops(t.client).adoptArbs(template);
+      expect(r.ok, isTrue);
+      expect(t.imports, <String>['de all +translate']);
+    });
+
+    test('a token without the Translate scope imports and says what is left',
+        () async {
+      arb('app_en.arb', 'en');
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject(others: <String>['en', 'fr'], translateScope: false);
+      final OpResult r = await _ops(t.client).adoptArbs(template);
+      expect(r.ok, isTrue);
+      expect(t.imports, <String>['de all', 'en']);
+      expect(
+          r.message,
+          endsWith('Not translated: this token does not have the Translate '
+              'scope, so the base text is still in fr. Create a token with the '
+              'Translate scope (API keys page in the dashboard), then run '
+              '`fl retranslate`.'));
+      expect(r.data['untranslated_locales'], <String>['fr']);
+    });
+
+    test('the same refusal on the only import falls back to a plain import',
+        () async {
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject(translateScope: false);
+      final OpResult r = await _ops(t.client).adoptArbs(template);
+      expect(r.ok, isTrue);
+      expect(t.imports, <String>['de all']);
+      expect(r.message, contains('so the base text is still in en'));
+    });
+
+    test('any other 403 still fails', () async {
+      final ({ManagementClient client, List<String> imports}) t =
+          _germanProject(
+              translateScope: false,
+              refusalBody: 'Plan limit reached: Maximum 100 translation keys.');
+      await expectLater(
+          _ops(t.client).adoptArbs(template),
+          throwsA(isA<ApiException>().having(
+              (final ApiException e) => e.statusCode, 'statusCode', 403)));
+      expect(t.imports, isEmpty);
+    });
   });
 }
 

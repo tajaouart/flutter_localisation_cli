@@ -441,9 +441,16 @@ class InitCommand extends Command<int> with _ApiCommand {
         globalResults!['token'] as String,
       ],
     ];
-    int code = await runner!.run(<String>[...passthrough, 'pull']) ?? 0;
-    if (code != 0 &&
-        ask.confirm('Import the keys that exist only on disk, then pull?')) {
+    int code =
+        await runner!.run(<String>[...passthrough, 'pull', '--from-init']) ?? 0;
+    if (code == _kLocalOnlyKeys) {
+      if (!ask.confirm('Import them (and the translations in the ARBs beside '
+          'them), then pull?')) {
+        stderr.writeln('Nothing was imported or pulled. Later, run '
+            '`fl pull --adopt` to import them or `fl pull --discard-local` to '
+            'take the service copy.');
+        return 1;
+      }
       code =
           await runner!.run(<String>[...passthrough, 'pull', '--adopt']) ?? 0;
     }
@@ -653,7 +660,8 @@ class ImportCommand extends Command<int> with _ApiCommand {
     argParser.addOption(
       'language',
       abbr: 'l',
-      help: 'Locale the ARB represents (default: the project base language). '
+      help: 'Locale the ARB represents (default: the one the file names in '
+          '@@locale or its file name, else the project base language). '
           'Ignored for a String Catalog, which carries every locale.',
     );
     argParser.addFlag(
@@ -1408,7 +1416,9 @@ class PullCommand extends Command<int> with _ApiCommand {
         'no-git',
         negatable: false,
         help: 'Skip the git mirror and write the files straight from the API.',
-      );
+      )
+      // What `fl init` runs: it asks about local-only keys itself.
+      ..addFlag('from-init', negatable: false, hide: true);
   }
 
   @override
@@ -1425,18 +1435,25 @@ class PullCommand extends Command<int> with _ApiCommand {
         adopt: argResults!['adopt'] as bool,
         discardLocal: argResults!['discard-local'] as bool,
         noGit: argResults!['no-git'] as bool,
+        fromInit: argResults!['from-init'] as bool,
       );
 }
+
+/// What [_pullArbs] answers to `fl init` when local-only keys stopped it.
+/// Never an exit code.
+const int _kLocalOnlyKeys = -1;
 
 /// Bring `arb_dir` to exactly what the service holds.
 ///
 /// Shared by `fl pull` and `fl sync` so there is one definition of "in sync"
-/// and one place where the local-only-key guard lives.
+/// and one place where the local-only-key guard lives. [fromInit] names the
+/// local-only keys without the two-command advice: the wizard asks instead.
 Future<int> _pullArbs(
   final _ApiCommand cmd, {
   final bool adopt = false,
   final bool discardLocal = false,
   final bool noGit = false,
+  final bool fromInit = false,
 }) async {
   final ProjectConfig cfg = cmd.loadProject();
   final String arbDir = cfg.arbDir ?? '.';
@@ -1519,6 +1536,13 @@ Future<int> _pullArbs(
       if (catalogOrphans.isNotEmpty)
         (file: kLocalizableCatalog, keys: catalogOrphans),
     ];
+    if (staged.isNotEmpty && !adopt && !discardLocal && fromInit) {
+      for (final ({String file, List<String> keys}) entry in staged) {
+        stdout.writeln('${entry.file} has ${entry.keys.length} key(s) the '
+            'service does not have yet.');
+      }
+      return _kLocalOnlyKeys;
+    }
     if (staged.isNotEmpty && !adopt && !discardLocal) {
       for (final ({String file, List<String> keys}) entry in staged) {
         stderr.writeln(
@@ -1545,30 +1569,25 @@ Future<int> _pullArbs(
         if (orphans.isNotEmpty) {
           stdout.writeln('Importing ${orphans.length} local-only key(s) from '
               '$templateName …');
-          final OpResult imported = await built.ops.importArb(
-            template.readAsStringSync(),
-            languageCode: base.code,
-            translate: true,
-          );
+          final OpResult imported = await built.ops.adoptArbs(template);
           if (!imported.ok) {
             stderr.writeln(imported.message);
             return 1;
           }
-          stdout.writeln('  ${imported.message}');
+          stdout.writeln('  ${imported.message.replaceAll('\n', '\n  ')}');
         }
         if (catalogOrphans.isNotEmpty) {
           stdout.writeln('Importing ${catalogOrphans.length} local-only key(s) '
               'from $kLocalizableCatalog …');
-          final OpResult imported = await built.ops.importArb(
+          final OpResult imported = await built.ops.adoptCatalog(
             catalog.readAsStringSync(),
-            translate: true,
             fileName: kLocalizableCatalog,
           );
           if (!imported.ok) {
             stderr.writeln(imported.message);
             return 1;
           }
-          stdout.writeln('  ${imported.message}');
+          stdout.writeln('  ${imported.message.replaceAll('\n', '\n  ')}');
         }
       }
     }
@@ -1807,6 +1826,7 @@ Future<int> _regenerateDart(final ProjectConfig cfg,
     {required final String skipHint}) async {
   final String projectRoot = cfg.root ?? Directory.current.path;
   final Directory rootDir = Directory(projectRoot);
+  if (usesPlainGenL10n(rootDir)) return _runGenL10n(projectRoot);
   final ({String flavorsFolder, String flavor}) target =
       generatorTarget(cfg.arbDir ?? 'arbs/Default', projectRoot);
   if (lacksGenerateFlag(rootDir)) {
@@ -1838,6 +1858,29 @@ Future<int> _regenerateDart(final ProjectConfig cfg,
     return gen.exitCode;
   }
   stdout.write(gen.stdout);
+  return 0;
+}
+
+/// An app that reads its ARBs with Flutter's own gen-l10n and does not use the
+/// flutter_localisation package: its generator is `flutter gen-l10n`.
+Future<int> _runGenL10n(final String projectRoot) async {
+  stdout.writeln('Regenerating Dart with `flutter gen-l10n` …');
+  final ProcessResult gen;
+  try {
+    gen = await Process.run('flutter', <String>['gen-l10n'],
+        workingDirectory: projectRoot, runInShell: Platform.isWindows);
+  } on ProcessException {
+    stdout.writeln('`flutter` is not on the PATH here. The ARB files are up to '
+        'date; run `flutter gen-l10n` where Flutter is installed.');
+    return 0;
+  }
+  if (gen.exitCode != 0) {
+    final String output = tail('${gen.stdout}\n${gen.stderr}');
+    stderr.writeln('`flutter gen-l10n` failed (exit ${gen.exitCode}) in '
+        '$projectRoot:');
+    if (output.isNotEmpty) stderr.writeln(output);
+    return gen.exitCode;
+  }
   return 0;
 }
 

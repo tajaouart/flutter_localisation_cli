@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.17.4] - 2026-11-13
+### Fixed
+- `fl init`, `fl pull --adopt` and the MCP `pull_arbs` with `adopt` no longer stop on a token
+  without the Translate scope. The strings are imported, and the output names the locales
+  that still hold the base text and says to run `fl retranslate` with a token that has the
+  scope.
+- Adopting local keys also imports the ARB of every other language found beside the template
+  (`app_en.arb` next to `app_de.arb`) as that language, so existing translations are kept
+  instead of being machine translated again. The server is asked to translate only when a
+  language has no local file.
+- `fl init` no longer prints the `fl pull --adopt` / `--discard-local` advice before asking
+  whether to import the local keys. It names the file and the number of keys, then asks.
+- `fl import` (and `fl sync <file>`, MCP `import_arb`) without `--language` reads the
+  language of an ARB from its `@@locale`, else from its file name, instead of importing
+  `app_en.arb` as the base language. A file in a language the project does not have is
+  refused, with both fixes: `fl languages add <code>`, or `--language <base>`.
+- `fl init` and `fl sync` end with `flutter gen-l10n` in an app that has an `l10n.yaml` and
+  does not use the flutter_localisation package, instead of failing with "Could not find
+  package `flutter_localisation`" on an app that was set up correctly.
+
 ## [1.17.3] - 2026-11-12
 ### Fixed
 - `fl export` ends with the generator command the README documents

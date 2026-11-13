@@ -68,6 +68,13 @@ class ReceivedImport {
   final String body;
 
   bool get hasLanguage => body.contains('name="selected_language_code"');
+  String? get language => _field('selected_language_code');
+  bool get autoTranslate => _field('auto_translate') == 'true';
+
+  String? _field(final String name) =>
+      RegExp('name="$name"\\r?\\n\\r?\\n([^\\r\\n]*)')
+          .firstMatch(body)
+          ?.group(1);
   String? get fileName =>
       RegExp(r'filename="([^"]+)"').firstMatch(body)?.group(1);
 }
@@ -82,6 +89,13 @@ class FakeBackend {
 
   /// Flavor names, in order; each holds the same one English key.
   List<String> flavors = <String>['Default'];
+
+  /// Locale codes of every flavor, base language first.
+  List<String> languages = <String>['en'];
+
+  /// False for a token with `strings:write` only: an import that asks for
+  /// translation is refused, the way the service refuses it.
+  bool translateScope = true;
 
   /// The linked git repo the project detail reports, or null for none.
   String? repoUrl;
@@ -116,9 +130,16 @@ class FakeBackend {
               'id': 3 + i,
               'name': flavors[i],
               'languages': <Map<String, dynamic>>[
+                for (final String code in languages.skip(1))
+                  <String, dynamic>{
+                    'id': 100 + i + languages.indexOf(code),
+                    'code': code,
+                    'is_base_language': false,
+                    'translations': <Map<String, dynamic>>[],
+                  },
                 <String, dynamic>{
                   'id': 1 + i,
-                  'code': 'en',
+                  'code': languages.first,
                   'is_base_language': true,
                   'translations': <Map<String, dynamic>>[
                     <String, dynamic>{
@@ -165,8 +186,8 @@ class FakeBackend {
                 <String, dynamic>{
                   'id': 3 + i,
                   'name': flavors[i],
-                  'base_language': 'en',
-                  'languages': <String>['en'],
+                  'base_language': languages.first,
+                  'languages': languages,
                 },
             ],
           },
@@ -179,9 +200,27 @@ class FakeBackend {
       res.write(table == 'InfoPlist' ? kEmptyInfoPlist : kServedCatalog);
     } else if (req.method == 'POST' && path == '/api/project/7/import-arb/') {
       final String body = await utf8.decoder.bind(req).join();
-      imports.add(ReceivedImport(body));
+      final ReceivedImport received = ReceivedImport(body);
+      if (received.autoTranslate && !translateScope) {
+        res.statusCode = HttpStatus.forbidden;
+        res.write(jsonEncode(<String, String>{
+          'error': "auto_translate requires the 'translate' scope; this "
+              "token only has 'strings:write'. Import without it, then "
+              'translate with a token that has the scope.',
+        }));
+        await res.close();
+        return;
+      }
+      imports.add(received);
       res.write(jsonEncode(<String, dynamic>{
         'import_status': 'success',
+        if (received.autoTranslate)
+          'translation': <String, dynamic>{
+            'status': 'success',
+            'translated': 1,
+            'failed': 0,
+            'pending': 1,
+          },
         'import': <String, dynamic>{
           'keys': <String, int>{
             'total': 1,

@@ -105,7 +105,11 @@ is written from its language's translation (de) instead of from the source on it
 `fl import <file.arb>` bulk-creates every key in an ARB in **one** request (instead of many
 `fl add` calls) — the right tool for large migrations. `--overwrite` replaces existing values;
 `-t/--translate` batch-fills the other locales afterwards; `--language <code>` sets the locale
-the file represents (default: the base language). Preview with `--dry-run`.
+the file represents. Without it, an ARB is read as the language it names (`@@locale`, else
+the file name: `app_en.arb` is `en`, `app_pt_BR.arb` is `pt-BR`), and as the base language
+when it names none. A file in a language the project does not have is refused: add the
+language first, or pass `--language <base>` to import it as the base text on purpose.
+Preview with `--dry-run`.
 
 The result says what the server actually wrote: keys written, keys skipped because they
 already hold a different value (pass `--overwrite` to replace them), and keys already
@@ -185,7 +189,11 @@ flutter_localisation` hint only when the pubspec really lacks it.
 service, so a key staged by hand for an import that never ran would vanish — it has
 happened, and it took an app's build with it. `pull` and `export` name those keys and
 refuse; `fl pull --adopt` imports them first, `--discard-local` takes the service copy on
-purpose.
+purpose. `--adopt` also imports the ARB of every other language found beside the template
+(`app_en.arb` next to `app_de.arb`) as that language, so translations you already have are
+kept, and asks for AI translation only for a language with no file. With a token that lacks
+the Translate scope the strings are still imported; the output names the locales left
+holding the base text, to fill later with `fl retranslate`.
 
 This is the dashboard's Export, from the terminal. The ARBs are the backend's data, not
 hand-written: `@@locale` is written in the same underscored form as the file name (gen_l10n

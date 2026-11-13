@@ -630,7 +630,8 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             'language': <String, dynamic>{
               'type': 'string',
               'description':
-                  'Locale the file represents (default: the base language).',
+                  'Locale the file represents (default: the one the file names in '
+                      '@@locale or its file name, else the base language).',
             },
             'overwrite': <String, dynamic>{
               'type': 'boolean',
@@ -889,11 +890,7 @@ Future<void> _callTool(
 
       final List<String> steps = <String>[];
       if (orphans.isNotEmpty && adopt) {
-        final OpResult imported = await ops.importArb(
-          templateFile.readAsStringSync(),
-          languageCode: base.code,
-          translate: true,
-        );
+        final OpResult imported = await ops.adoptArbs(templateFile);
         if (!imported.ok) {
           _toolResult(id, <String, dynamic>{
             'ok': false,
@@ -904,9 +901,8 @@ Future<void> _callTool(
         steps.add(imported.message);
       }
       if (catalogOrphans.isNotEmpty && adopt) {
-        final OpResult imported = await ops.importArb(
+        final OpResult imported = await ops.adoptCatalog(
           catalogFile.readAsStringSync(),
-          translate: true,
           fileName: kLocalizableCatalog,
         );
         if (!imported.ok) {

@@ -418,8 +418,98 @@ class Operations {
   /// (defaults to the base language). With [translate], batch-translates every
   /// empty non-base locale afterwards. This is the right primitive for large
   /// migrations — put all the strings in a file and import it once.
+  ///
+  /// Without [languageCode], an ARB that names another language of the flavor
+  /// (`@@locale`, else its file name) is imported as that language: read as
+  /// the base, `app_en.arb` on a German project would land as German text.
   Future<OpResult> importArb(
     final String arbContent, {
+    final String? languageCode,
+    final bool overwrite = false,
+    final bool translate = false,
+    final bool dryRun = false,
+    final int chunkSize = _defaultChunkSize,
+    final String? fileName,
+    final bool noteUntranslated = true,
+  }) async {
+    Future<OpResult> run(final String? code) => _importArb(
+          arbContent,
+          languageCode: code,
+          overwrite: overwrite,
+          translate: translate,
+          dryRun: dryRun,
+          chunkSize: chunkSize,
+          fileName: fileName,
+          noteUntranslated: noteUntranslated,
+        );
+    if (languageCode != null) return run(languageCode);
+
+    Object? parsed;
+    try {
+      parsed = jsonDecode(arbContent);
+    } catch (_) {
+      return run(null);
+    }
+    if (isCatalogJson(parsed) ||
+        (fileName != null && fileName.endsWith('.xcstrings'))) {
+      return run(null);
+    }
+    final ({String code, String source})? inferred =
+        inferArbLocale(parsed, fileName);
+    if (inferred == null) return run(null);
+
+    final ProjectData project = await client.getProject(projectId);
+    final FlavorData fl = project.flavor(flavor);
+    final String? baseCode = project.baseLanguage(flavor)?.code;
+    if (baseCode == null || canonicalizeOrKeep(baseCode) == inferred.code) {
+      return run(null);
+    }
+    final List<String> others = <String>[
+      for (final LanguageData l in fl.languages)
+        if (l.code != baseCode) l.code,
+    ];
+    final String? match = others
+        .where((final String c) => canonicalizeOrKeep(c) == inferred.code)
+        .firstOrNull;
+    if (match == null) {
+      // A three-letter word at the end of a file name is more often a word
+      // (`keys_new.arb`, `strings_add.arb`) than a language.
+      if (inferred.source != '@@locale' &&
+          languageOf(inferred.code).length > 2) {
+        return run(null);
+      }
+      return OpResult(
+        false,
+        '${fileName ?? 'The file'} holds "${inferred.code}" (from '
+        '${inferred.source}), and flavor "${fl.name}" has no such language '
+        '(base "$baseCode"${others.isEmpty ? '' : ', also ${others.join(', ')}'}). '
+        'Nothing was imported. Add it with `fl languages add ${inferred.code}`, '
+        'or pass --language $baseCode to import the file as the base text on '
+        'purpose.',
+        <String, dynamic>{
+          'error': 'unknown_language',
+          'language': inferred.code,
+          'language_source': inferred.source,
+          'base_language': baseCode,
+        },
+      );
+    }
+    final OpResult r = await run(match);
+    return OpResult(
+      r.ok,
+      '${r.message}\n${dryRun ? 'Would import' : 'Imported'} as "$match" '
+      '(from ${inferred.source}). Pass --language to choose another.',
+      <String, dynamic>{
+        ...r.data,
+        'language': match,
+        'language_source': inferred.source,
+      },
+    );
+  }
+
+  Future<OpResult> _importArb(
+    final String arbContent, {
+    required final bool noteUntranslated,
     final String? languageCode,
     final bool overwrite = false,
     final bool translate = false,
@@ -505,7 +595,8 @@ class Operations {
       final int others = fl.languages.length - 1;
       // Only an import that creates keys leaves base text in other locales;
       // --overwrite rewrites the base row and leaves translations alone.
-      final String untranslated = written > 0 &&
+      final String untranslated = noteUntranslated &&
+              written > 0 &&
               others > 0 &&
               targetsBaseLanguage &&
               !overwrite
@@ -689,6 +780,151 @@ class Operations {
       },
     );
   }
+
+  /// Import what exists only on disk before a sync overwrites it: the
+  /// [template] (base language), then the ARB of every other language found
+  /// beside it, so translations a human already wrote are kept instead of
+  /// being replaced by machine output.
+  ///
+  /// The server is asked to translate only when a language has no file. A
+  /// token without the Translate scope still gets its strings imported; the
+  /// message then names the locales left holding the base text.
+  Future<OpResult> adoptArbs(final File template) async {
+    final ProjectData project = await client.getProject(projectId);
+    final FlavorData fl = project.flavor(flavor);
+    final String? baseCode = project.baseLanguage(flavor)?.code;
+    if (baseCode == null) {
+      return OpResult(false, 'No base language on flavor "${fl.name}".');
+    }
+    final String templateName = template.uri.pathSegments.last;
+    final Map<String, File> local = <String, File>{};
+    final List<String> missing = <String>[];
+    for (final LanguageData l in fl.languages) {
+      if (l.code == baseCode) continue;
+      final File file = File.fromUri(
+          template.uri.resolve(siblingArbName(templateName, baseCode, l.code)));
+      if (file.existsSync()) {
+        local[l.code] = file;
+      } else {
+        missing.add(l.code);
+      }
+    }
+
+    final String content = template.readAsStringSync();
+    final List<String> lines = <String>[];
+    bool scopeRefused = false;
+
+    // With files to adopt, translating has to wait for them: the server fills
+    // every row that still reads like the base, theirs included.
+    final ({OpResult result, bool scopeRefused}) base =
+        await _importOrSkipTranslate(
+      content,
+      languageCode: baseCode,
+      translate: local.isEmpty && missing.isNotEmpty,
+    );
+    if (!base.result.ok) return base.result;
+    scopeRefused = base.scopeRefused;
+    lines.add('$templateName ($baseCode, base): ${base.result.message}');
+
+    for (final MapEntry<String, File> entry in local.entries) {
+      final String name = entry.value.uri.pathSegments.last;
+      final OpResult r = await importArb(
+        entry.value.readAsStringSync(),
+        languageCode: entry.key,
+      );
+      if (!r.ok) {
+        return OpResult(false, '${lines.join('\n')}\n$name: ${r.message}');
+      }
+      lines.add('$name (${entry.key}): ${r.message}');
+    }
+
+    if (local.isNotEmpty && missing.isNotEmpty) {
+      // The same file again: every key is already there, so all this does is
+      // have the server fill the rows no local file covered.
+      try {
+        final OpResult filled = await importArb(
+          content,
+          languageCode: baseCode,
+          translate: true,
+        );
+        if (!filled.ok) {
+          return OpResult(false, '${lines.join('\n')}\n${filled.message}');
+        }
+        final Object? count = filled.data['translated'];
+        lines.add(count is int
+            ? 'Translated $count locale-string(s) the local files do not '
+                'cover.'
+            : filled.message);
+      } on ApiException catch (e) {
+        if (!e.isTranslateScopeRefusal) rethrow;
+        scopeRefused = true;
+      }
+    }
+
+    if (scopeRefused) lines.add(_translateScopeNote(missing.join(', ')));
+    return OpResult(true, lines.join('\n'), <String, dynamic>{
+      'files': <String>[
+        templateName,
+        for (final File f in local.values) f.uri.pathSegments.last,
+      ],
+      if (scopeRefused) 'untranslated_locales': missing,
+    });
+  }
+
+  /// [adoptArbs] for a String Catalog, which carries every locale itself.
+  Future<OpResult> adoptCatalog(
+    final String content, {
+    required final String fileName,
+  }) async {
+    final ({OpResult result, bool scopeRefused}) imported =
+        await _importOrSkipTranslate(content,
+            fileName: fileName, translate: true);
+    if (!imported.result.ok || !imported.scopeRefused) return imported.result;
+    return OpResult(
+      true,
+      '${imported.result.message}\n'
+      '${_translateScopeNote('the locales the catalog does not translate')}',
+      <String, dynamic>{...imported.result.data, 'translate_scope': false},
+    );
+  }
+
+  /// An import that wants translation, falling back to a plain import when
+  /// the token is not allowed to translate.
+  Future<({OpResult result, bool scopeRefused})> _importOrSkipTranslate(
+    final String content, {
+    required final bool translate,
+    final String? languageCode,
+    final String? fileName,
+  }) async {
+    try {
+      return (
+        result: await importArb(
+          content,
+          languageCode: languageCode,
+          translate: translate,
+          fileName: fileName,
+          noteUntranslated: false,
+        ),
+        scopeRefused: false,
+      );
+    } on ApiException catch (e) {
+      if (!translate || !e.isTranslateScopeRefusal) rethrow;
+      return (
+        result: await importArb(
+          content,
+          languageCode: languageCode,
+          fileName: fileName,
+          noteUntranslated: false,
+        ),
+        scopeRefused: true,
+      );
+    }
+  }
+
+  static String _translateScopeNote(final String locales) =>
+      'Not translated: this token does not have the Translate scope, so the '
+      'base text is still in $locales. Create a token with the Translate '
+      'scope (API keys page in the dashboard), then run `fl retranslate`.';
 
   /// Poll a translation the import queued until it ends, reporting progress,
   /// and answer in the shape of the synchronous `translation` block.

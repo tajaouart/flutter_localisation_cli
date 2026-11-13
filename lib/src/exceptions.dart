@@ -27,6 +27,12 @@ class ApiException extends ManagementException {
   bool get isRateLimited => statusCode == 429;
   bool get isServer => statusCode >= 500;
 
+  /// The import endpoint refusing `auto_translate` for a token without the
+  /// Translate scope. Nothing was imported when this comes back.
+  bool get isTranslateScopeRefusal =>
+      isForbidden &&
+      RegExp(r"\btranslate\W+scope\b", caseSensitive: false).hasMatch(message);
+
   @override
   String toString() => 'HTTP $statusCode: $message';
 }
