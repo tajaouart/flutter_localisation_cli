@@ -24,10 +24,55 @@ String? sshFormOf(final String url) {
     return null;
   }
   final String host = uri.host.toLowerCase();
-  if (!kSshHosts.contains(host)) return null;
   final String path = _trimPath(uri.path);
+  final String? azure = _azurePath(host, path);
+  if (azure != null) return 'git@ssh.dev.azure.com:v3/$azure';
+  if (!kSshHosts.contains(host)) return null;
   if (path.isEmpty) return null;
   return 'git@$host:$path.git';
+}
+
+/// `org/project/repo` for any spelling of an Azure Repos URL, else null:
+/// `dev.azure.com/org/project/_git/repo`, the older
+/// `org.visualstudio.com/project/_git/repo`, and the SSH path
+/// `v3/org/project/repo`. A project's first repository carries its name and
+/// may leave the project out.
+String? _azurePath(final String host, final String path) {
+  final List<String> parts = path.split('/');
+  if (host == 'ssh.dev.azure.com' || host == 'vs-ssh.visualstudio.com') {
+    return parts.length == 4 && parts.first == 'v3'
+        ? parts.skip(1).join('/')
+        : null;
+  }
+  final int git = parts.indexOf('_git');
+  if (git < 0 || git != parts.length - 2) return null;
+  final String repo = parts.last;
+  List<String> before = parts.sublist(0, git);
+  if (host == 'dev.azure.com') {
+    if (before.isEmpty || before.length > 2) return null;
+  } else if (host.endsWith('.visualstudio.com')) {
+    before = <String>[
+      host.substring(0, host.length - '.visualstudio.com'.length),
+      ...before
+          .where((final String s) => s.toLowerCase() != 'defaultcollection'),
+    ];
+    if (before.length > 2) return null;
+  } else {
+    return null;
+  }
+  return <String>[
+    before.first,
+    if (before.length == 2) before[1] else repo,
+    repo
+  ].join('/');
+}
+
+String _hostAndPath(final String host, final String path) {
+  final String h = host.toLowerCase();
+  final String? azure = _azurePath(h, path);
+  return azure != null
+      ? 'dev.azure.com/${azure.toLowerCase()}'
+      : '$h/${path.toLowerCase()}';
 }
 
 /// A form of [url] two spellings of one repository share: no scheme, user,
@@ -37,8 +82,7 @@ String normalizeRepoUrl(final String url) {
   // `C:\\dir` is a path, though it reads like the scp form `host:path`.
   final RegExpMatch? scp = _drivePath.hasMatch(s) ? null : _scp.firstMatch(s);
   if (scp != null && !s.contains('://')) {
-    return '${scp.group(1)!.toLowerCase()}/'
-        '${_trimPath(scp.group(2)!).toLowerCase()}';
+    return _hostAndPath(scp.group(1)!, _trimPath(scp.group(2)!));
   }
   final Uri? uri = Uri.tryParse(s);
   if (uri != null && uri.host.isNotEmpty && uri.scheme != 'file') {
@@ -47,7 +91,7 @@ String normalizeRepoUrl(final String url) {
     if (uri.scheme.startsWith('http') && path.startsWith('scm/')) {
       path = path.substring(4);
     }
-    return '${uri.host.toLowerCase()}/${path.toLowerCase()}';
+    return _hostAndPath(uri.host, path);
   }
   final String local = s.startsWith('file://') ? _fileUrlPath(s) : s;
   return p.normalize(_trimGit(local));

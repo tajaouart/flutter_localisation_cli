@@ -449,6 +449,29 @@ void main() {
       expect(arbFile('app_en.arb').readAsStringSync(), contains('Cleaning'));
     });
 
+    test('and when that link is the app\'s own Azure Repos repository',
+        () async {
+      // Azure Pipelines checks the app out over https with the organisation
+      // as the user; the dashboard holds the same repository's web URL.
+      const String azure = 'dev.azure.com/acme/Mobile%20App/_git/app';
+      git(<String>['remote', 'set-url', 'origin', 'https://acme@$azure']);
+      backend
+        ..repoProvider = 'azure_devops'
+        ..repoUrl = 'https://$azure';
+      final String head = gitOut(<String>['rev-parse', 'HEAD']);
+
+      final Run r = await fl(<String>['pull']);
+      expect(r.code, 0, reason: r.err);
+      expect(gitOut(<String>['rev-parse', 'HEAD']), head);
+      expect(arbFile('app_en.arb').readAsStringSync(), contains('Cleaning'));
+      expect(r.out, isNot(contains('Synced')));
+
+      final Run repo = await fl(<String>['repo', '--json']);
+      expect(repo.code, 0, reason: repo.err);
+      expect((jsonDecode(repo.out) as Map<String, dynamic>)['repository'],
+          containsPair('provider', 'azure_devops'));
+    });
+
     test('a key committed to the ARB but never imported fails the build',
         () async {
       arbFile('app_en.arb')

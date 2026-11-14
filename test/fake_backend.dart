@@ -157,6 +157,9 @@ class FakeBackend {
   /// The linked git repo the project detail reports, or null for none.
   String? repoUrl;
 
+  /// The provider [repoUrl] is linked through.
+  String repoProvider = 'github';
+
   final List<ReceivedImport> imports = <ReceivedImport>[];
   final List<String> requests = <String>[];
 
@@ -178,8 +181,8 @@ class FakeBackend {
         'platforms': platforms,
         'xcstrings_dir': 'Resources',
         if (repoUrl != null) ...<String, dynamic>{
-          'is_github_linked': true,
-          'github_repository_url': repoUrl,
+          'is_${repoProvider}_linked': true,
+          '${repoProvider}_repository_url': repoUrl,
         },
         'flavors': <Map<String, dynamic>>[
           for (int i = 0; i < flavors.length; i++)

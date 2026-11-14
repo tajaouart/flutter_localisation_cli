@@ -36,6 +36,59 @@ void main() {
     expect(sameRepo('/tmp/x/arbs.git', 'file:///tmp/x/arbs'), isTrue);
   });
 
+  test('every spelling of an Azure Repos repository is the same repo', () {
+    const String web = 'https://dev.azure.com/Acme/Mobile%20App/_git/app';
+    for (final String other in <String>[
+      'https://acme@dev.azure.com/acme/Mobile%20App/_git/app',
+      'https://dev.azure.com/acme/Mobile%20App/_git/app/',
+      'git@ssh.dev.azure.com:v3/acme/Mobile%20App/app',
+      'ssh://git@ssh.dev.azure.com/v3/acme/Mobile%20App/app',
+      'https://acme.visualstudio.com/Mobile%20App/_git/app',
+      'https://acme.visualstudio.com/DefaultCollection/Mobile%20App/_git/app',
+      'acme@vs-ssh.visualstudio.com:v3/acme/Mobile%20App/app',
+    ]) {
+      expect(sameRepo(web, other), isTrue, reason: other);
+    }
+    expect(
+        sameRepo('https://dev.azure.com/acme/_git/app',
+            'git@ssh.dev.azure.com:v3/acme/app/app'),
+        isTrue,
+        reason: 'a project\'s first repository may leave the project out');
+    expect(sameRepo(web, 'https://dev.azure.com/acme/Mobile%20App/_git/other'),
+        isFalse);
+    expect(sameRepo(web, 'https://dev.azure.com/other/Mobile%20App/_git/app'),
+        isFalse);
+    expect(sameRepo(web, 'https://dev.azure.com/acme/Web/_git/app'), isFalse);
+    expect(sameRepo(web, 'https://github.com/acme/app'), isFalse);
+    // Not repository URLs: left as they are, never taken for one another.
+    expect(
+        sameRepo('https://dev.azure.com/acme/Mobile',
+            'https://dev.azure.com/acme/mobile/'),
+        isTrue);
+    expect(
+        sameRepo('https://dev.azure.com/a/b/c/_git/app',
+            'https://dev.azure.com/a/b/_git/app'),
+        isFalse);
+    expect(
+        sameRepo('git@ssh.dev.azure.com:v3/acme/app',
+            'https://dev.azure.com/acme/_git/app'),
+        isFalse);
+    expect(
+        sameRepo('https://acme.visualstudio.com/a/b/_git/app',
+            'https://dev.azure.com/acme/a/_git/app'),
+        isFalse);
+  });
+
+  test('sshFormOf knows the Azure Repos form', () {
+    expect(sshFormOf('https://dev.azure.com/acme/Mobile%20App/_git/app'),
+        'git@ssh.dev.azure.com:v3/acme/Mobile%20App/app');
+    expect(sshFormOf('https://acme@dev.azure.com/acme/_git/app'),
+        'git@ssh.dev.azure.com:v3/acme/app/app');
+    expect(sshFormOf('https://acme.visualstudio.com/Mobile/_git/app'),
+        'git@ssh.dev.azure.com:v3/acme/Mobile/app');
+    expect(sshFormOf('https://dev.azure.com/acme/Mobile'), isNull);
+  });
+
   test('redactCredentials hides a token, keeps a plain user', () {
     expect(redactCredentials('https://x-access-token:abc@github.com/a/b.git'),
         'https://x-access-token:***@github.com/a/b.git');

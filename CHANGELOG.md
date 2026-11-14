@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.19.1] - 2026-11-14
+### Added
+- **Azure Repos.** A project can now be linked to an Azure DevOps repository in the dashboard, and
+  `fl repo` names it (`azure_devops`). `fl pull` and `fl clone` recognise every spelling of an
+  Azure Repos URL as the same repository: the web URL, the https clone URL with the organisation
+  as user, the SSH form and the older `visualstudio.com` host. A refused https clone is retried
+  over SSH, as for the other providers.
+
 ## [1.19.0] - 2026-11-13
 ### Added
 - **Update notices.** Every request now names the client and its version (`fl/1.19.0`,

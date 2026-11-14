@@ -117,7 +117,7 @@ class GitRepository {
     this.needsReauth = false,
   });
 
-  /// `github`, `gitlab`, `bitbucket` or `bitbucket_server`.
+  /// `github`, `gitlab`, `bitbucket`, `bitbucket_server` or `azure_devops`.
   final String provider;
   final String url;
 
@@ -134,6 +134,7 @@ class GitRepository {
       'gitlab': 'gitlab',
       'bitbucket': 'bitbucket',
       'bitbucket_server': 'bitbucket_server',
+      'azure_devops': 'azure_devops',
     };
     for (final MapEntry<String, String> p in providers.entries) {
       final bool linked = (j['is_${p.key}_linked'] ?? false) as bool;

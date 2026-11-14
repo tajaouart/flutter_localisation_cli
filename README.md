@@ -375,7 +375,7 @@ nullable-getter: false
 ```
 
 `fl repo` reads the linked provider off the project detail endpoint (`github`, `gitlab`,
-`bitbucket` or `bitbucket_server`) and warns when the git token needs reconnecting. `--json`
+`bitbucket`, `bitbucket_server` or `azure_devops`) and warns when the git token needs reconnecting. `--json`
 gives `{project, repository: {provider, url, needs_reauth}}`; it exits non-zero when no
 provider is linked. The repo holds one folder per flavor at its root, so when the last folder
 of `arb_dir` is a flavor name, `fl clone` clones into the folder above it (`arbs/` for
