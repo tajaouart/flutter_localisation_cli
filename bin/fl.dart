@@ -94,10 +94,20 @@ Future<void> main(final List<String> args) async {
   runner.addCommand(UpgradeCommand());
 
   try {
-    final ArgResults top = runner.parse(args);
+    ArgResults top = runner.parse(args);
     if (top['version'] as bool) {
       stdout.writeln('fl $kCliVersion');
       exit(0);
+    }
+    // `fl style`, `fl languages` and `fl glossary` on their own show what is
+    // there, where CommandRunner would answer "Missing subcommand".
+    final ArgResults? group = top.command;
+    if (group != null &&
+        const <String>{'style', 'languages', 'glossary'}.contains(group.name) &&
+        group.command == null &&
+        group.rest.isEmpty &&
+        !(group['help'] as bool)) {
+      top = runner.parse(<String>[...args, 'list']);
     }
     final int? code = await runner.runCommand(top);
     _announceUpdate();
@@ -140,13 +150,11 @@ Future<void> main(final List<String> args) async {
 
 /// One line on stderr when the service named a newer version, after the
 /// command's own output so a build log ends with it. stdout is left alone:
-/// `--json` output stays parseable.
+/// `--json` output stays parseable. At a desk it is said once a day, see
+/// [UpdateNotice.isDue].
 void _announceUpdate() {
   final UpdateNotice? notice = UpdateNotice.current;
-  if (notice == null ||
-      Platform.environment.containsKey(kNoUpdateNoticeEnvVar)) {
-    return;
-  }
+  if (notice == null || !notice.isDue(Platform.environment)) return;
   stderr.writeln('\n${notice.describe('fl')}  (or: fl upgrade)');
 }
 
@@ -981,6 +989,11 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
         help: 'Also send values that match the source in variants of the base '
             'language (en-GB, en-US for an en base). Skipped by default: '
             'there, matching the source is usually correct.');
+    argParser.addFlag('changed',
+        negatable: false,
+        help: 'Also redo every value whose base text was changed after it was '
+            'translated (`fl status` counts them). Off by default: the old '
+            'translation is overwritten, reviewed or not.');
   }
 
   @override
@@ -988,11 +1001,12 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
   @override
   String get description =>
       'AI-translate every empty value, and every unchecked value still identical '
-      'to the source.';
+      'to the source. With --changed, also every value whose base text changed '
+      'since.';
   @override
   String get invocation =>
-      'fl retranslate [--locale ar --locale ru] [--accept-unchanged] '
-      '[--include-variants]';
+      'fl retranslate [--changed] [--locale ar --locale ru] '
+      '[--accept-unchanged] [--include-variants]';
 
   @override
   Future<int> run() async {
@@ -1007,6 +1021,7 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
         dryRun: dryRun,
         acceptUnchanged: argResults!['accept-unchanged'] as bool,
         includeVariants: argResults!['include-variants'] as bool,
+        changed: argResults!['changed'] as bool,
       );
       if (jsonOut) return emit(r);
       stdout.writeln(r.message);
@@ -1122,6 +1137,7 @@ class StatusCommand extends Command<int> with _ApiCommand {
       if (jsonOut) return emit(r);
       stdout.writeln(r.message);
       var totalUntranslated = 0;
+      var totalOutdated = 0;
       for (final row in (r.data['locales'] as List)) {
         final Map<String, dynamic> m = row as Map<String, dynamic>;
         final String tag = (m['base'] as bool)
@@ -1136,10 +1152,19 @@ class StatusCommand extends Command<int> with _ApiCommand {
         final String gap = untranslated > 0
             ? '  ⚠ $untranslated same as source — `fl retranslate`'
             : '';
+        final int outdated = (m['outdated'] as int?) ?? 0;
+        totalOutdated += outdated;
+        final String old =
+            outdated > 0 ? '  ⚠ $outdated translate an older base text' : '';
         stdout.writeln(
           '  ${m['locale']}$tag: ${m['translated'] ?? m['filled']}/${m['total']} '
-          '(${m['translated_percent'] ?? m['percent']}%)$gap',
+          '(${m['translated_percent'] ?? m['percent']}%)$gap$old',
         );
+      }
+      if (totalOutdated > 0) {
+        stdout.writeln(
+            '\n$totalOutdated value(s) were translated before their base text '
+            'changed. Run `fl retranslate --changed` to redo them.');
       }
       // Without this, a project whose remaining gap is entirely loanwords shows
       // a warning on most of its locales that `fl retranslate` can never clear
@@ -2633,7 +2658,8 @@ class StyleCommand extends Command<int> {
   @override
   String get description =>
       'How translations address the reader per language: formal (Sie, vous, '
-      'usted) or informal (du, tu, tú), plus instructions of your own.';
+      'usted) or informal (du, tu, tú), plus instructions of your own, for one '
+      'language or for all of them.';
 }
 
 class StyleListCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
@@ -2647,6 +2673,10 @@ class StyleListCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
       withGlossary((final GlossaryOperations g, final _) async {
         final OpResult r = await g.styles();
         if (jsonOut) return emit(r);
+        final String everywhere = r.data['project_instructions'] as String;
+        if (everywhere.isNotEmpty) {
+          stdout.writeln('  every language: $everywhere');
+        }
         for (final dynamic row in r.data['languages'] as List<dynamic>) {
           final Map<String, dynamic> m = row as Map<String, dynamic>;
           final String f = (m['formality'] as String? ?? '').isEmpty
@@ -2672,7 +2702,12 @@ class StyleSetCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
       ..addFlag('informal',
           negatable: false, help: 'Informal address (du, tu, tú...).')
       ..addOption('instructions',
-          help: 'Anything else the translator should follow for this locale.');
+          help: 'Anything else the translator should follow for this locale, '
+              'or with --all for every language.')
+      ..addFlag('all',
+          negatable: false,
+          help: 'Set --instructions for every language of the project at '
+              'once, present and future ("Never use a dash").');
   }
 
   @override
@@ -2680,17 +2715,40 @@ class StyleSetCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
   @override
   String get description =>
       'Set the style of a locale. Regional variants (de-AT) follow their '
-      'language (de) unless they have their own.';
+      'language (de) unless they have their own. With --all, set one '
+      'instruction for every language.';
   @override
   String get invocation =>
-      'fl style set <locale> (--formal | --informal) [--instructions "..."]';
+      'fl style set <locale> (--formal | --informal) [--instructions "..."]\n'
+      '       fl style set --all --instructions "..."';
 
   @override
   Future<int> run() {
     final List<String> rest = argResults!.rest;
-    if (rest.isEmpty) throw UsageException('Missing <locale>.', usage);
     final bool formal = argResults!['formal'] as bool;
     final bool informal = argResults!['informal'] as bool;
+    if (argResults!['all'] as bool) {
+      final String text =
+          ((argResults!['instructions'] as String?) ?? '').trim();
+      if (rest.isNotEmpty) {
+        throw UsageException('Pass a locale or --all, not both.', usage);
+      }
+      if (formal || informal) {
+        throw UsageException(
+            'Formal and informal are set per language: '
+            '`fl style set de --formal`.',
+            usage);
+      }
+      if (text.isEmpty) {
+        throw UsageException(
+            'Missing --instructions "...". To remove them: '
+            '`fl style clear --all`.',
+            usage);
+      }
+      return withGlossary((final GlossaryOperations g, final _) async =>
+          emit(await g.setProjectInstructions(text, dryRun: dryRun)));
+    }
+    if (rest.isEmpty) throw UsageException('Missing <locale>.', usage);
     if (formal && informal) {
       throw UsageException('Pass --formal or --informal, not both.', usage);
     }
@@ -2706,17 +2764,31 @@ class StyleSetCommand extends Command<int> with _ApiCommand, _GlossaryCommand {
 
 class StyleClearCommand extends Command<int>
     with _ApiCommand, _GlossaryCommand {
+  StyleClearCommand() {
+    argParser.addFlag('all',
+        negatable: false,
+        help: 'Remove the instructions set for every language. Each '
+            "language's own style stays.");
+  }
+
   @override
   String get name => 'clear';
   @override
   String get description =>
       "Remove a locale's style; it then follows its parent, if any.";
   @override
-  String get invocation => 'fl style clear <locale>';
+  String get invocation => 'fl style clear (<locale> | --all)';
 
   @override
   Future<int> run() {
     final List<String> rest = argResults!.rest;
+    if (argResults!['all'] as bool) {
+      if (rest.isNotEmpty) {
+        throw UsageException('Pass a locale or --all, not both.', usage);
+      }
+      return withGlossary((final GlossaryOperations g, final _) async =>
+          emit(await g.setProjectInstructions('', dryRun: dryRun)));
+    }
     if (rest.isEmpty) throw UsageException('Missing <locale>.', usage);
     return withGlossary((final GlossaryOperations g, final _) async =>
         emit(await g.clearStyle(rest.first, dryRun: dryRun)));

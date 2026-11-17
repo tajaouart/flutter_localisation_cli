@@ -9,10 +9,14 @@ import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
 /// A locale row: its value, and whether a reviewer has marked it checked.
-typedef Row = ({String value, bool checked});
+typedef Row = ({String value, bool checked, bool outdated});
 
-Row v(final String value, {final bool checked = false}) =>
-    (value: value, checked: checked);
+Row v(
+  final String value, {
+  final bool checked = false,
+  final bool outdated = false,
+}) =>
+    (value: value, checked: checked, outdated: outdated);
 
 /// A project whose base `en` holds [base] (key `k<i>` → value), plus one row
 /// per entry in [locales].
@@ -54,6 +58,7 @@ String _project({
                       'key': 'k$i',
                       'value': e.value[i].value,
                       'is_checked': e.value[i].checked,
+                      if (e.value[i].outdated) 'is_outdated': true,
                     },
                 ],
               },
@@ -435,5 +440,182 @@ void main() {
       contains('altered placeholders'),
       reason: 'the backend reason is the whole value of the failed bucket',
     );
+  });
+
+  group('values whose base text changed since', () {
+    final String before = _project(
+      base: <String>['Hello there', 'Bye', 'Save'],
+      locales: <String, List<Row>>{
+        'fr': <Row>[v('Bonjour', outdated: true), v(''), v('Enregistrer')],
+        'de': <Row>[v('Hallo', outdated: true), v('Tschüss'), v('Sichern')],
+      },
+    );
+    final String after = _project(
+      base: <String>['Hello there', 'Bye', 'Save'],
+      locales: <String, List<Row>>{
+        'fr': <Row>[v('Bonjour à vous'), v('Au revoir'), v('Enregistrer')],
+        'de': <Row>[v('Hallo zusammen'), v('Tschüss'), v('Sichern')],
+      },
+    );
+
+    test('are left alone by default, counted and named', () async {
+      final ({
+        List<List<int>> batches,
+        List<List<int>> checked,
+        MockClient client
+      }) m = _mock(before: before, after: after);
+
+      final OpResult r = await _ops(m.client).retranslate();
+
+      expect(m.batches.single, <int>[1001]);
+      expect(r.data['outdated'], 2);
+      expect(
+        r.message,
+        endsWith('2 value(s) still translate a base text that has changed '
+            'since: `fl retranslate --changed` redoes them.'),
+      );
+    });
+
+    test('are sent with changed, together with the gaps', () async {
+      final ({
+        List<List<int>> batches,
+        List<List<int>> checked,
+        MockClient client
+      }) m = _mock(before: before, after: after);
+
+      final OpResult r = await _ops(m.client).retranslate(changed: true);
+
+      expect(r.ok, isTrue);
+      expect(m.batches.single, <int>[1000, 1001, 1100]);
+      expect(r.data['translated'], 3);
+      expect(r.data['per_locale'], <String, int>{'fr': 2, 'de': 1});
+      expect(r.data.containsKey('outdated'), isFalse);
+      expect(r.message, isNot(contains('--changed')));
+    });
+
+    test('are named when nothing else is missing', () async {
+      final String p = _project(
+        base: <String>['Hello there'],
+        locales: <String, List<Row>>{
+          'fr': <Row>[v('Bonjour', outdated: true)],
+        },
+      );
+      final ({
+        List<List<int>> batches,
+        List<List<int>> checked,
+        MockClient client
+      }) m = _mock(before: p, after: p);
+
+      final OpResult r = await _ops(m.client).retranslate();
+      expect(m.batches, isEmpty);
+      expect(r.ok, isTrue);
+      expect(r.message, startsWith('Nothing is missing. 1 value(s) still'));
+      expect(r.data['outdated'], 1);
+
+      final OpResult dry =
+          await _ops(m.client).retranslate(changed: true, dryRun: true);
+      expect(m.batches, isEmpty);
+      expect(dry.message,
+          'DRY RUN: would translate 1 value(s) across 1 locale(s).');
+      expect(dry.data['pending'], 1);
+    });
+
+    test('respect --locale', () async {
+      final ({
+        List<List<int>> batches,
+        List<List<int>> checked,
+        MockClient client
+      }) m = _mock(before: before, after: after);
+
+      final OpResult r = await _ops(m.client)
+          .retranslate(changed: true, locales: <String>['de']);
+
+      expect(m.batches.single, <int>[1100]);
+      expect(r.data['per_locale'], <String, int>{'de': 1});
+    });
+
+    test('a service that never says outdated changes nothing', () async {
+      final String old = _project(
+        base: <String>['Hello'],
+        locales: <String, List<Row>>{
+          'fr': <Row>[v('Bonjour')],
+        },
+      );
+      final ({
+        List<List<int>> batches,
+        List<List<int>> checked,
+        MockClient client
+      }) m = _mock(before: old, after: old);
+
+      final OpResult r = await _ops(m.client).retranslate(changed: true);
+      expect(m.batches, isEmpty);
+      expect(r.message,
+          'Nothing to translate — every locale differs from the base.');
+    });
+
+    test('status counts them per locale', () async {
+      final ({
+        List<List<int>> batches,
+        List<List<int>> checked,
+        MockClient client
+      }) m = _mock(before: before, after: after);
+
+      final OpResult r = await _ops(m.client).status();
+      final Map<String, int> outdated = <String, int>{
+        for (final dynamic row in r.data['locales'] as List<dynamic>)
+          (row as Map<String, dynamic>)['locale'] as String:
+              row['outdated'] as int,
+      };
+      expect(outdated, <String, int>{'en': 0, 'fr': 1, 'de': 1});
+    });
+  });
+
+  group('editing the base text', () {
+    Future<OpResult> edit(
+      final String value, {
+      final String? locale,
+      final List<Row> fr = const <Row>[],
+    }) {
+      final String p = _project(
+        base: <String>['Hello'],
+        locales: <String, List<Row>>{
+          'fr': fr.isEmpty ? <Row>[v('Bonjour')] : fr,
+          'de': <Row>[v('Hallo')],
+          'es': <Row>[v('')],
+          'it': <Row>[v('Hello')],
+        },
+      );
+      final MockClient client = MockClient((final http.Request req) async =>
+          http.Response(req.method == 'GET' ? p : '{}', 200));
+      return _ops(client).edit('k0', locale, value: value);
+    }
+
+    test('says how many translations were written for the old text', () async {
+      final OpResult r = await edit('Hello there');
+      // es is empty and it still holds the old base text, which the service
+      // replaces with the new one.
+      expect(r.data['outdated'], 2);
+      expect(
+        r.message,
+        'Updated "k0" [en]. 2 translation(s) were written for the old text '
+        'and are now marked for review: `fl retranslate --changed` redoes '
+        'them.',
+      );
+    });
+
+    test('says nothing when the text is the same, or only spacing changed',
+        () async {
+      for (final String same in <String>['Hello', ' Hello ']) {
+        final OpResult r = await edit(same);
+        expect(r.message, 'Updated "k0" [en].');
+        expect(r.data.containsKey('outdated'), isFalse);
+      }
+    });
+
+    test('says nothing when a translation is edited', () async {
+      final OpResult r = await edit('Salut', locale: 'fr');
+      expect(r.message, 'Updated "k0" [fr].');
+      expect(r.data.containsKey('outdated'), isFalse);
+    });
   });
 }

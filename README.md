@@ -71,6 +71,8 @@ fl doctor --fix                          # fix a gen-l10n setup current Flutter 
 fl glossary add Dictee --keep            # never translate the app's name
 fl glossary add Snippets --as de=Schnipsel --as fr=Extraits
 fl style set de --formal                 # Sie, never du (de-AT, de-CH follow)
+fl style set --all --instructions "Never use a dash."   # one rule, every language
+fl retranslate --changed                 # redo translations of strings you reworded
 fl glossary apply                        # re-translate strings that use glossary terms
 fl lock support_url                      # this key keeps the base text in every locale
 ```
@@ -90,6 +92,9 @@ same feature two different things. Three settings fix that for every later trans
   (`term,keep,note,de,fr,...` or the JSON `fl glossary export` writes).
 - **Language style.** `fl style set <locale> --formal|--informal [--instructions "..."]`.
   A regional variant (de-AT, pt-BR) follows its language unless it has its own style.
+  `fl style set --all --instructions "..."` gives one instruction to every language of the
+  project, including those added later; a language's own instructions add to it, and
+  `fl style clear --all` removes it. `fl style` on its own lists what is set.
 - **Locked keys.** `fl lock <key>` copies the base text into every locale and never sends the
   key for translation: URLs, code samples, names. It is the same flag as Xcode's
   `"shouldTranslate": false`, and both directions round-trip (`@key.x-translate: false` in ARBs).
@@ -132,7 +137,14 @@ Work must cost **O(1) requests, not O(N)**. Two commands cover every bulk case:
 | Populate **new** locales | `fl languages add <c1> <c2> <c3> -t` | 1 per locale, one command (backend back-fills every key) |
 | Repair every locale | `fl retranslate` (no `--locale`) | batched |
 | Accept the loanword rows | `fl retranslate --accept-unchanged` | 1 request |
+| Redo translations after rewording base strings | `fl retranslate --changed` | batched |
 | Add one key | `fl add` | 1 request |
+
+**Reworded strings.** When the base text of a key changes, its translations in the other
+languages are kept and marked for review: they still say what the old text said. `fl edit`
+says how many, `fl status` counts them per locale, and `fl retranslate --changed` translates
+them again in one pass. It is not the default because the old translation is overwritten,
+reviewed or not, and a corrected typo in the base does not always call for that.
 
 **Never loop `fl add`, `fl edit`, `fl translate`, `fl languages add` or
 `fl retranslate --locale`.** Each is already the bulk form of itself. Looping one is
@@ -432,8 +444,10 @@ fl upgrade       # install the latest one (dart pub global activate flutter_loca
 ```
 
 `fl` and `fl_mcp` tell the service which version they are, and the service tells them when a
-newer one is published. `fl` prints one line after the command; `fl_mcp` hands it to the agent
-once per session. Set `FL_NO_UPDATE_NOTICE=1` to silence it.
+newer one is published. `fl` prints one line after the command: once a day at a desk, on every
+run in a build (`CI` or `TF_BUILD` set), and every time when the service says why the update
+matters. `fl_mcp` hands it to the agent once per session. Set `FL_NO_UPDATE_NOTICE=1` to
+silence it.
 
 ## MCP server (Claude, GitHub Copilot)
 

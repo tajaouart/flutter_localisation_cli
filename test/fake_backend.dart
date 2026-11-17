@@ -160,6 +160,17 @@ class FakeBackend {
   /// The provider [repoUrl] is linked through.
   String repoProvider = 'github';
 
+  /// The one key's row in other languages, by locale code: `value`, and
+  /// `is_outdated` for a translation of an older base text. A locale without
+  /// an entry has no row.
+  Map<String, Map<String, dynamic>> targets = <String, Map<String, dynamic>>{};
+
+  /// What the translator is told for every language.
+  String projectInstructions = '';
+
+  /// Ids of every batch translation request, in order.
+  final List<List<int>> translated = <List<int>>[];
+
   final List<ReceivedImport> imports = <ReceivedImport>[];
   final List<String> requests = <String>[];
 
@@ -195,7 +206,14 @@ class FakeBackend {
                     'id': 100 + i + languages.indexOf(code),
                     'code': code,
                     'is_base_language': false,
-                    'translations': <Map<String, dynamic>>[],
+                    'translations': <Map<String, dynamic>>[
+                      if (targets[code] != null)
+                        <String, dynamic>{
+                          'id': 500 + i * 100 + languages.indexOf(code),
+                          'key': 'running %lld',
+                          ...targets[code]!,
+                        },
+                    ],
                   },
                 <String, dynamic>{
                   'id': 1 + i,
@@ -297,6 +315,49 @@ class FakeBackend {
       }));
     } else if (req.method == 'GET' && path == '/api/projects/7/') {
       res.write(jsonEncode(_project));
+    } else if (path == '/api/projects/7/language-styles/') {
+      if (req.method == 'PUT') {
+        final Map<String, dynamic> body = jsonDecode(
+          await utf8.decoder.bind(req).join(),
+        ) as Map<String, dynamic>;
+        projectInstructions = body['project_instructions'] as String;
+        res.write(jsonEncode(
+            <String, String>{'project_instructions': projectInstructions}));
+      } else {
+        res.write(jsonEncode(<String, dynamic>{
+          'project_instructions': projectInstructions,
+          'languages': <Map<String, dynamic>>[
+            for (final String code in languages)
+              <String, dynamic>{
+                'code': code,
+                'formality': code == 'de' ? 'informal' : '',
+                'instructions': '',
+                'inherited_from': null,
+              },
+          ],
+        }));
+      }
+    } else if (path.startsWith('/api/update_translation/')) {
+      res.write('{}');
+    } else if (req.method == 'GET' && path == '/api/projects/7/glossary/') {
+      res.write(jsonEncode(<String, dynamic>{'terms': <dynamic>[]}));
+    } else if (req.method == 'POST' && path == '/api/ai_batch_translate/') {
+      final List<int> ids = ((jsonDecode(await utf8.decoder.bind(req).join())
+              as Map<String, dynamic>)['translation_ids'] as List<dynamic>)
+          .cast<int>();
+      translated.add(ids);
+      for (final String code in targets.keys) {
+        if (ids.contains(500 + languages.indexOf(code))) {
+          targets[code] = <String, dynamic>{'value': 'Translated ($code)'};
+        }
+      }
+      res.write(jsonEncode(<String, dynamic>{
+        'status': 'success',
+        'results': <String, dynamic>{
+          'successful': <dynamic>[],
+          'failed': <dynamic>[],
+        },
+      }));
     } else if (req.method == 'GET' && path == '/api/project/7/export/') {
       final String table = req.uri.queryParameters['table'] ?? 'Localizable';
       res.write(table == 'InfoPlist' ? kEmptyInfoPlist : kServedCatalog);

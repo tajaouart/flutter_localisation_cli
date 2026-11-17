@@ -280,6 +280,107 @@ void main() {
     expect(data['error'], contains('File not found'));
   });
 
+  test('language_style all=true sets one instruction for every language',
+      () async {
+    addTearDown(() => backend.projectInstructions = '');
+    final Map<String, dynamic> preview = await mcp.call(
+        'language_style', <String, dynamic>{
+      'action': 'set',
+      'all': true,
+      'instructions': 'No dashes.'
+    });
+    expect(
+        preview['message'], 'Would set the instructions for every language.');
+    expect(backend.projectInstructions, isEmpty);
+
+    final Map<String, dynamic> applied =
+        await mcp.call('language_style', <String, dynamic>{
+      'action': 'set',
+      'all': true,
+      'instructions': 'No dashes.',
+      'apply': true,
+    });
+    expect(applied['ok'], isTrue, reason: applied.toString());
+    expect(backend.projectInstructions, 'No dashes.');
+    final Map<String, dynamic> listed =
+        await mcp.call('language_style', <String, dynamic>{'action': 'list'});
+    expect(listed['project_instructions'], 'No dashes.');
+
+    final Map<String, dynamic> cleared = await mcp.call('language_style',
+        <String, dynamic>{'action': 'clear', 'all': true, 'apply': true});
+    expect(cleared['message'], 'Removed the instructions for every language.');
+    expect(backend.projectInstructions, isEmpty);
+  });
+
+  test('language_style all=true refuses a locale, a formality or no text',
+      () async {
+    for (final Map<String, dynamic> arguments in <Map<String, dynamic>>[
+      <String, dynamic>{'action': 'set', 'all': true, 'apply': true},
+      <String, dynamic>{
+        'action': 'set',
+        'all': true,
+        'locale': 'de',
+        'instructions': 'x',
+        'apply': true,
+      },
+      <String, dynamic>{
+        'action': 'set',
+        'all': true,
+        'formality': 'formal',
+        'instructions': 'x',
+        'apply': true,
+      },
+      <String, dynamic>{
+        'action': 'clear',
+        'all': true,
+        'locale': 'de',
+        'apply': true
+      },
+    ]) {
+      final Map<String, dynamic> reply = await mcp.request('tools/call',
+          <String, dynamic>{'name': 'language_style', 'arguments': arguments});
+      expect((reply['error'] as Map<String, dynamic>)['message'],
+          contains('all=true takes instructions only'),
+          reason: '$arguments');
+    }
+    expect(backend.projectInstructions, isEmpty);
+  });
+
+  test('retranslate changed=true redoes values of an older base text',
+      () async {
+    backend
+      ..platforms = <String>['flutter']
+      ..languages = <String>['en', 'de']
+      ..targets = <String, Map<String, dynamic>>{
+        'de': <String, dynamic>{'value': 'Alt {arg1}', 'is_outdated': true},
+      };
+    addTearDown(() {
+      backend
+        ..languages = <String>['en']
+        ..targets = <String, Map<String, dynamic>>{};
+      backend.translated.clear();
+    });
+
+    final Map<String, dynamic> plain =
+        await mcp.call('retranslate', <String, dynamic>{'apply': true});
+    expect(plain['outdated'], 1);
+    expect(plain['message'], contains('fl retranslate --changed'));
+    expect(backend.translated, isEmpty);
+
+    final Map<String, dynamic> preview =
+        await mcp.call('retranslate', <String, dynamic>{'changed': true});
+    expect(preview['pending'], 1);
+    expect(backend.translated, isEmpty);
+
+    final Map<String, dynamic> applied = await mcp
+        .call('retranslate', <String, dynamic>{'changed': true, 'apply': true});
+    expect(applied['ok'], isTrue, reason: applied.toString());
+    expect(applied['translated'], 1);
+    expect(backend.translated, <List<int>>[
+      <int>[501]
+    ]);
+  });
+
   test('a newer version is told to the agent once, in a tool result', () async {
     backend.latestVersion = '99.0.0';
     addTearDown(() => backend.latestVersion = null);

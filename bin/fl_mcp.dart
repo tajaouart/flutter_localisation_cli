@@ -478,7 +478,10 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             'done. translate_key cannot fix it — those rows are not "missing", and it '
             'is one key per call. Values that are correctly identical to the source '
             '(loanwords, product names, notation) should be marked checked, which '
-            'excludes them from future runs. Preview by default; apply=true writes.',
+            'excludes them from future runs. changed=true also redoes every value '
+            'whose base text was edited after it was translated (the result of an '
+            'edit, and of this tool without it, counts them as "outdated"). '
+            'Preview by default; apply=true writes.',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
@@ -508,6 +511,14 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
                       'base language (en-GB, en-US for an en base). Skipped by '
                       'default, since matching the source is usually correct '
                       'there.',
+            },
+            'changed': <String, dynamic>{
+              'type': 'boolean',
+              'default': false,
+              'description':
+                  'Also redo every value whose base text changed after it was '
+                      'translated. The old translation is overwritten, '
+                      'reviewed or not.',
             },
             'apply': <String, dynamic>{'type': 'boolean', 'default': false},
             ..._projectProps,
@@ -557,8 +568,11 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             'Lei...) or informal (du, tu, tú...), plus free instructions. Regional '
             'variants (de-AT, de-CH) follow their language unless set themselves. '
             'action=list shows every locale and where its style comes from; set '
-            'changes one; clear removes one. Existing translations keep their '
-            'wording until re-translated (glossary action=apply with all).',
+            'changes one; clear removes one. For one rule in every language, '
+            'present and future ("Never use a dash"), pass all=true with '
+            'instructions and no locale; clear with all=true removes it. Existing '
+            'translations keep their wording until re-translated (glossary '
+            'action=apply with all).',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
@@ -572,6 +586,12 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
               'enum': <String>['', 'formal', 'informal'],
             },
             'instructions': <String, dynamic>{'type': 'string'},
+            'all': <String, dynamic>{
+              'type': 'boolean',
+              'default': false,
+              'description':
+                  'The instructions apply to every language of the project.',
+            },
             'apply': <String, dynamic>{'type': 'boolean', 'default': false},
             ..._projectProps,
           },
@@ -1069,6 +1089,7 @@ Future<void> _callTool(
           dryRun: !apply,
           acceptUnchanged: (a['accept_unchanged'] ?? false) as bool,
           includeVariants: (a['include_variants'] ?? false) as bool,
+          changed: (a['changed'] ?? false) as bool,
         );
       case 'list_languages':
         r = await ops.listLanguages();
@@ -1115,9 +1136,27 @@ Future<void> _callTool(
           final GlossaryOperations g =
               GlossaryOperations(_client, target.projectId);
           final String locale = (a['locale'] as String?) ?? '';
+          final bool all = (a['all'] ?? false) as bool;
+          final String instructions = (a['instructions'] as String?) ?? '';
+          if (all &&
+              a['action'] != 'list' &&
+              (locale.isNotEmpty ||
+                  ((a['formality'] as String?) ?? '').isNotEmpty ||
+                  (a['action'] == 'set' && instructions.trim().isEmpty))) {
+            _error(
+                id,
+                -32602,
+                'all=true takes instructions only: no locale and no formality, '
+                'which is set per language.');
+            return;
+          }
           switch (a['action']) {
             case 'list':
               r = await g.styles();
+            case 'set' when all:
+              r = await g.setProjectInstructions(instructions, dryRun: !apply);
+            case 'clear' when all:
+              r = await g.setProjectInstructions('', dryRun: !apply);
             case 'set':
               r = await g.setStyle(
                 locale,

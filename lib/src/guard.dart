@@ -229,6 +229,8 @@ To add or change a user-facing string:
 1. Author it in the SaaS — the dashboard, or the `fl` CLI:
    - `fl add <key> --value "Hello" --translate`
    - `fl edit <key> --value "Hi" --locale en`
+   - after rewording base strings, `fl retranslate --changed` brings the other
+     languages up to the new text.
 2. Pull the regenerated ARBs into the repo: `fl pull`.
 3. Reference the key through the generated accessor in code.
 
@@ -242,6 +244,8 @@ budget, and it is refused after a few calls:
 | `fl languages add <code>` per locale    | `fl languages add <c1> <c2> <c3> --auto-translate` |
 | `fl retranslate --locale <one>` per locale | `fl retranslate` (no `--locale` = every locale) |
 | `fl translate <key>` per key            | `fl retranslate`                                 |
+| `fl translate <key> --all` per reworded key | `fl retranslate --changed`                   |
+| `fl style set <locale> --instructions` per locale | `fl style set --all --instructions "..."` |
 
 A 429 or a refusal is never a signal to sleep and retry: backing off runs the
 same wrong algorithm slower. Switch to the bulk call. If a request times out, do

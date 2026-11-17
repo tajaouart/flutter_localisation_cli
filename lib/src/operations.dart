@@ -1100,6 +1100,25 @@ class Operations {
     final int id = project.resolveId(key, code, flavorName: flavor);
     final String full = project.canonicalKey(key, flavorName: flavor);
     final TranslationEntry? base = project.baseEntry(full, flavorName: flavor);
+    // Translations written for the base text this edit replaces. An unwritten
+    // seed (still the old base text) is not one: the service gives it the new
+    // text.
+    final int outdated = value == null ||
+            base == null ||
+            base.id != id ||
+            base.value.trim().isEmpty ||
+            base.value.trim() == value.trim()
+        ? 0
+        : project
+            .flavor(flavor)
+            .languages
+            .where((final LanguageData l) => !l.isBase)
+            .expand((final LanguageData l) => l.translations)
+            .where((final TranslationEntry t) =>
+                t.key == base.key &&
+                t.value.trim().isNotEmpty &&
+                t.value != base.value)
+            .length;
     if (value != null && base != null && !base.isPluralEnabled) {
       // A String Catalog key's arguments are `{argN}` on the service and `%@`
       // in Xcode. Either form keeps the argument; the service converts the
@@ -1142,8 +1161,18 @@ class Operations {
       clearDescription: clearDescription,
       isChecked: isChecked,
     );
-    return OpResult(true, 'Updated "$full" [$code].',
-        <String, dynamic>{'key': full, 'locale': code});
+    return OpResult(
+      true,
+      'Updated "$full" [$code].'
+      '${outdated == 0 ? '' : ' $outdated translation(s) were written for the '
+          'old text and are now marked for review: `fl retranslate --changed` '
+          'redoes them.'}',
+      <String, dynamic>{
+        'key': full,
+        'locale': code,
+        if (outdated > 0) 'outdated': outdated,
+      },
+    );
   }
 
   /// Delete a key. Without [locale] the whole key is removed (all locales + the key
@@ -1381,6 +1410,7 @@ class Operations {
     final int chunkSize = _defaultChunkSize,
     final bool acceptUnchanged = false,
     final bool includeVariants = false,
+    final bool changed = false,
   }) async {
     // Narrowing a whole-project repair to one locale, over and over, is the
     // most expensive way to do the cheapest thing: omitting --locale covers
@@ -1421,6 +1451,10 @@ class Operations {
 
     final List<int> ids = <int>[];
     final Map<String, int> perLocale = <String, int>{};
+    // Values that still translate a base text since rewritten. They are sent
+    // only when asked for: a corrected typo in the base does not make thirty
+    // reviewed translations wrong.
+    var outdated = 0;
     for (final LanguageData l in f.languages) {
       if (l.code == baseCode) continue;
       if (locales != null && locales.isNotEmpty && !locales.contains(l.code)) {
@@ -1440,24 +1474,41 @@ class Operations {
                 !t.isChecked &&
                 !identicalIsFine &&
                 hasTranslatableText(base));
-        if (needsWork) {
+        if (!needsWork && t.isOutdated) outdated++;
+        if (needsWork || (changed && t.isOutdated)) {
           ids.add(t.id);
           n++;
         }
       }
       if (n > 0) perLocale[l.code] = n;
     }
+    final String outdatedHint = changed || outdated == 0
+        ? ''
+        : ' $outdated value(s) still translate a base text that has changed '
+            'since: `fl retranslate --changed` redoes them.';
+    final Map<String, dynamic> outdatedData = <String, dynamic>{
+      if (!changed && outdated > 0) 'outdated': outdated,
+    };
 
     if (ids.isEmpty) {
       return OpResult(
-          true, 'Nothing to translate — every locale differs from the base.');
+        true,
+        changed || outdated == 0
+            ? 'Nothing to translate — every locale differs from the base.'
+            : 'Nothing is missing.$outdatedHint',
+        outdatedData,
+      );
     }
     if (dryRun) {
       return OpResult(
         true,
         'DRY RUN: would translate ${ids.length} value(s) across '
-        '${perLocale.length} locale(s).',
-        <String, dynamic>{'pending': ids.length, 'per_locale': perLocale},
+        '${perLocale.length} locale(s).$outdatedHint',
+        <String, dynamic>{
+          'pending': ids.length,
+          'per_locale': perLocale,
+          ...outdatedData,
+        },
       );
     }
 
@@ -1502,11 +1553,13 @@ class Operations {
       'Translated ${result.translated}/${ids.length} value(s) across '
       '${perLocale.length} locale(s)${_outcomeSuffix(result)}'
       '${accepted > 0 ? ', $accepted accepted as checked' : ''}'
-      '${acceptFailed.isNotEmpty ? ', ${acceptFailed.length} could not be accepted' : ''}.',
+      '${acceptFailed.isNotEmpty ? ', ${acceptFailed.length} could not be accepted' : ''}.'
+      '$outdatedHint',
       <String, dynamic>{
         'translated': result.translated,
         'attempted': ids.length,
         'per_locale': perLocale,
+        ...outdatedData,
         'failed': _failedJson(result.failed),
         'unchanged': _unchangedJson(result.unchanged),
         if (acceptUnchanged) 'accepted': accepted,
@@ -1893,11 +1946,15 @@ class Operations {
                   hasTranslatableText(base);
             }).length;
       final int translated = l.isBase ? total : filled - sameAsBase;
+      final int outdated = l.translations
+          .where((final TranslationEntry t) => t.isOutdated && !t.isEmpty)
+          .length;
       rows.add(<String, dynamic>{
         'locale': l.code,
         'base': l.isBase,
         'filled': filled,
         'untranslated': sameAsBase,
+        'outdated': outdated,
         'translated': translated,
         'total': total,
         'percent': total == 0 ? 100 : ((filled / total) * 100).round(),

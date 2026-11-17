@@ -79,6 +79,7 @@ class _Backend {
         }
         if (path == '/api/projects/7/language-styles/' && req.method == 'GET') {
           return _json(<String, dynamic>{
+            'project_instructions': 'Never use a dash.',
             'languages': <Map<String, dynamic>>[
               <String, dynamic>{
                 'code': 'de',
@@ -94,6 +95,12 @@ class _Backend {
               },
             ],
           });
+        }
+        if (path == '/api/projects/7/language-styles/' &&
+            req.method == 'PUT' &&
+            (body! as Map<String, dynamic>)
+                .containsKey('project_instructions')) {
+          return _json(<String, dynamic>{...(body as Map<String, dynamic>)});
         }
         if (path == '/api/projects/7/language-styles/' && req.method == 'PUT') {
           return _json(
@@ -442,6 +449,36 @@ void main() {
       expect(backend.calls.last.path, '/api/projects/7/language-styles/de-AT/');
       expect((await g.clearStyle('fr', dryRun: true)).message,
           'Would clear the style of fr.');
+    });
+
+    test('one instruction for every language', () async {
+      expect(
+          (await g.styles()).data['project_instructions'], 'Never use a dash.');
+
+      final int before = backend.calls.length;
+      expect(
+          (await g.setProjectInstructions('No dashes', dryRun: true)).message,
+          'Would set the instructions for every language.');
+      expect((await g.setProjectInstructions('', dryRun: true)).message,
+          'Would remove the instructions for every language.');
+      expect(backend.calls, hasLength(before),
+          reason: 'a dry run sends nothing');
+
+      final OpResult set = await g.setProjectInstructions('  No dashes.  ');
+      expect(backend.calls.last.body,
+          <String, dynamic>{'project_instructions': 'No dashes.'});
+      expect(
+        set.message,
+        'Every language now follows: "No dashes.". A language\'s own style '
+        'adds to it. Strings already translated keep their text until '
+        '`fl glossary apply --all` re-translates them.',
+      );
+      expect(set.data['project_instructions'], 'No dashes.');
+
+      final OpResult cleared = await g.setProjectInstructions('');
+      expect(backend.calls.last.body,
+          <String, dynamic>{'project_instructions': ''});
+      expect(cleared.message, 'Removed the instructions for every language.');
     });
 
     test('lock and unlock', () async {

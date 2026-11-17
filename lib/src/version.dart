@@ -5,8 +5,11 @@
 /// exists without asking pub.dev, and refuses a version it has withdrawn.
 library;
 
+import 'dart:convert';
+import 'dart:io';
+
 /// Kept equal to `version:` in pubspec.yaml by a test.
-const String kCliVersion = '1.19.1';
+const String kCliVersion = '1.20.0';
 
 /// Set to any value to keep the "update available" line out of the output.
 const String kNoUpdateNoticeEnvVar = 'FL_NO_UPDATE_NOTICE';
@@ -36,6 +39,54 @@ class UpdateNotice {
       reason: headers['x-fl-notice'],
       command: headers['x-fl-upgrade-command'],
     );
+  }
+
+  /// Whether `fl` should print the notice after this command.
+  ///
+  /// A build log gets it on every run, and so does a notice that says why the
+  /// update matters. Otherwise once a day per version is enough: printed after
+  /// every command it buried the output of each one.
+  bool isDue(
+    final Map<String, String> env, {
+    final File? stamp,
+    final DateTime Function() now = DateTime.now,
+  }) {
+    if (env.containsKey(kNoUpdateNoticeEnvVar)) return false;
+    if (reason != null && reason!.isNotEmpty) return true;
+    if (_isSet(env['CI']) || _isSet(env['TF_BUILD'])) return true;
+    final File file = stamp ?? _stampFile(env);
+    final int at = now().millisecondsSinceEpoch;
+    try {
+      final Object? seen = jsonDecode(file.readAsStringSync());
+      if (seen is Map &&
+          seen['latest'] == latest &&
+          seen['at'] is int &&
+          at >= (seen['at'] as int) &&
+          at - (seen['at'] as int) < const Duration(days: 1).inMilliseconds) {
+        return false;
+      }
+    } on Object {
+      // No stamp yet, or one that cannot be read: say it.
+    }
+    try {
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync(
+          jsonEncode(<String, Object>{'latest': latest, 'at': at}));
+    } on Object {
+      // A home that cannot be written to hears it every time.
+    }
+    return true;
+  }
+
+  static bool _isSet(final String? value) =>
+      value != null &&
+      value.isNotEmpty &&
+      value != '0' &&
+      value.toLowerCase() != 'false';
+
+  static File _stampFile(final Map<String, String> env) {
+    final String home = env['HOME'] ?? env['USERPROFILE'] ?? '.';
+    return File('$home/.config/flutterlocalisation/update_notice.json');
   }
 
   /// The lines to print, for [name] (`fl` or `fl_mcp`).

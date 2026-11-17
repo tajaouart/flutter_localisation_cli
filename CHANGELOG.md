@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.20.0] - 2026-11-17
+### Added
+- **`fl retranslate --changed`.** When the base text of a key is reworded, the translations in
+  the other languages still say what the old text said. The service marks them, `fl edit` says
+  how many it left behind, `fl status` counts them per locale, and `fl retranslate --changed`
+  translates them again in one pass. Until now this took one `fl translate <key> --all` per
+  reworded key. Without the flag `fl retranslate` leaves them alone, as before, and says how
+  many there are. The MCP `retranslate` tool takes `changed` too.
+- **One instruction for every language.** `fl style set --all --instructions "Never use a dash."`
+  tells the translator once, for every language of the project and those added later; a
+  language's own style adds to it. `fl style clear --all` removes it, `fl style list` shows it,
+  and the dashboard has the same box under Glossary & voice. MCP: `language_style` with
+  `all: true`.
+
+### Changed
+- **The update notice is printed once a day**, where it followed every command and buried the
+  output of each one. A build (`CI` or `TF_BUILD` set) still gets it on every run, and so does
+  a notice that carries a reason.
+- `fl style`, `fl languages` and `fl glossary` on their own list what is there, where they
+  answered "Missing subcommand".
+
 ## [1.19.1] - 2026-11-14
 ### Added
 - **Azure Repos.** A project can now be linked to an Azure DevOps repository in the dashboard, and

@@ -30,6 +30,7 @@ class TranslationEntry {
     required this.isChecked,
     required this.isPluralEnabled,
     required this.isAiTranslated,
+    this.isOutdated = false,
     this.description = '',
     this.placeholders = const <String, dynamic>{},
   });
@@ -40,6 +41,10 @@ class TranslationEntry {
   final bool isChecked;
   final bool isPluralEnabled;
   final bool isAiTranslated;
+
+  /// The base text changed after this value was written, and nothing has
+  /// rewritten or checked it since. Older services never say so.
+  final bool isOutdated;
 
   /// Key description (`@key.description` in ARB). Round-tripped from the backend.
   final String description;
@@ -57,6 +62,7 @@ class TranslationEntry {
         isChecked: (j['is_checked'] ?? false) as bool,
         isPluralEnabled: (j['is_plural_enabled'] ?? false) as bool,
         isAiTranslated: (j['is_ai_translated'] ?? false) as bool,
+        isOutdated: (j['is_outdated'] ?? false) as bool,
         description: (j['description'] ?? '') as String,
         placeholders: (j['placeholders'] ?? const <String, dynamic>{})
             as Map<String, dynamic>,
@@ -889,7 +895,7 @@ class ManagementClient {
   }
 
   /// `{styles: [...], languages: [{code, formality, instructions,
-  /// inherited_from}], formality_choices}`.
+  /// inherited_from}], project_instructions, formality_choices}`.
   Future<Map<String, dynamic>> listLanguageStyles(final int projectId) async =>
       _json(await _send('GET', '/api/projects/$projectId/language-styles/'));
 
@@ -908,6 +914,19 @@ class ManagementClient {
           'instructions': instructions,
         },
       ));
+
+  /// What the translator is told for every language; empty removes it.
+  Future<String> setProjectInstructions(
+    final int projectId,
+    final String instructions,
+  ) async {
+    final Map<String, dynamic> j = _json(await _send(
+      'PUT',
+      '/api/projects/$projectId/language-styles/',
+      body: <String, dynamic>{'project_instructions': instructions},
+    ));
+    return (j['project_instructions'] ?? '') as String;
+  }
 
   Future<void> deleteLanguageStyle(
       final int projectId, final String code) async {

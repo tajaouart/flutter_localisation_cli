@@ -180,6 +180,11 @@ class GlossaryOperations {
       'Strings already translated keep their text until `fl glossary apply` '
       're-translates them.';
 
+  /// A style reaches strings with no glossary term in them too.
+  static const String _restyleHint =
+      'Strings already translated keep their text until '
+      '`fl glossary apply --all` re-translates them.';
+
   Future<List<Map<String, dynamic>>> _terms() async =>
       ((await client.listGlossary(projectId))['terms'] as List<dynamic>? ??
               const <dynamic>[])
@@ -381,8 +386,35 @@ class GlossaryOperations {
 
   Future<OpResult> styles() async {
     final Map<String, dynamic> r = await client.listLanguageStyles(projectId);
-    return OpResult(true, 'Language styles.',
-        <String, dynamic>{'languages': r['languages'] ?? const <dynamic>[]});
+    return OpResult(true, 'Language styles.', <String, dynamic>{
+      'project_instructions': r['project_instructions'] ?? '',
+      'languages': r['languages'] ?? const <dynamic>[],
+    });
+  }
+
+  /// One rule for every language of the project ("never use a dash"). An
+  /// empty [instructions] removes it.
+  Future<OpResult> setProjectInstructions(
+    final String instructions, {
+    final bool dryRun = false,
+  }) async {
+    final String text = instructions.trim();
+    if (dryRun) {
+      return OpResult(
+          true,
+          text.isEmpty
+              ? 'Would remove the instructions for every language.'
+              : 'Would set the instructions for every language.');
+    }
+    final String saved = await client.setProjectInstructions(projectId, text);
+    return OpResult(
+      true,
+      saved.isEmpty
+          ? 'Removed the instructions for every language.'
+          : 'Every language now follows: "$saved". A language\'s own style '
+              'adds to it. $_restyleHint',
+      <String, dynamic>{'project_instructions': saved},
+    );
   }
 
   Future<OpResult> setStyle(
@@ -406,7 +438,7 @@ class GlossaryOperations {
       true,
       '$locale: ${formality.isEmpty ? "translator's choice" : formality}'
       '${instructions.isNotEmpty ? ', with instructions' : ''}. Regional '
-      'variants without their own style follow it. $_retranslateHint',
+      'variants without their own style follow it. $_restyleHint',
       <String, dynamic>{'style': saved},
     );
   }
