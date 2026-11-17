@@ -1850,7 +1850,9 @@ class SyncCommand extends Command<int> with _ApiCommand {
   @override
   String get description =>
       'Import an ARB or String Catalog (optional), sync arb_dir, then '
-      'regenerate the Dart, the whole flow in one command.';
+      'regenerate the Dart, the whole flow in one command. With '
+      '"ios_permission_keys" in flutterlocalisation.json it ends with '
+      '`fl native`.';
   @override
   String get invocation => 'fl sync [<file.arb|file.xcstrings>]';
 
@@ -1908,6 +1910,31 @@ class SyncCommand extends Command<int> with _ApiCommand {
     final int gen = await _regenerateDart(cfg,
         skipHint: 'Re-run with --no-codegen to skip this step.');
     if (gen != 0) return gen;
+    // A project that keeps its iOS permission alerts in translation keys has
+    // one more thing fed by the ARBs.
+    if (cfg.iosPermissionKeys != null) {
+      final NativeSyncPlan plan;
+      try {
+        plan = planNativeSync(
+          Directory(cfg.root ?? Directory.current.path),
+          arbDir: cfg.arbDir,
+          permissionKeys: cfg.iosPermissionKeys,
+        );
+      } on StateError catch (e) {
+        stderr.writeln(e.message);
+        return 1;
+      }
+      final int changed = applyNativeSync(plan).length;
+      stdout.writeln(changed == 0
+          ? 'Native locale declarations and iOS permission alerts are current.'
+          : 'Updated $changed native file(s): locale declarations and iOS '
+              'permission alerts.');
+      for (final String note in plan.notes) {
+        stdout.writeln('  ! $note');
+      }
+      stdout.writeln('✓ In sync: service → ARBs → Dart → native.');
+      return 0;
+    }
     stdout.writeln('✓ In sync: service → ARBs → Dart.');
     return 0;
   }
@@ -2178,12 +2205,21 @@ class NativeCommand extends Command<int> {
   Future<int> run() async {
     final Directory root = Directory.current;
     String? arbDir;
+    Map<String, String>? permissionKeys;
     try {
-      arbDir =
-          ProjectConfig.load(path: globalResults?['config'] as String?).arbDir;
+      final ProjectConfig cfg =
+          ProjectConfig.load(path: globalResults?['config'] as String?);
+      arbDir = cfg.arbDir;
+      permissionKeys = cfg.iosPermissionKeys;
+    } on ConfigException catch (e) {
+      // A config that is there and wrong is said; a missing one is fine:
+      // locales come from the generated Dart, and this command has nothing to
+      // say to the backend.
+      if (e.message.contains('ios_permission_keys')) {
+        stderr.writeln('Error: ${e.message}');
+        return 1;
+      }
     } on Object {
-      // No project config is fine: locales come from the generated Dart, and
-      // this command has nothing to say to the backend.
       arbDir = null;
     }
 
@@ -2199,6 +2235,7 @@ class NativeCommand extends Command<int> {
         return 1;
       }
       final NativeSyncPlan plan = planNativeSync(root, arbDir: arbDir);
+      // The starter is for a project that keeps its sentences in the file.
       out.writeAsStringSync(
         initCopyFile(
             target, plan.locales.contains('en') ? 'en' : plan.locales.first),
@@ -2211,7 +2248,8 @@ class NativeCommand extends Command<int> {
 
     final NativeSyncPlan plan;
     try {
-      plan = planNativeSync(root, arbDir: arbDir);
+      plan =
+          planNativeSync(root, arbDir: arbDir, permissionKeys: permissionKeys);
     } on StateError catch (e) {
       stderr.writeln(e.message);
       return 1;

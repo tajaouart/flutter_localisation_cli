@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.21.0] - 2026-11-17
+### Added
+- **iOS permission alerts from translation keys.** `"ios_permission_keys"` in
+  `flutterlocalisation.json` maps an Info.plist key to the translation key that holds its
+  sentence (`"NSCameraUsageDescription": "iosCameraUsage"`). `fl native` then writes the
+  `InfoPlist.strings` of every language from the ARBs, with no `InfoPlist.copy.json` to keep
+  by hand, and `fl sync` ends with `fl native`. A language with no text for a key stops the
+  command and is named.
+
+### Fixed
+- `fl native` found no ARBs to read the locales from when `arb_dir` was not one of the usual
+  folders and the generated Dart was absent.
+
 ## [1.20.0] - 2026-11-17
 ### Added
 - **`fl retranslate --changed`.** When the base text of a key is reworded, the translations in

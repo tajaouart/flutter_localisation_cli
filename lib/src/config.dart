@@ -31,6 +31,7 @@ class ProjectConfig {
     this.flavor,
     this.arbDir,
     this.xcstringsDir,
+    this.iosPermissionKeys,
     this.root,
   });
 
@@ -49,6 +50,12 @@ class ProjectConfig {
   /// with native iOS strings keeps them beside the ARBs, an iOS-only app
   /// points this at its Xcode resources folder.
   final String? xcstringsDir;
+
+  /// `ios_permission_keys`: Info.plist key to the translation key holding its
+  /// sentence (`NSCameraUsageDescription` to `iosCameraUsage`). With it,
+  /// `fl native` reads the iOS permission alerts from the ARBs and `fl sync`
+  /// ends with `fl native`.
+  final Map<String, String>? iosPermissionKeys;
 
   /// The catalog folder in effect: `xcstrings_dir`, else `arb_dir`, else here.
   String get catalogDir => xcstringsDir ?? arbDir ?? '.';
@@ -112,6 +119,20 @@ class ProjectConfig {
           : p.normalize(p.join(file.parent.path, raw));
     }
 
+    final Object? permissionKeys = json['ios_permission_keys'];
+    if (permissionKeys != null &&
+        (permissionKeys is! Map ||
+            permissionKeys.isEmpty ||
+            permissionKeys.entries.any((final MapEntry<dynamic, dynamic> e) =>
+                e.key is! String ||
+                e.value is! String ||
+                (e.value as String).isEmpty))) {
+      throw ConfigException(
+          '${file.path}: "ios_permission_keys" must map Info.plist keys to '
+          'translation keys, for example '
+          '{"NSCameraUsageDescription": "iosCameraUsage"}.');
+    }
+
     return ProjectConfig(
       baseUrl: text('base_url')?.trimRight() ?? kDefaultBaseUrl,
       projectId: pid is int ? pid : null,
@@ -119,6 +140,9 @@ class ProjectConfig {
       flavor: text('flavor'),
       arbDir: relativeToConfig('arb_dir'),
       xcstringsDir: relativeToConfig('xcstrings_dir'),
+      iosPermissionKeys: permissionKeys == null
+          ? null
+          : Map<String, String>.from(permissionKeys as Map<dynamic, dynamic>),
       root: p.normalize(file.absolute.parent.path),
     );
   }

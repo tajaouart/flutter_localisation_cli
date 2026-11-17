@@ -775,7 +775,14 @@ Future<void> _callTool(
       }
       final NativeSyncPlan plan;
       try {
-        plan = planNativeSync(root);
+        ProjectConfig? cfg;
+        try {
+          cfg = ProjectConfig.load(path: '${root.path}/$kProjectConfigName');
+        } on Object {
+          // No config: the copy file, if any, is read as before.
+        }
+        plan = planNativeSync(root,
+            arbDir: cfg?.arbDir, permissionKeys: cfg?.iosPermissionKeys);
       } on StateError catch (e) {
         _toolResult(id, <String, dynamic>{'ok': false, 'message': e.message});
         return;

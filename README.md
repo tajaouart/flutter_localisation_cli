@@ -355,12 +355,31 @@ locale:
 }
 ```
 
-They are **not** dashboard keys. Nothing in that file ever reaches Dart, so
-putting it through the ARB pipeline would buy nothing and cost a translation
-round-trip; translate it once and commit it. A locale in the app with no entry
-here is a hard failure rather than a silent fallback to English — a fluent-
-looking alert in the wrong language is the bug this command exists to prevent.
-`--init-copy` writes a starter from whatever your `Info.plist` says today.
+A locale in the app with no entry here is a hard failure rather than a silent
+fallback to English — a fluent-looking alert in the wrong language is the bug
+this command exists to prevent. `--init-copy` writes a starter from whatever
+your `Info.plist` says today.
+
+**Or keep the sentences in the project, as ordinary keys.** Thirty languages of
+a hand-kept JSON file is a second translation job. Add the sentences as
+translation keys (`iosCameraUsage`, ...), and name them in
+`flutterlocalisation.json`:
+
+```json
+{
+  "project": "My App",
+  "arb_dir": "arbs/Default",
+  "ios_permission_keys": {
+    "NSCameraUsageDescription": "iosCameraUsage",
+    "NSMicrophoneUsageDescription": "iosMicrophoneUsage"
+  }
+}
+```
+
+`fl native` then reads them from the ARBs, the copy file is not needed, and
+`fl sync` ends with `fl native`: one command takes a change of wording from the
+service to the Dart and to the permission alerts. A locale whose key has no
+text stops the command and is named.
 
 `fl native` also writes `locales_config.xml` if the project has none and points
 `<application android:localeConfig>` at it, since a file nothing references is

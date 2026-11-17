@@ -196,6 +196,96 @@ void main() {
         expect('${r.out}${r.err}', isNot(contains('Could not find package')));
       });
 
+      group('with the iOS permission alerts in translation keys', () {
+        late String key;
+
+        setUp(() async {
+          Directory(p.join(tmp.path, 'ios', 'Runner'))
+              .createSync(recursive: true);
+          File(p.join(tmp.path, 'ios', 'Runner', 'Info.plist'))
+              .writeAsStringSync('<?xml version="1.0" encoding="UTF-8"?>\n'
+                  '<plist version="1.0">\n<dict>\n'
+                  '\t<key>NSCameraUsageDescription</key>\n'
+                  '\t<string>Old sentence.</string>\n</dict>\n</plist>\n');
+          // Whatever name the service gives its one key in an ARB.
+          expect((await fl(<String>['pull'])).code, 0);
+          final Map<String, dynamic> en = jsonDecode(
+            File(p.join(tmp.path, 'lib', 'l10n', 'app_en.arb'))
+                .readAsStringSync(),
+          ) as Map<String, dynamic>;
+          key = en.keys.firstWhere((final String k) => !k.startsWith('@'));
+          writeConfig(<String, Object>{
+            'arb_dir': 'lib/l10n',
+            'ios_permission_keys': <String, String>{
+              'NSCameraUsageDescription': key,
+            },
+          });
+        });
+
+        String strings() => File(p.join(
+                tmp.path, 'ios', 'Runner', 'en.lproj', 'InfoPlist.strings'))
+            .readAsStringSync();
+
+        test('sync ends with the native files, written from the ARBs',
+            () async {
+          final Run r =
+              await flWith(<String>['sync'], path: fakeFlutter(0, 'generated'));
+          expect(r.code, 0, reason: r.err);
+          expect(r.out, contains('Updated '));
+          expect(r.out, contains('✓ In sync: service → ARBs → Dart → native.'));
+          expect(strings(), contains('from the project translations'));
+          expect(
+              strings(),
+              contains(
+                  '"NSCameraUsageDescription" = "Cleaning… {arg1} s left";'));
+          expect(
+              File(p.join(tmp.path, 'ios', 'Runner', 'Info.plist'))
+                  .readAsStringSync(),
+              allOf(contains('CFBundleLocalizations'),
+                  contains('<string>Cleaning… {arg1} s left</string>')));
+
+          final Run again =
+              await flWith(<String>['sync'], path: fakeFlutter(0, 'generated'));
+          expect(again.code, 0, reason: again.err);
+          expect(again.out, contains('alerts are current.'));
+        });
+
+        test('fl native reads them too, and --check passes afterwards',
+            () async {
+          final Run stale = await fl(<String>['native', '--check']);
+          expect(stale.code, 1);
+          final Run r = await fl(<String>['native']);
+          expect(r.code, 0, reason: r.err);
+          expect(strings(), contains('"NSCameraUsageDescription"'));
+          expect((await fl(<String>['native', '--check'])).code, 0);
+        });
+
+        test('a key the ARBs do not have fails the sync and names it',
+            () async {
+          writeConfig(<String, Object>{
+            'arb_dir': 'lib/l10n',
+            'ios_permission_keys': <String, String>{
+              'NSCameraUsageDescription': 'iosCameraUsage',
+            },
+          });
+          final Run r =
+              await flWith(<String>['sync'], path: fakeFlutter(0, 'generated'));
+          expect(r.code, 1);
+          expect(r.err, contains('en: iosCameraUsage'));
+          expect(r.out, isNot(contains('✓ In sync')));
+        });
+
+        test('a wrong shape in the config is refused by fl native', () async {
+          writeConfig(<String, Object>{
+            'arb_dir': 'lib/l10n',
+            'ios_permission_keys': <String>['iosCameraUsage'],
+          });
+          final Run r = await fl(<String>['native']);
+          expect(r.code, 1);
+          expect(r.err, contains('"ios_permission_keys" must map'));
+        });
+      });
+
       test('a failing gen-l10n fails the sync and shows what it said',
           () async {
         final Run r = await flWith(<String>['sync'],
