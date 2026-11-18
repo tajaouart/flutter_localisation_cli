@@ -107,22 +107,32 @@ Map<String, dynamic> _stringsOf(final File file) {
 /// What `fl pull --adopt` imports for an app with several catalogs: the
 /// service has one flat set of keys, and a string shared by the app and its
 /// widget is one key there.
+///
+/// [only] keeps just those keys: the new ones are all an import needs, and a
+/// whole app in thirty languages is too large for one upload.
 Map<String, dynamic> mergeTargetCatalogs(
   final List<CatalogTarget> targets, {
   final String sourceLanguage = 'en',
+  final Set<String>? only,
 }) {
-  final Map<String, dynamic> strings = <String, dynamic>{};
+  final Map<String, dynamic> all = <String, dynamic>{};
+  final Map<String, dynamic> strings = only == null ? all : <String, dynamic>{};
   for (final CatalogTarget target in targets) {
     _stringsOf(target.localizable).forEach((final String key, final dynamic v) {
       // Xcode extracts Text("") as an empty key, which the service refuses.
-      if (key.isNotEmpty) strings.putIfAbsent(key, () => v);
+      if (key.isNotEmpty) all.putIfAbsent(key, () => v);
     });
     final String? prefix = target.infoPlistPrefix;
     if (prefix != null) {
       _stringsOf(target.infoPlist).forEach((final String key, final dynamic v) {
-        strings.putIfAbsent('$prefix$key', () => v);
+        all.putIfAbsent('$prefix$key', () => v);
       });
     }
+  }
+  if (only != null) {
+    all.forEach((final String key, final dynamic v) {
+      if (only.contains(key)) strings[key] = v;
+    });
   }
   return <String, dynamic>{
     'sourceLanguage': sourceLanguage,

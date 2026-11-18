@@ -578,8 +578,8 @@ void main() {
       expect(sent.hasLanguage, isFalse);
       expect(sent.autoTranslate, isTrue);
       expect(sent.body, contains('Brand new'));
-      expect(sent.body, contains('running %lld'),
-          reason: 'one catalog, every target');
+      expect(sent.body, isNot(contains('running %lld')),
+          reason: 'only the new keys travel: a whole app is too large');
       expect(stringsOf(target('App')).keys,
           <String>['Shared', 'Start', 'running %lld']);
     });

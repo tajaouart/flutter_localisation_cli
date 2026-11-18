@@ -1682,8 +1682,8 @@ Future<int> _pullArbs(
           final OpResult imported = await built.ops.adoptCatalog(
             targets == null
                 ? catalog.readAsStringSync()
-                : jsonEncode(
-                    mergeTargetCatalogs(targets, sourceLanguage: base.code)),
+                : jsonEncode(mergeTargetCatalogs(targets,
+                    sourceLanguage: base.code, only: catalogOrphans.toSet())),
             fileName: kLocalizableCatalog,
           );
           if (!imported.ok) {

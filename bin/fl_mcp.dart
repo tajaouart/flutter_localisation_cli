@@ -941,7 +941,8 @@ Future<void> _callTool(
           targets == null
               ? catalogFile.readAsStringSync()
               : jsonEncode(mergeTargetCatalogs(targets,
-                  sourceLanguage: p.baseLanguage(target.flavor)?.code ?? 'en')),
+                  sourceLanguage: p.baseLanguage(target.flavor)?.code ?? 'en',
+                  only: catalogOrphans.toSet())),
           fileName: kLocalizableCatalog,
         );
         if (!imported.ok) {

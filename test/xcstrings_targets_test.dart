@@ -143,6 +143,17 @@ void main() {
       expect(isCatalogJson(merged), isTrue);
     });
 
+    test('merge can keep only the keys an import needs', () {
+      final Map<String, dynamic> strings = mergeTargetCatalogs(targets,
+          only: <String>{
+            'Widget',
+            'mac.NSMicrophoneUsageDescription',
+            'x'
+          })['strings'] as Map<String, dynamic>;
+      expect(
+          strings.keys, <String>['Widget', 'mac.NSMicrophoneUsageDescription']);
+    });
+
     test('local-only keys are named by their service key', () {
       expect(
         localOnlyTargetKeys(targets, <String>{'Start', 'Shared'}),

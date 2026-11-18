@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.22.1] - 2026-11-18
+### Fixed
+- `fl pull --adopt` in an app with several catalogs sent every string of every target, which a
+  large app's upload limit refused ("Request Entity Too Large"). It sends the new keys only.
+
 ## [1.22.0] - 2026-11-18
 ### Added
 - **iOS apps with a String Catalog per target.** `"xcstrings_catalogs": ["App", "Widgets"]` in
