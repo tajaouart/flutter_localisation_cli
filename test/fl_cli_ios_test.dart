@@ -591,7 +591,7 @@ void main() {
       expect(r.code, 1);
       expect('${r.out}${r.err}', contains('No catalog at'));
       expect('${r.out}${r.err}',
-          contains(p.join('Extensions', 'Shield', 'Localizable.xcstrings')));
+          matches(r'Extensions[\\/]Shield[\\/]Localizable\.xcstrings'));
       expect(target('App').readAsStringSync(), before);
     });
 
