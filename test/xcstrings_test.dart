@@ -181,7 +181,7 @@ void main() {
           return _json(_project(<String>['ios']));
         }
         final String table = req.url.queryParameters['table'] ?? '';
-        return _json(table == 'InfoPlist' ? kEmptyInfoPlist : kServedCatalog);
+        return _json(table == 'Localizable' ? kServedCatalog : kEmptyInfoPlist);
       });
 
       final OpResult r = await _ops(mock).exportCatalogs(tmp.path);
@@ -192,6 +192,7 @@ void main() {
         <String>[
           'GET /api/project/7/export/?flavor_id=3&format=xcstrings&table=Localizable',
           'GET /api/project/7/export/?flavor_id=3&format=xcstrings&table=InfoPlist',
+          'GET /api/project/7/export/?flavor_id=3&format=xcstrings&table=AppShortcuts',
         ],
       );
       expect(File(p.join(tmp.path, kLocalizableCatalog)).readAsStringSync(),

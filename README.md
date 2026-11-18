@@ -300,7 +300,38 @@ fl export Gush/Resources                         # same, straight from the API, 
 formatting, so a build does not rewrite the file and the mirror never sees a diff. The
 local-only guard applies to the catalog too: a key added in Xcode and never imported stops a
 pull; `--adopt` imports it first. An iOS-only project has no ARBs and `fl sync` skips the
-Dart codegen for it.
+Dart codegen for it. App Shortcut phrases (keys with `${applicationName}`) go to
+`AppShortcuts.xcstrings`, the only catalog Xcode reads them from.
+
+**An app with several targets** (the app, a widget, an extension) has one
+`Localizable.xcstrings` per target, and Xcode decides which string goes where when it extracts
+them from the code. The project still holds one flat set of keys. List the folders:
+
+```json
+{
+  "project": "Reelfree",
+  "xcstrings_catalogs": ["App", "Extensions/Widgets", "Extensions/Shield"]
+}
+```
+
+`fl pull` then writes into each catalog the keys that catalog declares, every language filled
+in, in Xcode's formatting. A string shared by two targets is one key on the service and lands
+in both files. Keys on the service that no catalog declares are counted and named, not
+written. The whole round after adding strings in the code:
+
+```bash
+xcodebuild -exportLocalizations -project App.xcodeproj -localizationPath build/loc -exportLanguage en
+fl pull --adopt    # new keys up in one import, translated, then every catalog back
+```
+
+The first line is Xcode's own extraction: it writes the new strings into each target's
+catalog (a build in Xcode does the same). `InfoPlist.xcstrings` and `AppShortcuts.xcstrings`
+go to the first folder. A target with an Info.plist of its own (a Mac app beside the iPhone
+one) keeps its permission sentences under a prefix:
+`{"dir": "Mac", "infoplist_prefix": "mac."}` writes the key
+`mac.NSMicrophoneUsageDescription` to `Mac/InfoPlist.xcstrings` as
+`NSMicrophoneUsageDescription`. With `xcstrings_catalogs` the files are written from the API,
+since the git mirror holds the one catalog the service renders.
 
 Placeholders map by type: `{name}` becomes `%@`, an `int` becomes `%lld`, a `double` `%lf`;
 with more than one argument they are numbered (`%1$@`, `%2$lld`). ICU plurals become plural

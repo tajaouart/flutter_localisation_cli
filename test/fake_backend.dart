@@ -165,6 +165,16 @@ class FakeBackend {
   /// an entry has no row.
   Map<String, Map<String, dynamic>> targets = <String, Map<String, dynamic>>{};
 
+  /// More keys of the base language, beside the one every flavor holds.
+  List<String> extraKeys = <String>[];
+
+  /// The `Localizable` catalog to serve in place of [kServedCatalog].
+  String? servedCatalog;
+
+  /// The `AppShortcuts` catalog; null answers as a service from before it
+  /// had one, with a 400.
+  String? appShortcuts;
+
   /// What the translator is told for every language.
   String projectInstructions = '';
 
@@ -231,6 +241,12 @@ class FakeBackend {
                         },
                       },
                     },
+                    for (int k = 0; k < extraKeys.length; k++)
+                      <String, dynamic>{
+                        'id': 900 + i * 100 + k,
+                        'key': extraKeys[k],
+                        'value': extraKeys[k],
+                      },
                   ],
                 },
               ],
@@ -360,7 +376,18 @@ class FakeBackend {
       }));
     } else if (req.method == 'GET' && path == '/api/project/7/export/') {
       final String table = req.uri.queryParameters['table'] ?? 'Localizable';
-      res.write(table == 'InfoPlist' ? kEmptyInfoPlist : kServedCatalog);
+      if (table == 'AppShortcuts' && appShortcuts == null) {
+        res.statusCode = HttpStatus.badRequest;
+        res.write(jsonEncode(<String, String>{
+          'error': 'table must be Localizable or InfoPlist.',
+        }));
+      } else {
+        res.write(switch (table) {
+          'InfoPlist' => kEmptyInfoPlist,
+          'AppShortcuts' => appShortcuts!,
+          _ => servedCatalog ?? kServedCatalog,
+        });
+      }
     } else if (req.method == 'POST' && path == '/api/project/7/import-arb/') {
       final String body = await utf8.decoder.bind(req).join();
       final ReceivedImport received = ReceivedImport(body);

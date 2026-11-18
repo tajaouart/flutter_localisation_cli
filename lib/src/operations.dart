@@ -2077,19 +2077,45 @@ extension ArbExport on Operations {
   /// look for one. A string the backend cannot express (an ICU `select`)
   /// comes back as a 422 whose details name the keys; that is the whole
   /// message, so it is passed through unchanged.
+  ///
+  /// With [targets] (an app with several catalogs) `Localizable` is cut into
+  /// each target's file, see [splitCatalog]; the other tables go to [dir].
   Future<OpResult> exportCatalogs(
     final String dir, {
     final bool dryRun = false,
     final ProjectData? fetched,
+    final List<CatalogTarget>? targets,
   }) async {
     final ProjectData project = fetched ?? await client.getProject(projectId);
     final FlavorData f = project.flavor(flavor);
     final List<Map<String, dynamic>> written = <Map<String, dynamic>>[];
-    for (final String table in <String>['Localizable', 'InfoPlist']) {
+    final List<String> unassigned = <String>[];
+    if (targets != null) {
+      final List<String> missing = <String>[
+        for (final CatalogTarget t in targets)
+          if (!t.localizable.existsSync()) t.localizable.path,
+      ];
+      if (missing.isNotEmpty) {
+        return OpResult(
+          false,
+          'No catalog at ${missing.join(', ')}. Each folder of '
+          '"xcstrings_catalogs" needs the Localizable.xcstrings Xcode keeps '
+          'for that target: the keys it declares are the ones it is given.',
+          <String, dynamic>{'missing': missing},
+        );
+      }
+    }
+    for (final String table in <String>[
+      'Localizable',
+      'InfoPlist',
+      'AppShortcuts'
+    ]) {
       final String body;
       try {
         body = await client.downloadCatalog(projectId, f.id, table: table);
       } on ApiException catch (e) {
+        // A service from before App Shortcut phrases had a catalog.
+        if (table == 'AppShortcuts' && e.statusCode == 400) continue;
         if (e.statusCode != 422) rethrow;
         final List<String> details = <String>[
           for (final Object? d
@@ -2103,7 +2129,20 @@ extension ArbExport on Operations {
         );
       }
       final int keys = catalogKeys(jsonDecode(body)).length;
-      if (table == 'InfoPlist' && keys == 0) continue;
+      if (table != 'Localizable' && keys == 0) continue;
+      if (table == 'Localizable' && targets != null) {
+        final ({Map<String, String> files, List<String> unassigned}) cut =
+            splitCatalog(body, targets);
+        unassigned.addAll(cut.unassigned);
+        cut.files.forEach((final String path, final String content) {
+          written.add(<String, dynamic>{
+            'file': _shown(path),
+            'keys': catalogKeys(jsonDecode(content)).length,
+          });
+          if (!dryRun) File(path).writeAsStringSync(content);
+        });
+        continue;
+      }
       final String file = '$table.xcstrings';
       written.add(<String, dynamic>{'file': file, 'keys': keys});
       if (dryRun) continue;
@@ -2114,10 +2153,24 @@ extension ArbExport on Operations {
     return OpResult(
       true,
       '${dryRun ? 'DRY RUN: would write' : 'Wrote'} ${written.length} '
-      'String Catalog(s) to $dir '
-      '(${written.map((final Map<String, dynamic> w) => w['file']).join(', ')}).',
-      <String, dynamic>{'files': written, 'dir': dir},
+      'String Catalog(s)${targets == null ? ' to $dir' : ''} '
+      '(${written.map((final Map<String, dynamic> w) => w['file']).join(', ')}).'
+      '${unassigned.isEmpty ? '' : '\n${unassigned.length} key(s) on the '
+          'service are in none of the catalogs, so in no file (strings the '
+          'code no longer uses?): ${unassigned.take(8).join(', ')}'
+          '${unassigned.length > 8 ? ', …' : ''}'}',
+      <String, dynamic>{
+        'files': written,
+        'dir': dir,
+        if (targets != null) 'unassigned': unassigned,
+      },
     );
+  }
+
+  /// [path] as the user would type it from where they stand.
+  static String _shown(final String path) {
+    final String here = '${Directory.current.path}${Platform.pathSeparator}';
+    return path.startsWith(here) ? path.substring(here.length) : path;
   }
 
   /// The `@@last_modified` value to write for one locale.

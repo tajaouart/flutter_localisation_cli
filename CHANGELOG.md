@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.22.0] - 2026-11-18
+### Added
+- **iOS apps with a String Catalog per target.** `"xcstrings_catalogs": ["App", "Widgets"]` in
+  `flutterlocalisation.json` lists the folders that each hold a `Localizable.xcstrings`.
+  `fl pull` and `fl export` write into each catalog the keys it declares, in Xcode's
+  formatting; `fl pull --adopt` imports the new keys of all of them in one request. Keys of the
+  service that no catalog declares are named. A folder written
+  `{"dir": "Mac", "infoplist_prefix": "mac."}` gets an `InfoPlist.xcstrings` of its own from
+  the keys under that prefix.
+- **`AppShortcuts.xcstrings`.** App Shortcut phrases (`Open ${applicationName}`) are written to
+  their own catalog, with the app name token as written. In `Localizable.xcstrings` Xcode did
+  not read them, and the token came out as `$%@`.
+
 ## [1.21.0] - 2026-11-17
 ### Added
 - **iOS permission alerts from translation keys.** `"ios_permission_keys"` in

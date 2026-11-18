@@ -18,6 +18,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'package:flutter_localisation_cli/src/exceptions.dart';
+import 'package:flutter_localisation_cli/src/xcstrings.dart';
 
 const String kDefaultBaseUrl = 'https://api.flutterlocalisation.com';
 const String kProjectConfigName = 'flutterlocalisation.json';
@@ -32,6 +33,7 @@ class ProjectConfig {
     this.arbDir,
     this.xcstringsDir,
     this.iosPermissionKeys,
+    this.xcstringsCatalogs,
     this.root,
   });
 
@@ -51,6 +53,14 @@ class ProjectConfig {
   /// points this at its Xcode resources folder.
   final String? xcstringsDir;
 
+  /// `xcstrings_catalogs`: the folders of an iOS app with several targets
+  /// (the app, a widget, an extension), each holding the
+  /// `Localizable.xcstrings` of its own code. The service keeps one flat set
+  /// of keys; `fl pull` writes into each catalog the keys it declares. The
+  /// first folder also takes `InfoPlist.xcstrings` and
+  /// `AppShortcuts.xcstrings`.
+  final List<CatalogTarget>? xcstringsCatalogs;
+
   /// `ios_permission_keys`: Info.plist key to the translation key holding its
   /// sentence (`NSCameraUsageDescription` to `iosCameraUsage`). With it,
   /// `fl native` reads the iOS permission alerts from the ARBs and `fl sync`
@@ -58,7 +68,8 @@ class ProjectConfig {
   final Map<String, String>? iosPermissionKeys;
 
   /// The catalog folder in effect: `xcstrings_dir`, else `arb_dir`, else here.
-  String get catalogDir => xcstringsDir ?? arbDir ?? '.';
+  String get catalogDir =>
+      xcstringsCatalogs?.first.dir ?? xcstringsDir ?? arbDir ?? '.';
 
   /// The folder holding the config file, which is the app's root; null when
   /// no config file was found.
@@ -133,6 +144,34 @@ class ProjectConfig {
           '{"NSCameraUsageDescription": "iosCameraUsage"}.');
     }
 
+    String underConfig(final String raw) =>
+        p.isAbsolute(raw) ? raw : p.normalize(p.join(file.parent.path, raw));
+    List<CatalogTarget>? catalogs;
+    final Object? rawCatalogs = json['xcstrings_catalogs'];
+    if (rawCatalogs != null) {
+      Never refuse() => throw ConfigException(
+          '${file.path}: "xcstrings_catalogs" must list the folders that hold '
+          'a Localizable.xcstrings, for example ["App", "Widgets"]. A folder '
+          'with an Info.plist of its own is written '
+          '{"dir": "Mac", "infoplist_prefix": "mac."}.');
+      if (rawCatalogs is! List || rawCatalogs.isEmpty) refuse();
+      catalogs = <CatalogTarget>[
+        for (final Object? entry in rawCatalogs)
+          if (entry is String && entry.isNotEmpty)
+            CatalogTarget(underConfig(entry))
+          else if (entry is Map &&
+              entry['dir'] is String &&
+              (entry['dir'] as String).isNotEmpty &&
+              (entry['infoplist_prefix'] == null ||
+                  (entry['infoplist_prefix'] is String &&
+                      (entry['infoplist_prefix'] as String).isNotEmpty)))
+            CatalogTarget(underConfig(entry['dir'] as String),
+                infoPlistPrefix: entry['infoplist_prefix'] as String?)
+          else
+            refuse(),
+      ];
+    }
+
     return ProjectConfig(
       baseUrl: text('base_url')?.trimRight() ?? kDefaultBaseUrl,
       projectId: pid is int ? pid : null,
@@ -140,6 +179,7 @@ class ProjectConfig {
       flavor: text('flavor'),
       arbDir: relativeToConfig('arb_dir'),
       xcstringsDir: relativeToConfig('xcstrings_dir'),
+      xcstringsCatalogs: catalogs,
       iosPermissionKeys: permissionKeys == null
           ? null
           : Map<String, String>.from(permissionKeys as Map<dynamic, dynamic>),

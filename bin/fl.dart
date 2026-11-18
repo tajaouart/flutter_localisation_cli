@@ -1546,6 +1546,7 @@ Future<int> _pullArbs(
   final ProjectConfig cfg = cmd.loadProject();
   final String arbDir = cfg.arbDir ?? '.';
   final String catalogDir = cfg.catalogDir;
+  final List<CatalogTarget>? targets = cfg.xcstringsCatalogs;
 
   final ({ManagementClient client, Operations ops, String projectName}) built =
       await cmd.build(cfg);
@@ -1573,8 +1574,11 @@ Future<int> _pullArbs(
     // strings from a repository the project left.
     final GitMirror mirror = GitMirror(dir);
     final GitRepository? linked = project.repository;
+    // The mirror holds the one catalog the service writes; an app that cuts
+    // it into several is written from the API.
+    final bool skipGit = noGit || (targets != null && !project.shipsFlutter);
     final ({String name, String url, String root})? local =
-        noGit || linked == null ? null : await mirror.remote();
+        skipGit || linked == null ? null : await mirror.remote();
     final bool appRepo = local != null &&
         _contains(local.root, cfg.root ?? Directory.current.path);
     // Relinking the project in the dashboard leaves the old clone behind,
@@ -1615,27 +1619,32 @@ Future<int> _pullArbs(
     final List<String> orphans = project.shipsFlutter
         ? localOnlyKeys(template, serviceKeys)
         : <String>[];
-    final List<String> catalogOrphans = project.shipsIos
-        ? localOnlyCatalogKeys(catalog, serviceKeys)
-        : <String>[];
+    final List<String> catalogOrphans = !project.shipsIos
+        ? <String>[]
+        : targets != null
+            ? localOnlyTargetKeys(targets, serviceKeys)
+            : localOnlyCatalogKeys(catalog, serviceKeys);
+    final String catalogName = targets == null
+        ? kLocalizableCatalog
+        : 'The ${targets.length} catalogs of "xcstrings_catalogs"';
     final List<({String file, List<String> keys})> staged =
         <({String file, List<String> keys})>[
       if (orphans.isNotEmpty) (file: templateName, keys: orphans),
-      if (catalogOrphans.isNotEmpty)
-        (file: kLocalizableCatalog, keys: catalogOrphans),
+      if (catalogOrphans.isNotEmpty) (file: catalogName, keys: catalogOrphans),
     ];
     if (staged.isNotEmpty && !adopt && !discardLocal && fromInit) {
       for (final ({String file, List<String> keys}) entry in staged) {
-        stdout.writeln('${entry.file} has ${entry.keys.length} key(s) the '
-            'service does not have yet.');
+        stdout.writeln(
+            '${entry.file} ${entry.file.startsWith('The ') ? 'have' : 'has'} '
+            '${entry.keys.length} key(s) the service does not have yet.');
       }
       return _kLocalOnlyKeys;
     }
     if (staged.isNotEmpty && !adopt && !discardLocal) {
       for (final ({String file, List<String> keys}) entry in staged) {
         stderr.writeln(
-            '${entry.file} has ${entry.keys.length} key(s) the service does '
-            'not have yet:');
+            '${entry.file} ${entry.file.startsWith('The ') ? 'have' : 'has'} '
+            '${entry.keys.length} key(s) the service does not have yet:');
         for (final String k in entry.keys.take(20)) {
           stderr.writeln('  $k');
         }
@@ -1669,9 +1678,12 @@ Future<int> _pullArbs(
         }
         if (catalogOrphans.isNotEmpty) {
           say.writeln('Importing ${catalogOrphans.length} local-only key(s) '
-              'from $kLocalizableCatalog …');
+              'from ${targets == null ? kLocalizableCatalog : 'the catalogs'} …');
           final OpResult imported = await built.ops.adoptCatalog(
-            catalog.readAsStringSync(),
+            targets == null
+                ? catalog.readAsStringSync()
+                : jsonEncode(
+                    mergeTargetCatalogs(targets, sourceLanguage: base.code)),
             fileName: kLocalizableCatalog,
           );
           if (!imported.ok) {
@@ -1691,7 +1703,7 @@ Future<int> _pullArbs(
     // Git when it can deliver, API when it cannot. Same outcome either way,
     // which is why the fallback is silent enough to be routine and loud
     // enough to explain itself.
-    if (!noGit) {
+    if (!skipGit) {
       final GitSyncOutcome outcome = await mirror.syncMirrorOf(
         linked?.url,
         appRoot: cfg.root ?? Directory.current.path,
@@ -1738,6 +1750,7 @@ Future<int> _pullArbs(
       project,
       arbDir: arbDir,
       catalogDir: catalogDir,
+      targets: targets,
       stale: staged.isNotEmpty && adopt,
     );
     if (cmd.jsonOut) {
@@ -1768,6 +1781,7 @@ Future<OpResult> _exportFromApi(
   final ProjectData project, {
   required final String arbDir,
   required final String catalogDir,
+  final List<CatalogTarget>? targets,
   final bool dryRun = false,
   final bool stale = false,
 }) async {
@@ -1778,7 +1792,8 @@ Future<OpResult> _exportFromApi(
     if (project.shipsFlutter)
       await ops.exportArbs(arbDir, dryRun: dryRun, fetched: fetched),
     if (project.shipsIos)
-      await ops.exportCatalogs(catalogDir, dryRun: dryRun, fetched: fetched),
+      await ops.exportCatalogs(catalogDir,
+          dryRun: dryRun, fetched: fetched, targets: targets),
   ];
   final OpResult? failed = results
       .cast<OpResult?>()
@@ -2376,8 +2391,11 @@ class ExportCommand extends Command<int> with _ApiCommand {
       // A given directory is where the files go, whichever kind they are;
       // without one each kind has its own configured home.
       final String arbDir = positional ?? cfg.arbDir ?? 'arbs/Default';
+      // Into a given directory the catalog is written whole, as served.
+      final List<CatalogTarget>? targets =
+          positional == null ? cfg.xcstringsCatalogs : null;
       final String catalogDir = positional ??
-          (project.shipsFlutter
+          (project.shipsFlutter || targets != null
               ? cfg.catalogDir
               : cfg.xcstringsDir ?? cfg.arbDir ?? '.');
       // The same hazard `pull` guards: this rewrites the files from the
@@ -2400,7 +2418,12 @@ class ExportCommand extends Command<int> with _ApiCommand {
                 file: '$arbDir/$template',
                 keys: localOnlyKeys(File('$arbDir/$template'), serviceKeys),
               ),
-            if (project.shipsIos)
+            if (project.shipsIos && targets != null)
+              (
+                file: 'the catalogs of "xcstrings_catalogs"',
+                keys: localOnlyTargetKeys(targets, serviceKeys),
+              )
+            else if (project.shipsIos)
               (
                 file: '$catalogDir/$kLocalizableCatalog',
                 keys: localOnlyCatalogKeys(
@@ -2413,9 +2436,11 @@ class ExportCommand extends Command<int> with _ApiCommand {
                 '${entry.file} holds ${entry.keys.length} key(s) the service '
                 'does not have: ${entry.keys.take(10).join(', ')}'
                 '${entry.keys.length > 10 ? ', …' : ''}');
-            stderr.writeln('Exporting would overwrite them. Import them first '
-                '(`fl import ${entry.file} --translate`), or run '
-                '`fl pull --adopt`, or force with `--discard-local`.');
+            stderr.writeln('Exporting would overwrite them. '
+                '${targets != null ? 'Run `fl pull --adopt` to import them '
+                    'first' : 'Import them first (`fl import ${entry.file} '
+                    '--translate`), or run `fl pull --adopt`'}, or force '
+                'with `--discard-local`.');
             return 1;
           }
         }
@@ -2425,6 +2450,7 @@ class ExportCommand extends Command<int> with _ApiCommand {
         project,
         arbDir: arbDir,
         catalogDir: catalogDir,
+        targets: targets,
         dryRun: dryRun,
       );
       if (jsonOut) return emit(r);

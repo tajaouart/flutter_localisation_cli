@@ -880,9 +880,13 @@ Future<void> _callTool(
       final List<String> orphans = p.shipsFlutter
           ? localOnlyKeys(templateFile, serviceKeys)
           : <String>[];
-      final List<String> catalogOrphans = p.shipsIos
-          ? localOnlyCatalogKeys(catalogFile, serviceKeys)
-          : <String>[];
+      final List<CatalogTarget>? targets =
+          a['dir'] == null ? cfg.xcstringsCatalogs : null;
+      final List<String> catalogOrphans = !p.shipsIos
+          ? <String>[]
+          : targets != null
+              ? localOnlyTargetKeys(targets, serviceKeys)
+              : localOnlyCatalogKeys(catalogFile, serviceKeys);
       final bool adopt = (a['adopt'] ?? false) as bool;
       final bool discardLocal = (a['discard_local'] ?? false) as bool;
 
@@ -934,7 +938,10 @@ Future<void> _callTool(
       }
       if (catalogOrphans.isNotEmpty && adopt) {
         final OpResult imported = await ops.adoptCatalog(
-          catalogFile.readAsStringSync(),
+          targets == null
+              ? catalogFile.readAsStringSync()
+              : jsonEncode(mergeTargetCatalogs(targets,
+                  sourceLanguage: p.baseLanguage(target.flavor)?.code ?? 'en')),
           fileName: kLocalizableCatalog,
         );
         if (!imported.ok) {
@@ -947,10 +954,14 @@ Future<void> _callTool(
         steps.add(imported.message);
       }
 
-      final GitSyncOutcome outcome = await GitMirror(dir).syncMirrorOf(
-        p.repository?.url,
-        appRoot: cfg.root ?? Directory.current.path,
-      );
+      // An app that cuts the catalog into several is written from the API:
+      // the mirror holds the one catalog the service writes.
+      final GitSyncOutcome outcome = targets != null && !p.shipsFlutter
+          ? const GitSyncOutcome.skipped(GitSkipReason.notARepo)
+          : await GitMirror(dir).syncMirrorOf(
+              p.repository?.url,
+              appRoot: cfg.root ?? Directory.current.path,
+            );
       if (outcome.ok) {
         _toolResult(id, <String, dynamic>{
           'ok': true,
@@ -972,7 +983,7 @@ Future<void> _callTool(
       }
       final List<OpResult> written = <OpResult>[
         if (p.shipsFlutter) await ops.exportArbs(arbDir),
-        if (p.shipsIos) await ops.exportCatalogs(catalogDir),
+        if (p.shipsIos) await ops.exportCatalogs(catalogDir, targets: targets),
       ];
       final OpResult exported = OpResult(
         written.every((final OpResult r) => r.ok),

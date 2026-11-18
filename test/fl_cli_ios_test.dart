@@ -403,4 +403,227 @@ void main() {
     expect(r.code, 0, reason: r.err);
     expect(r.out, contains('"ios"'));
   });
+
+  group('an app with a catalog per target', () {
+    Map<String, dynamic> unit(final String value) => <String, dynamic>{
+          'stringUnit': <String, String>{'state': 'translated', 'value': value},
+        };
+    Map<String, dynamic> entry(final String en, [final String? fr]) =>
+        <String, dynamic>{
+          'localizations': <String, dynamic>{
+            'en': unit(en),
+            if (fr != null) 'fr': unit(fr),
+          },
+        };
+    String catalogOf(final Map<String, dynamic> strings) =>
+        jsonEncode(<String, dynamic>{
+          'sourceLanguage': 'en',
+          'strings': strings,
+          'version': '1.0',
+        });
+    File target(final String dir, [final String name = 'Localizable']) =>
+        File(p.join(tmp.path, dir, '$name.xcstrings'));
+    Map<String, dynamic> stringsOf(final File file) =>
+        (jsonDecode(file.readAsStringSync()) as Map<String, dynamic>)['strings']
+            as Map<String, dynamic>;
+    void write(final File file, final Map<String, dynamic> strings) => file
+      ..createSync(recursive: true)
+      ..writeAsStringSync(catalogOf(strings));
+    void config(final List<Object> catalogs) =>
+        File(p.join(tmp.path, 'flutterlocalisation.json'))
+            .writeAsStringSync(jsonEncode(<String, Object>{
+          'base_url': backend.url,
+          'project': 'Gush',
+          'xcstrings_catalogs': catalogs,
+        }));
+
+    setUp(() {
+      backend
+        ..extraKeys = <String>[
+          'Start',
+          'Shared',
+          'Widget title',
+          'Gone',
+          'mac.NSMicrophoneUsageDescription',
+        ]
+        ..servedCatalog = catalogOf(<String, dynamic>{
+          'running %lld': entry('Cleaning… %lld s left', 'Nettoyage… %lld s'),
+          'Start': entry('Start', 'Démarrer'),
+          'Shared': entry('Shared', 'Partagé'),
+          'Widget title': entry('Widget title', 'Titre du widget'),
+          'Gone': entry('Gone', 'Parti'),
+          'mac.NSMicrophoneUsageDescription': entry('Mac hears you', 'Le Mac'),
+        })
+        ..appShortcuts = null;
+      // What Xcode left after extracting the strings of each target: the keys,
+      // and nothing translated yet.
+      write(target('App'), <String, dynamic>{
+        'running %lld': <String, dynamic>{},
+        'Start': <String, dynamic>{},
+        'Shared': <String, dynamic>{},
+        '': <String, dynamic>{},
+      });
+      write(target('Extensions/Widgets'), <String, dynamic>{
+        'Shared': <String, dynamic>{},
+        'Widget title': <String, dynamic>{},
+      });
+      config(<Object>['App', 'Extensions/Widgets']);
+    });
+    tearDown(() {
+      backend
+        ..extraKeys = <String>[]
+        ..servedCatalog = null
+        ..appShortcuts = null;
+    });
+
+    test('pull gives each catalog the keys it declares, in Xcode\'s format',
+        () async {
+      final Run r = await fl(<String>['pull']);
+      expect(r.code, 0, reason: r.err);
+
+      expect(stringsOf(target('App')).keys,
+          <String>['Shared', 'Start', 'running %lld']);
+      expect(stringsOf(target('Extensions/Widgets')).keys,
+          <String>['Shared', 'Widget title']);
+      expect(
+        stringsOf(target('Extensions/Widgets'))['Widget title'],
+        entry('Widget title', 'Titre du widget'),
+      );
+      expect(
+        target('Extensions/Widgets').readAsStringSync(),
+        startsWith('{\n  "sourceLanguage" : "en",\n  "strings" : {\n'
+            '    "Shared" : {\n      "localizations" : {\n        "en" : {\n'),
+      );
+      expect(r.out, contains('Wrote 2 String Catalog(s)'));
+      expect(
+        r.out,
+        contains('2 key(s) on the service are in none of the catalogs'),
+      );
+      expect(r.out, contains('Gone, mac.NSMicrophoneUsageDescription'));
+      expect(target('App', 'AppShortcuts').existsSync(), isFalse,
+          reason: 'an older service has no such catalog, and that is fine');
+      expect(target('App', 'InfoPlist').existsSync(), isFalse);
+    });
+
+    test('a second pull changes no byte', () async {
+      expect((await fl(<String>['pull'])).code, 0);
+      final String app = target('App').readAsStringSync();
+      final String widgets = target('Extensions/Widgets').readAsStringSync();
+      expect((await fl(<String>['pull'])).code, 0);
+      expect(target('App').readAsStringSync(), app);
+      expect(target('Extensions/Widgets').readAsStringSync(), widgets);
+    });
+
+    test('a target with its own Info.plist gets its prefixed keys', () async {
+      write(target('Mac'), <String, dynamic>{'Start': <String, dynamic>{}});
+      config(<Object>[
+        'App',
+        'Extensions/Widgets',
+        <String, String>{'dir': 'Mac', 'infoplist_prefix': 'mac.'},
+      ]);
+      final Run r = await fl(<String>['pull']);
+      expect(r.code, 0, reason: r.err);
+      expect(stringsOf(target('Mac')).keys, <String>['Start']);
+      expect(stringsOf(target('Mac', 'InfoPlist')), <String, dynamic>{
+        'NSMicrophoneUsageDescription': entry('Mac hears you', 'Le Mac'),
+      });
+      expect(r.out, contains('1 key(s) on the service are in none'));
+      expect(
+          stringsOf(target('App')).keys, isNot(contains(startsWith('mac.'))));
+    });
+
+    test('App Shortcut phrases land beside the first catalog', () async {
+      backend.appShortcuts = catalogOf(<String, dynamic>{
+        r'Open ${applicationName}': entry(r'Open ${applicationName}'),
+      });
+      final Run r = await fl(<String>['pull']);
+      expect(r.code, 0, reason: r.err);
+      expect(stringsOf(target('App', 'AppShortcuts')).keys,
+          <String>[r'Open ${applicationName}']);
+      expect(
+          target('Extensions/Widgets', 'AppShortcuts').existsSync(), isFalse);
+    });
+
+    test('a key only a catalog has stops the pull and is named', () async {
+      write(target('Extensions/Widgets'), <String, dynamic>{
+        'Shared': <String, dynamic>{},
+        'Brand new': entry('Brand new'),
+      });
+      final String before = target('App').readAsStringSync();
+      final Run r = await fl(<String>['pull']);
+      expect(r.code, 1);
+      expect(r.err, contains('have 1 key(s) the service does not have yet'));
+      expect(r.err, contains('  Brand new'));
+      expect(r.err, contains('fl pull --adopt'));
+      expect(target('App').readAsStringSync(), before);
+      expect(backend.imports, isEmpty);
+
+      final Run export = await fl(<String>['export']);
+      expect(export.code, 1);
+      expect(export.err, contains('Brand new'));
+      expect(export.err, contains('Run `fl pull --adopt`'));
+    });
+
+    test('pull --adopt imports the union once, then writes every catalog',
+        () async {
+      write(target('Extensions/Widgets'), <String, dynamic>{
+        'Shared': <String, dynamic>{},
+        'Brand new': entry('Brand new'),
+      });
+      final Run r = await fl(<String>['pull', '--adopt']);
+      expect(r.code, 0, reason: r.err);
+      expect(backend.imports, hasLength(1));
+      final ReceivedImport sent = backend.imports.single;
+      expect(sent.fileName, 'Localizable.xcstrings');
+      expect(sent.hasLanguage, isFalse);
+      expect(sent.autoTranslate, isTrue);
+      expect(sent.body, contains('Brand new'));
+      expect(sent.body, contains('running %lld'),
+          reason: 'one catalog, every target');
+      expect(stringsOf(target('App')).keys,
+          <String>['Shared', 'Start', 'running %lld']);
+    });
+
+    test('a folder with no catalog is named, and nothing is written', () async {
+      config(<Object>['App', 'Extensions/Widgets', 'Extensions/Shield']);
+      final String before = target('App').readAsStringSync();
+      final Run r = await fl(<String>['pull']);
+      expect(r.code, 1);
+      expect('${r.out}${r.err}', contains('No catalog at'));
+      expect('${r.out}${r.err}',
+          contains(p.join('Extensions', 'Shield', 'Localizable.xcstrings')));
+      expect(target('App').readAsStringSync(), before);
+    });
+
+    test('export into a folder still writes the whole catalog as served',
+        () async {
+      final Run r = await fl(<String>['export', 'out']);
+      expect(r.code, 0, reason: r.err);
+      expect(target('out').readAsStringSync(), backend.servedCatalog);
+      expect(stringsOf(target('App'))['Start'], <String, dynamic>{},
+          reason: 'the targets are left alone');
+    });
+
+    test('a wrong shape in the config is refused', () async {
+      for (final Object wrong in <Object>[
+        'App',
+        <Object>[],
+        <Object>[3],
+        <Object>[
+          <String, Object>{'infoplist_prefix': 'mac.'}
+        ],
+      ]) {
+        File(p.join(tmp.path, 'flutterlocalisation.json'))
+            .writeAsStringSync(jsonEncode(<String, Object>{
+          'base_url': backend.url,
+          'project': 'Gush',
+          'xcstrings_catalogs': wrong,
+        }));
+        final Run r = await fl(<String>['pull']);
+        expect(r.code, isNot(0), reason: '$wrong');
+        expect(r.err, contains('"xcstrings_catalogs" must list the folders'),
+            reason: '$wrong');
+      }
+    });
+  });
 }
