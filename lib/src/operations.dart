@@ -2144,7 +2144,10 @@ extension ArbExport on Operations {
         continue;
       }
       final String file = '$table.xcstrings';
-      written.add(<String, dynamic>{'file': file, 'keys': keys});
+      written.add(<String, dynamic>{
+        'file': targets == null ? file : _shown('$dir/$file'),
+        'keys': keys,
+      });
       if (dryRun) continue;
       final File out = File('$dir/$file');
       out.parent.createSync(recursive: true);
