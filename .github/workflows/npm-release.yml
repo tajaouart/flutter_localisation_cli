@@ -94,5 +94,11 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/') || inputs.publish
         run: |
           for d in npm/dist/cli-*/ npm/dist/cli/ npm/dist/angular/; do
+            name=$(node -p "require('./$d/package.json').name")
+            version=$(node -p "require('./$d/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already on npm"
+              continue
+            fi
             (cd "$d" && npm publish --access public --provenance)
           done
