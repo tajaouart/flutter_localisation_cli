@@ -81,6 +81,40 @@ bool isNestedNgxFile(final File file) {
   }
 }
 
+/// [body] (a downloaded translation JSON) with its keys in the order the
+/// file at [existing] already has them, objects included; keys the file lacks
+/// follow in the service's order. A pull then rewrites only the lines that
+/// changed instead of sorting the developer's file.
+String orderNgxLike(final String body, final File existing) {
+  if (!existing.existsSync()) return body;
+  final Object? doc = jsonDecode(body);
+  final Object? old;
+  try {
+    old = jsonDecode(existing.readAsStringSync());
+  } on FormatException {
+    return body;
+  }
+  if (doc is! Map<String, dynamic> || old is! Map<String, dynamic>) return body;
+  return '${const JsonEncoder.withIndent('  ').convert(_orderLike(doc, old))}\n';
+}
+
+Map<String, dynamic> _orderLike(
+    final Map<String, dynamic> doc, final Map<String, dynamic> old) {
+  final Map<String, dynamic> out = <String, dynamic>{};
+  for (final String k in old.keys) {
+    if (!doc.containsKey(k)) continue;
+    final Object? v = doc[k];
+    final Object? was = old[k];
+    out[k] = v is Map<String, dynamic> && was is Map<String, dynamic>
+        ? _orderLike(v, was)
+        : v;
+  }
+  for (final MapEntry<String, dynamic> e in doc.entries) {
+    out.putIfAbsent(e.key, () => e.value);
+  }
+  return out;
+}
+
 /// The locales a file name may carry, most likely first: `fr.json`,
 /// `de-DE.json`, `pt_BR.json`, then without a prefix (`frx_fr.json`,
 /// `app_pt_BR.json`). A two-letter language comes before a three-letter one,

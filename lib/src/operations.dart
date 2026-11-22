@@ -2355,7 +2355,7 @@ extension ArbExport on Operations {
       if (dryRun) continue;
       final File out = File(file);
       out.parent.createSync(recursive: true);
-      out.writeAsStringSync(body);
+      out.writeAsStringSync(orderNgxLike(body, out));
     }
     return OpResult(
       true,

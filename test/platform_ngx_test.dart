@@ -113,4 +113,30 @@ void main() {
       expect(isNestedNgxFile(File(p.join(tmp.path, 'none.json'))), isFalse);
     });
   });
+
+  group('orderNgxLike', () {
+    test('keeps the file\'s order, objects included, and appends new keys', () {
+      final Directory tmp = Directory.systemTemp.createTempSync('ngx_order');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final File fr = File('${tmp.path}/fr.json')
+        ..writeAsStringSync(jsonEncode(<String, dynamic>{
+          'z': 'old',
+          'HOME': <String, dynamic>{'TITLE': 't', 'SUB': 's'},
+          'gone': 'x',
+        }));
+      final String body = jsonEncode(<String, dynamic>{
+        'HOME': <String, dynamic>{'SUB': 'S', 'TITLE': 'T', 'NEW': 'n'},
+        'a': 'new',
+        'z': 'Z',
+      });
+      final Map<String, dynamic> out =
+          jsonDecode(orderNgxLike(body, fr)) as Map<String, dynamic>;
+      expect(out.keys, <String>['z', 'HOME', 'a']);
+      expect((out['HOME'] as Map<String, dynamic>).keys,
+          <String>['TITLE', 'SUB', 'NEW']);
+      expect(orderNgxLike(body, File('${tmp.path}/none.json')), body);
+      fr.writeAsStringSync('{broken');
+      expect(orderNgxLike(body, fr), body);
+    });
+  });
 }
