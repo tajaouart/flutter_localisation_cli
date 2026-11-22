@@ -17,6 +17,19 @@ const String kNoUpdateNoticeEnvVar = 'FL_NO_UPDATE_NOTICE';
 const String kUpgradeCommand =
     'dart pub global activate flutter_localisation_cli';
 
+/// Set by the npm launcher of `@flutterlocalisation/cli` to `npm`, so the
+/// upgrade advice names the tool that installed this copy.
+const String kInstalledByEnvVar = 'FL_INSTALLED_BY';
+const String kNpmUpgradeCommand =
+    'npm install --save-dev @flutterlocalisation/cli@latest';
+
+bool installedByNpm([final Map<String, String>? env]) =>
+    (env ?? Platform.environment)[kInstalledByEnvVar] == 'npm';
+
+/// The command that updates this copy, wherever it came from.
+String upgradeCommandFor([final Map<String, String>? env]) =>
+    installedByNpm(env) ? kNpmUpgradeCommand : kUpgradeCommand;
+
 /// A newer version the service told this process about.
 class UpdateNotice {
   UpdateNotice({required this.latest, this.reason, this.command});
@@ -93,7 +106,7 @@ class UpdateNotice {
   String describe(final String name) =>
       '$name $latest is available (this is $kCliVersion).'
       '${reason == null || reason!.isEmpty ? '' : ' $reason'}\n'
-      'Update with: ${command ?? kUpgradeCommand}';
+      'Update with: ${installedByNpm() ? kNpmUpgradeCommand : command ?? kUpgradeCommand}';
 }
 
 /// Whether [version] is below [than], comparing numbers and not text

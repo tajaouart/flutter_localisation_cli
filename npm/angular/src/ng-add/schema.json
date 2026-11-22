@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/schema",
+  "$id": "flutterlocalisation-ng-add",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "The application to set up; default: the only one, or the one at the workspace root.",
+      "$default": { "$source": "projectName" }
+    },
+    "localeDir": {
+      "type": "string",
+      "description": "Where messages.arb and messages.<locale>.arb live.",
+      "default": "src/locale"
+    },
+    "sourceLocale": {
+      "type": "string",
+      "description": "The language the app is written in, as Angular names it (en, en-US, fr).",
+      "default": "en"
+    },
+    "skipInstall": {
+      "type": "boolean",
+      "description": "Do not run the package manager afterwards.",
+      "default": false
+    }
+  }
+}

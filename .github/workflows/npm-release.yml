@@ -1,0 +1,92 @@
+name: npm release
+
+# A version tag (v1.23.0) compiles fl and fl_mcp for every target in
+# npm/targets.json and publishes @flutterlocalisation/cli, one
+# @flutterlocalisation/cli-<os>-<cpu> per target and @flutterlocalisation/angular,
+# all at the version of pubspec.yaml. Needs the NPM_TOKEN secret (an
+# automation token of the flutterlocalisation npm org).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to npm (false = build and pack only)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  compile:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: darwin, cpu: arm64, runner: macos-14 }
+          - { os: darwin, cpu: x64, runner: macos-13 }
+          - { os: linux, cpu: x64, runner: ubuntu-latest }
+          - { os: linux, cpu: arm64, runner: ubuntu-24.04-arm }
+          - { os: win32, cpu: x64, runner: windows-latest }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.13.7
+      - run: dart pub get
+      - name: Compile
+        shell: bash
+        run: |
+          ext=""; [ "${{ matrix.os }}" = "win32" ] && ext=".exe"
+          out="bins/${{ matrix.os }}-${{ matrix.cpu }}"
+          mkdir -p "$out"
+          dart compile exe bin/fl.dart -o "$out/fl$ext"
+          dart compile exe bin/fl_mcp.dart -o "$out/fl_mcp$ext"
+          "$out/fl$ext" --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bins-${{ matrix.os }}-${{ matrix.cpu }}
+          path: bins
+
+  publish:
+    needs: compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bins-*
+          path: bins
+          merge-multiple: true
+      - name: Tag matches pubspec.yaml
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(sed -n 's/^version: *//p' pubspec.yaml)
+          [ "v$version" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} is not v$version"; exit 1; }
+      - name: Test the npm packages
+        working-directory: npm
+        run: npm ci && npm test
+      - run: node npm/build.mjs --binaries bins
+      - name: Every target has its package
+        run: |
+          for t in $(node -p "require('./npm/targets.json').map(t => t.os + '-' + t.cpu).join(' ')"); do
+            test -x "npm/dist/cli-$t/bin/fl" || test -f "npm/dist/cli-$t/bin/fl.exe" || { echo "no binary for $t"; exit 1; }
+          done
+      - name: Pack
+        run: for d in npm/dist/*/; do (cd "$d" && npm pack --dry-run); done
+      - name: Publish, binaries first so the launcher never points at a missing version
+        if: startsWith(github.ref, 'refs/tags/') || inputs.publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for d in npm/dist/cli-*/ npm/dist/cli/ npm/dist/angular/; do
+            (cd "$d" && npm publish --access public --provenance)
+          done

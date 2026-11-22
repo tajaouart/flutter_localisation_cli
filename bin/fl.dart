@@ -171,10 +171,17 @@ class UpgradeCommand extends Command<int> {
   @override
   Future<int> run() async {
     if ((globalResults?['dry-run'] as bool?) ?? false) {
-      stdout.writeln('DRY RUN: would run `$kUpgradeCommand`.');
+      stdout.writeln('DRY RUN: would run `${upgradeCommandFor()}`.');
       return 0;
     }
-    stdout.writeln('fl $kCliVersion: running `$kUpgradeCommand` …');
+    stdout.writeln('fl $kCliVersion: running `${upgradeCommandFor()}` …');
+    if (installedByNpm()) {
+      final List<String> words = kNpmUpgradeCommand.split(' ');
+      final Process npm = await Process.start(
+          words.first, words.skip(1).toList(),
+          runInShell: true, mode: ProcessStartMode.inheritStdio);
+      return npm.exitCode;
+    }
     // The VM that runs this script, unless fl was compiled to a binary of
     // its own, in which case `dart` has to come from the PATH.
     final String self = Platform.resolvedExecutable;

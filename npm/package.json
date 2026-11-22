@@ -1,0 +1,12 @@
+{
+  "name": "flutterlocalisation-npm-workspace",
+  "private": true,
+  "description": "Builds and tests the npm packages; never published.",
+  "scripts": {
+    "test": "node --test",
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "@angular-devkit/schematics": "^17.3.0"
+  }
+}

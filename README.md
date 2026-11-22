@@ -18,6 +18,14 @@ dart pub global activate flutter_localisation_cli
 
 This installs the `fl` and `fl_mcp` executables in `~/.pub-cache/bin` (put that on your `PATH`).
 
+Without Dart (an Angular or any JavaScript project), the same commands come as native binaries
+from npm:
+
+```bash
+npm install --save-dev @flutterlocalisation/cli   # then: npx fl init
+ng add @flutterlocalisation/angular                # an Angular app: also sets up @angular/localize
+```
+
 ## Auth
 
 Create a scoped API token in the dashboard → **API Keys** (`flk_live_…`), then either:

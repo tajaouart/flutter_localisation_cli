@@ -1,0 +1,10 @@
+{
+  "$schema": "../node_modules/@angular-devkit/schematics/collection-schema.json",
+  "schematics": {
+    "ng-add": {
+      "description": "Set up @angular/localize, ARB extraction and the fl command for FlutterLocalisation.",
+      "factory": "./src/ng-add/index#ngAdd",
+      "schema": "./src/ng-add/schema.json"
+    }
+  }
+}

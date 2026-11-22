@@ -155,4 +155,10 @@ void main() {
       );
     });
   });
+
+  test('a copy installed by npm is upgraded with npm', () {
+    expect(upgradeCommandFor(<String, String>{'FL_INSTALLED_BY': 'npm'}),
+        kNpmUpgradeCommand);
+    expect(upgradeCommandFor(<String, String>{}), kUpgradeCommand);
+  });
 }

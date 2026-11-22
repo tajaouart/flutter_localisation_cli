@@ -12,6 +12,11 @@
   says. `fl doctor` checks the Angular setup: `@angular/localize`, ARB extraction, messages
   without an `@@id`, a plural inside a sentence, locale files `angular.json` does not list.
   The MCP `pull_arbs`, `import_arb` and `check_l10n_setup` tools do the same.
+- **npm packages.** `@flutterlocalisation/cli` runs `fl` and `fl_mcp` as native binaries
+  (one optional package per OS and CPU, no Dart needed), and `ng add
+  @flutterlocalisation/angular` sets up `@angular/localize`, ARB extraction into `src/locale`,
+  the CLI and the `i18n:extract`, `i18n:push` and `i18n:pull` scripts. `fl upgrade` and the
+  update notice name the npm command for a copy npm installed.
 ### Changed
 - Platforms are a typed `AppPlatform` (`flutter`, `ios`, `angular`); `ProjectData.platforms`
   and `ProjectSummary.platforms` are `List<AppPlatform>`, and JSON output still names them
