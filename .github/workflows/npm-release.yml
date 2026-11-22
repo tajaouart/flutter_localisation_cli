@@ -39,8 +39,8 @@ jobs:
           - { os: win32, cpu: x64, runner: windows-latest }
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dart-lang/setup-dart@2286a0c042b44434fe26d292bbce8d34f7ec662b # v1
         with:
           sdk: 3.13.7
       - run: dart pub get
@@ -53,7 +53,7 @@ jobs:
           dart compile exe bin/fl.dart -o "$out/fl$ext"
           dart compile exe bin/fl_mcp.dart -o "$out/fl_mcp$ext"
           "$out/fl$ext" --version
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: bins-${{ matrix.os }}-${{ matrix.cpu }}
           path: bins
@@ -62,14 +62,15 @@ jobs:
     needs: compile
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      # Trusted publishing needs npm 11.5.1 or later.
-      - run: npm install -g npm@latest
-      - uses: actions/download-artifact@v4
+      # Trusted publishing needs npm 11.5.1 or later. Pinned, like every action
+      # here: this job can publish the packages, so nothing in it floats.
+      - run: npm install -g npm@11.16.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: bins-*
           path: bins
