@@ -25,6 +25,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_localisation_cli/src/angular.dart';
+import 'package:flutter_localisation_cli/src/ngx.dart';
 import 'package:path/path.dart' as path;
 import 'package:flutter_localisation_cli/src/arb_sync.dart';
 import 'package:flutter_localisation_cli/src/config.dart';
@@ -640,7 +641,8 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
         'name': 'import_arb',
         'description': 'Bulk-create keys by importing a whole ARB file, an Xcode String Catalog '
             '(.xcstrings) or an Angular ARB (messages.arb from `ng extract-i18n --format=arb`, '
-            'or a messages.<locale>.arb) in ONE request, the right tool for adding MANY strings at '
+            'or a messages.<locale>.arb) or an ngx-translate <locale>.json (one language, its '
+            'name or `language` picks it) in ONE request, the right tool for adding MANY strings at '
             'once. Put all the strings in an ARB JSON (a flat {"key":"value"} map, '
             '@-metadata allowed) and import it, instead of many add_string calls. '
             'Provide `path` (a file on disk) or `content` (raw JSON). A String '
@@ -655,7 +657,8 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
           'properties': <String, dynamic>{
             'path': <String, dynamic>{
               'type': 'string',
-              'description': 'Path to an ARB or .xcstrings file to import.',
+              'description':
+                  'Path to an ARB, .xcstrings or ngx-translate .json file to import.',
             },
             'content': <String, dynamic>{
               'type': 'string',
@@ -758,7 +761,16 @@ Future<void> _callTool(
       }
       final L10nDoctorReport r = checkL10nSetup(root, fix: apply);
       final int fixed = r.issues.where((final L10nIssue i) => i.fixed).length;
-      if (looksLikeAngularApp(root.path) && !r.applicable) {
+      if (usesNgxTranslate(root.path) && !r.applicable) {
+        _toolResult(id, <String, dynamic>{
+          'ok': true,
+          'ngx': true,
+          'message': 'ngx-translate app: its <locale>.json files need no build '
+              'setup. `pull_arbs` writes them.',
+        });
+        return;
+      }
+      if (looksLikeLocalizeApp(root.path) && !r.applicable) {
         String dir = angularExtractDir(root.path) ?? kAngularDefaultDir;
         try {
           final ProjectConfig cfg = ProjectConfig.load(
@@ -915,18 +927,31 @@ Future<void> _callTool(
           : <String>[];
       final List<CatalogTarget>? targets =
           a['dir'] == null ? cfg.xcstringsCatalogs : null;
-      final List<String> catalogOrphans = !p.shipsIos
+      final List<String> catalogOnly = !p.shipsIos
           ? <String>[]
           : targets != null
               ? localOnlyTargetKeys(targets, serviceKeys)
               : localOnlyCatalogKeys(catalogFile, serviceKeys);
+      // ngx-translate's base file is rewritten by the pull, like a template.
+      final String ngxDir = (a['dir'] as String?) ?? cfg.ngxLocaleDir;
+      final File ngxBase = File('$ngxDir/${ngxFileName(base.code)}');
+      final List<String> ngxOrphans =
+          p.shipsNgx ? localOnlyNgxKeys(ngxBase, serviceKeys) : <String>[];
+      final List<String> catalogOrphans = <String>[
+        ...catalogOnly,
+        ...ngxOrphans,
+      ];
       final bool adopt = (a['adopt'] ?? false) as bool;
       final bool discardLocal = (a['discard_local'] ?? false) as bool;
 
       if ((orphans.isNotEmpty || catalogOrphans.isNotEmpty) &&
           !adopt &&
           !discardLocal) {
-        final String file = orphans.isNotEmpty ? template : kLocalizableCatalog;
+        final String file = orphans.isNotEmpty
+            ? template
+            : ngxOrphans.isNotEmpty
+                ? path.basename(ngxBase.path)
+                : kLocalizableCatalog;
         _toolResult(id, <String, dynamic>{
           'ok': false,
           'local_only_keys': <String>[...orphans, ...catalogOrphans],
@@ -969,13 +994,28 @@ Future<void> _callTool(
         }
         steps.add(imported.message);
       }
-      if (catalogOrphans.isNotEmpty && adopt) {
+      if (ngxOrphans.isNotEmpty && adopt) {
+        final OpResult imported = await ops.importArb(
+          ngxBase.readAsStringSync(),
+          languageCode: base.code,
+          fileName: path.basename(ngxBase.path),
+        );
+        if (!imported.ok) {
+          _toolResult(id, <String, dynamic>{
+            'ok': false,
+            'message': 'Adopting local-only keys failed: ${imported.message}',
+          });
+          return;
+        }
+        steps.add(imported.message);
+      }
+      if (catalogOnly.isNotEmpty && adopt) {
         final OpResult imported = await ops.adoptCatalog(
           targets == null
               ? catalogFile.readAsStringSync()
               : jsonEncode(mergeTargetCatalogs(targets,
                   sourceLanguage: p.baseLanguage(target.flavor)?.code ?? 'en',
-                  only: catalogOrphans.toSet())),
+                  only: catalogOnly.toSet())),
           fileName: kLocalizableCatalog,
         );
         if (!imported.ok) {
@@ -1008,6 +1048,11 @@ Future<void> _callTool(
       }
       OpResult? angularFiles;
       Future<bool> writeAngular() async {
+        if (p.shipsNgx) {
+          final OpResult ngxFiles = await ops.exportNgx(ngxDir);
+          steps.add(ngxFiles.message);
+          if (!ngxFiles.ok) return false;
+        }
         if (!p.shipsAngular) return true;
         angularFiles = await ops.exportAngular(angularDir,
             appRoot: cfg.root ?? Directory.current.path);
@@ -1053,6 +1098,7 @@ Future<void> _callTool(
               await ops.exportCatalogs(catalogDir, targets: targets),
             AppPlatform.angular => await ops.exportAngular(angularDir,
                 appRoot: cfg.root ?? Directory.current.path),
+            AppPlatform.ngx => await ops.exportNgx(ngxDir),
           },
       ];
       final OpResult exported = OpResult(

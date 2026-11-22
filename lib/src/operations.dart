@@ -14,6 +14,7 @@ import 'package:flutter_localisation_cli/src/call_budget.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
+import 'package:flutter_localisation_cli/src/ngx.dart';
 import 'package:flutter_localisation_cli/src/platform.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
 import 'package:path/path.dart' as path;
@@ -463,9 +464,21 @@ class Operations {
     if (isAngularArbJson(parsed) || await _angularProjectFile(fileName)) {
       return run(null);
     }
+    // An ngx-translate file does not name its language inside; its file
+    // name does (`de.json`, `frx_fr.json`), else it is the base text.
+    final bool ngxFile =
+        isNgxDoc(parsed) && (fileName == null || fileName.endsWith('.json'));
+    final List<String> ngxCodes = ngxFile && fileName != null
+        ? ngxLocaleCandidates(fileName)
+        : <String>[];
     final ({String code, String source})? inferred =
-        inferArbLocale(parsed, fileName);
-    if (inferred == null) return run(null);
+        ngxFile ? await _ngxLocale(ngxCodes) : inferArbLocale(parsed, fileName);
+    if (inferred == null) {
+      if (!ngxFile) return run(null);
+      final String? baseCode =
+          (await client.getProject(projectId)).baseLanguage(flavor)?.code;
+      return run(baseCode);
+    }
 
     final ProjectData project = await client.getProject(projectId);
     final FlavorData fl = project.flavor(flavor);
@@ -516,6 +529,20 @@ class Operations {
     );
   }
 
+  /// The first of [codes] the flavor has, else the first one, as a file-name
+  /// locale; null when the name holds none.
+  Future<({String code, String source})?> _ngxLocale(
+      final List<String> codes) async {
+    if (codes.isEmpty) return null;
+    final FlavorData fl = (await client.getProject(projectId)).flavor(flavor);
+    final Set<String> have = <String>{
+      for (final LanguageData l in fl.languages) canonicalizeOrKeep(l.code),
+    };
+    final String code =
+        codes.firstWhere(have.contains, orElse: () => codes.first);
+    return (code: code, source: 'the file name');
+  }
+
   /// An Angular-only project takes every ARB as Angular's.
   Future<bool> _angularProjectFile(final String? fileName) async {
     if (fileName == null ||
@@ -540,6 +567,7 @@ class Operations {
     int keyCount;
     bool catalog;
     bool angularFile = false;
+    bool ngxFile = false;
     try {
       final Object? parsed = jsonDecode(arbContent);
       if (parsed is! Map<String, dynamic>) {
@@ -549,9 +577,14 @@ class Operations {
       catalog = isCatalogJson(parsed) ||
           (fileName != null && fileName.endsWith('.xcstrings'));
       angularFile = isAngularArbJson(parsed);
+      ngxFile = !catalog && !angularFile && isNgxDoc(parsed);
       keyCount = catalog
           ? catalogKeys(parsed).length
-          : parsed.keys.where((final String k) => !k.startsWith('@')).length;
+          : ngxFile
+              ? flattenNgx(parsed).length
+              : parsed.keys
+                  .where((final String k) => !k.startsWith('@'))
+                  .length;
     } catch (_) {
       return OpResult(false, 'Invalid ARB: not valid JSON.');
     }
@@ -572,7 +605,7 @@ class Operations {
     final String kind = switch ((catalog, angularFile)) {
       (true, _) => 'String Catalog',
       (false, true) => 'Angular file',
-      (false, false) => 'ARB',
+      (false, false) => ngxFile ? 'ngx-translate file' : 'ARB',
     };
 
     if (dryRun) {
@@ -591,7 +624,9 @@ class Operations {
               ? 'xcstrings'
               : angularFile
                   ? 'angular'
-                  : 'arb',
+                  : ngxFile
+                      ? 'ngx'
+                      : 'arb',
         },
       );
     }
@@ -703,6 +738,8 @@ class Operations {
       final Object? p = jsonDecode(arbContent);
       if (isCatalogJson(p)) {
         importedKeys.addAll(catalogKeys(p));
+      } else if (isNgxDoc(p)) {
+        importedKeys.addAll(flattenNgx(p! as Map<String, dynamic>).keys);
       } else if (p is Map<String, dynamic>) {
         importedKeys
             .addAll(p.keys.where((final String k) => !k.startsWith('@')));
@@ -2274,6 +2311,58 @@ extension ArbExport on Operations {
         'angular_dir': dir,
         if (listed != null) 'angular_json_added': listed,
       },
+    );
+  }
+
+  /// Every language of the flavor, the base included, as ngx-translate's
+  /// `<dir>/<code>.json`. A file already on disk with keys in objects is
+  /// written nested again, so a pull does not reshape the developer's file.
+  Future<OpResult> exportNgx(
+    final String dir, {
+    final bool dryRun = false,
+    final ProjectData? fetched,
+  }) async {
+    final ProjectData project = fetched ?? await client.getProject(projectId);
+    final FlavorData f = project.flavor(flavor);
+    final List<Map<String, dynamic>> written = <Map<String, dynamic>>[];
+    for (final LanguageData l in f.languages) {
+      final String file = '$dir/${ngxFileName(l.code)}';
+      final bool nested = isNestedNgxFile(File(file));
+      final String body;
+      try {
+        body =
+            await client.downloadNgx(projectId, f.id, l.code, nested: nested);
+      } on ApiException catch (e) {
+        if (e.statusCode != 422) rethrow;
+        final List<String> details = <String>[
+          for (final Object? d
+              in (e.body?['details'] as List?) ?? const <Object?>[])
+            '$d',
+        ];
+        return OpResult(
+          false,
+          '${e.message}\n${details.map((final String d) => '  $d').join('\n')}',
+          <String, dynamic>{'details': details},
+        );
+      }
+      final Object? doc = jsonDecode(body);
+      final int keys = doc is Map<String, dynamic> ? flattenNgx(doc).length : 0;
+      written.add(<String, dynamic>{
+        'file': _shown(file),
+        'keys': keys,
+        if (nested) 'layout': 'nested',
+      });
+      if (dryRun) continue;
+      final File out = File(file);
+      out.parent.createSync(recursive: true);
+      out.writeAsStringSync(body);
+    }
+    return OpResult(
+      true,
+      '${dryRun ? 'DRY RUN: would write' : 'Wrote'} ${written.length} '
+      'ngx-translate file(s) to ${_shown(dir)} '
+      '(${written.map((final Map<String, dynamic> w) => path.basename(w['file'] as String)).join(', ')}).',
+      <String, dynamic>{'files': written, 'ngx_dir': dir},
     );
   }
 

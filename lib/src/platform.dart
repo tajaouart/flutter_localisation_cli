@@ -6,7 +6,8 @@
 enum AppPlatform {
   flutter('flutter', 'Flutter', liveUpdates: true),
   ios('ios', 'iOS', liveUpdates: true),
-  angular('angular', 'Angular', liveUpdates: false);
+  angular('angular', 'Angular', liveUpdates: false),
+  ngx('ngx', 'ngx-translate', liveUpdates: false);
 
   const AppPlatform(this.wire, this.label, {required this.liveUpdates});
 
@@ -22,6 +23,7 @@ enum AppPlatform {
         AppPlatform.flutter => 'app_<locale>.arb',
         AppPlatform.ios => 'Localizable.xcstrings',
         AppPlatform.angular => 'messages.<locale>.arb',
+        AppPlatform.ngx => '<locale>.json',
       };
 
   static AppPlatform? fromWire(final Object? value) {

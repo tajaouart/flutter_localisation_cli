@@ -22,6 +22,7 @@ import 'package:args/command_runner.dart';
 import 'package:path/path.dart' as path;
 
 import 'package:flutter_localisation_cli/src/angular.dart';
+import 'package:flutter_localisation_cli/src/ngx.dart';
 import 'package:flutter_localisation_cli/src/arb_sync.dart';
 import 'package:flutter_localisation_cli/src/codegen.dart';
 import 'package:flutter_localisation_cli/src/config.dart';
@@ -393,7 +394,8 @@ class InitCommand extends Command<int> with _ApiCommand {
       ..addOption('angular-dir',
           help: 'Where Angular\'s messages.<locale>.arb files go (default: '
               'the outputPath of extract-i18n in angular.json, else '
-              'src/locale).')
+              'src/locale), or the <locale>.json files of an ngx-translate '
+              'project (default: an existing src/assets/i18n or public/i18n).')
       ..addFlag('yes',
           abbr: 'y',
           negatable: false,
@@ -480,6 +482,7 @@ class InitCommand extends Command<int> with _ApiCommand {
       final bool flutter = project.platforms.contains(AppPlatform.flutter);
       final bool ios = project.platforms.contains(AppPlatform.ios);
       final bool angular = project.platforms.contains(AppPlatform.angular);
+      final bool ngx = project.platforms.contains(AppPlatform.ngx);
       stdout.writeln(
           'Project: ${project.name} (${platformLabels(project.platforms)})'
           '${project.flavors.length > 1 ? ', flavor ${flavor.name}' : ''}');
@@ -501,6 +504,15 @@ class InitCommand extends Command<int> with _ApiCommand {
         angularDir = (argResults!['angular-dir'] as String?) ??
             ask.ask('Angular locale folder',
                 angularExtractDir(root.path) ?? kAngularDefaultDir);
+      } else if (ngx) {
+        angularDir = (argResults!['angular-dir'] as String?) ??
+            ask.ask(
+                'ngx-translate folder', ngxDirIn(root.path) ?? kNgxDefaultDir);
+      }
+      if (!ngx && usesNgxTranslate(root.path)) {
+        stdout.writeln('This app loads its strings with ngx-translate. Set the '
+            'project\'s platform to ngx-translate in the dashboard (project '
+            'settings) so `fl pull` writes <locale>.json files.');
       }
 
       // 4. The config every later command reads.
@@ -773,11 +785,13 @@ class ImportCommand extends Command<int> with _ApiCommand {
   String get name => 'import';
   @override
   String get description =>
-      'Bulk-create keys from an ARB file or an Xcode String Catalog '
-      '(.xcstrings) in ONE request (vs many `add`s).';
+      'Bulk-create keys from an ARB file, an Xcode String Catalog '
+      '(.xcstrings) or an ngx-translate <locale>.json in ONE request (vs many '
+      '`add`s).';
   @override
   String get invocation =>
-      'fl import <file.arb|file.xcstrings> [--language <code>] [--overwrite] '
+      'fl import <file.arb|file.xcstrings|locale.json> [--language <code>] '
+      '[--overwrite] '
       '[--translate]';
 
   @override
@@ -1651,10 +1665,18 @@ Future<int> _pullArbs(
     final String catalogName = targets == null
         ? kLocalizableCatalog
         : 'The ${targets.length} catalogs of "xcstrings_catalogs"';
+    // ngx-translate's base file is written by the pull like a Flutter
+    // template, so a key only it holds is at risk the same way.
+    final String ngxDir = cfg.ngxLocaleDir;
+    final File ngxBase = File('$ngxDir/${ngxFileName(base.code)}');
+    final List<String> ngxOrphans =
+        project.shipsNgx ? localOnlyNgxKeys(ngxBase, serviceKeys) : <String>[];
+    final String ngxBaseName = path.relative(ngxBase.path);
     final List<({String file, List<String> keys})> staged =
         <({String file, List<String> keys})>[
       if (orphans.isNotEmpty) (file: templateName, keys: orphans),
       if (catalogOrphans.isNotEmpty) (file: catalogName, keys: catalogOrphans),
+      if (ngxOrphans.isNotEmpty) (file: ngxBaseName, keys: ngxOrphans),
     ];
     if (staged.isNotEmpty && !adopt && !discardLocal && fromInit) {
       for (final ({String file, List<String> keys}) entry in staged) {
@@ -1753,6 +1775,20 @@ Future<int> _pullArbs(
           }
           say.writeln('  ${imported.message.replaceAll('\n', '\n  ')}');
         }
+        if (ngxOrphans.isNotEmpty) {
+          say.writeln('Importing ${ngxOrphans.length} local-only key(s) from '
+              '$ngxBaseName …');
+          final OpResult imported = await built.ops.importArb(
+            ngxBase.readAsStringSync(),
+            languageCode: base.code,
+            fileName: path.basename(ngxBase.path),
+          );
+          if (!imported.ok) {
+            stderr.writeln(imported.message);
+            return 1;
+          }
+          say.writeln('  ${imported.message.replaceAll('\n', '\n  ')}');
+        }
       }
     }
 
@@ -1785,6 +1821,14 @@ Future<int> _pullArbs(
                 '${outcome.recoveryRef}');
           }
         }
+        if (project.shipsNgx) {
+          final OpResult ngxFiles = await built.ops.exportNgx(ngxDir);
+          if (!ngxFiles.ok) {
+            stderr.writeln(ngxFiles.message);
+            return 1;
+          }
+          say.writeln('✓ ${ngxFiles.message}');
+        }
         OpResult? angularFiles;
         if (project.shipsAngular) {
           angularFiles = await built.ops.exportAngular(angularDir,
@@ -1805,7 +1849,7 @@ Future<int> _pullArbs(
                 'dir': dir,
                 'upstream': outcome.upstream,
                 'adopted': adopt
-                    ? <String>[...orphans, ...catalogOrphans]
+                    ? <String>[...orphans, ...catalogOrphans, ...ngxOrphans]
                     : <String>[],
               },
             ),
@@ -1823,6 +1867,7 @@ Future<int> _pullArbs(
       arbDir: arbDir,
       catalogDir: catalogDir,
       angularDir: angularDir,
+      ngxDir: ngxDir,
       appRoot: cfg.root ?? Directory.current.path,
       targets: targets,
       stale: (staged.isNotEmpty || project.shipsAngular) && adopt,
@@ -1835,8 +1880,9 @@ Future<int> _pullArbs(
           <String, dynamic>{
             ...r.data,
             'method': ArbSyncMethod.api.name,
-            'adopted':
-                adopt ? <String>[...orphans, ...catalogOrphans] : <String>[],
+            'adopted': adopt
+                ? <String>[...orphans, ...catalogOrphans, ...ngxOrphans]
+                : <String>[],
           },
         ),
       );
@@ -1856,6 +1902,7 @@ Future<OpResult> _exportFromApi(
   required final String arbDir,
   required final String catalogDir,
   required final String angularDir,
+  required final String ngxDir,
   final String? appRoot,
   final List<CatalogTarget>? targets,
   final bool dryRun = false,
@@ -1873,6 +1920,8 @@ Future<OpResult> _exportFromApi(
             dryRun: dryRun, fetched: fetched, targets: targets),
         AppPlatform.angular => await ops.exportAngular(angularDir,
             dryRun: dryRun, fetched: fetched, appRoot: appRoot),
+        AppPlatform.ngx =>
+          await ops.exportNgx(ngxDir, dryRun: dryRun, fetched: fetched),
       },
   ];
   final OpResult? failed = results
@@ -1891,6 +1940,7 @@ Future<OpResult> _exportFromApi(
       if (project.shipsFlutter) 'dir': arbDir,
       if (project.shipsIos) 'catalog_dir': catalogDir,
       if (project.shipsAngular) 'angular_dir': angularDir,
+      if (project.shipsNgx) 'ngx_dir': ngxDir,
     },
   );
 }
@@ -2238,7 +2288,12 @@ class DoctorCommand extends Command<int> {
     final bool fix = argResults!['fix'] as bool;
     final L10nDoctorReport r = checkL10nSetup(Directory.current, fix: fix);
     final String root = Directory.current.path;
-    final bool angularApp = looksLikeAngularApp(root);
+    final bool angularApp = looksLikeLocalizeApp(root);
+    if (!angularApp && usesNgxTranslate(root) && !_jsonOut) {
+      stdout.writeln('✓ ngx-translate app: its <locale>.json files need no '
+          'build setup.');
+      if (!r.applicable) return 0;
+    }
     final List<String> angularIssues = angularApp
         ? angularSetupIssues(root, _angularDirHere(root))
         : const <String>[];
@@ -2544,6 +2599,15 @@ class ExportCommand extends Command<int> with _ApiCommand {
                 keys: localOnlyCatalogKeys(
                     File('$catalogDir/$kLocalizableCatalog'), serviceKeys),
               ),
+            if (project.shipsNgx)
+              (
+                file: '${positional ?? cfg.ngxLocaleDir}/'
+                    '${ngxFileName(base.code)}',
+                keys: localOnlyNgxKeys(
+                    File('${positional ?? cfg.ngxLocaleDir}/'
+                        '${ngxFileName(base.code)}'),
+                    serviceKeys),
+              ),
           ];
           for (final ({String file, List<String> keys}) entry in staged) {
             if (entry.keys.isEmpty) continue;
@@ -2566,6 +2630,7 @@ class ExportCommand extends Command<int> with _ApiCommand {
         arbDir: arbDir,
         catalogDir: catalogDir,
         angularDir: positional ?? cfg.angularLocaleDir,
+        ngxDir: positional ?? cfg.ngxLocaleDir,
         appRoot: positional == null ? cfg.root ?? Directory.current.path : null,
         targets: targets,
         dryRun: dryRun,

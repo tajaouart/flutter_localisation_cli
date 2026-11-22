@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.24.0] - 2026-11-22
+### Added
+- **ngx-translate apps.** A project can ship ngx-translate (or Transloco): one `<locale>.json`
+  per language, keys flat or nested, `{{ name }}` placeholders. `fl init` asks for the folder
+  (an existing `src/assets/i18n` or `public/i18n`, else `src/assets/i18n`) and writes it as
+  `angular_dir`, and says so when an app uses ngx-translate but its project does not.
+  `fl pull` and `fl export` write every language, the base included, from the API, and keep a
+  nested file nested. Keys only the base file holds stop the pull like a Flutter template's;
+  `fl pull --adopt` imports them first. `fl import fr.json` (or `frx_fr.json`) takes the
+  language from the file name, else `--language`, else the base language. `fl doctor` does
+  not ask an ngx-translate app for `@angular/localize`. The MCP `pull_arbs`, `import_arb` and
+  `check_l10n_setup` tools do the same.
+
 ## [1.23.1] - 2026-11-22
 ### Changed
 - Every request says how this copy was installed (`X-FL-Install: pub` or `npm`), so an update

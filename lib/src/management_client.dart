@@ -190,6 +190,7 @@ class ProjectData {
   bool get shipsFlutter => ships(AppPlatform.flutter);
   bool get shipsIos => ships(AppPlatform.ios);
   bool get shipsAngular => ships(AppPlatform.angular);
+  bool get shipsNgx => ships(AppPlatform.ngx);
 
   factory ProjectData.fromJson(final Map<String, dynamic> j) => ProjectData(
         id: j['id'] as int,
@@ -781,6 +782,23 @@ class ManagementClient {
       'GET',
       '/api/project/$projectId/export/?flavor_id=$flavorId&format=angular'
           '&language_code=${Uri.encodeQueryComponent(languageCode)}',
+    );
+    return utf8.decode(res.bodyBytes);
+  }
+
+  /// One language as ngx-translate's `<code>.json`; [nested] asks for keys in
+  /// objects instead of dotted.
+  Future<String> downloadNgx(
+    final int projectId,
+    final int flavorId,
+    final String languageCode, {
+    final bool nested = false,
+  }) async {
+    final http.Response res = await _send(
+      'GET',
+      '/api/project/$projectId/export/?flavor_id=$flavorId&format=ngx'
+          '&language_code=${Uri.encodeQueryComponent(languageCode)}'
+          '${nested ? '&layout=nested' : ''}',
     );
     return utf8.decode(res.bodyBytes);
   }

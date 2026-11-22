@@ -390,6 +390,23 @@ class FakeBackend {
             'home.title': 'Hello ($code)',
             'home.greeting': r'Hi {$INTERPOLATION} ' '($code)',
           })}\n');
+    } else if (req.method == 'GET' &&
+        path == '/api/project/7/export/' &&
+        req.uri.queryParameters['format'] == 'ngx') {
+      final String code = req.uri.queryParameters['language_code'] ?? '';
+      final bool nested = req.uri.queryParameters['layout'] == 'nested';
+      final Map<String, dynamic> doc = nested
+          ? <String, dynamic>{
+              'home': <String, String>{
+                'title': 'Hello ($code)',
+                'greeting': 'Hi {{name}} ($code)',
+              },
+            }
+          : <String, dynamic>{
+              'home.greeting': 'Hi {{name}} ($code)',
+              'home.title': 'Hello ($code)',
+            };
+      res.write('${const JsonEncoder.withIndent('  ').convert(doc)}\n');
     } else if (req.method == 'GET' && path == '/api/project/7/export/') {
       final String table = req.uri.queryParameters['table'] ?? 'Localizable';
       if (table == 'AppShortcuts' && appShortcuts == null) {

@@ -19,6 +19,7 @@ import 'package:path/path.dart' as p;
 
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/angular.dart';
+import 'package:flutter_localisation_cli/src/ngx.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
 
 const String kDefaultBaseUrl = 'https://api.flutterlocalisation.com';
@@ -62,6 +63,10 @@ class ProjectConfig {
   /// The Angular folder in effect: `angular_dir`, else Angular's own default.
   String get angularLocaleDir =>
       angularDir ?? p.join(root ?? '.', kAngularDefaultDir);
+
+  /// The ngx-translate folder in effect: `angular_dir`, else the usual
+  /// `src/assets/i18n`.
+  String get ngxLocaleDir => angularDir ?? p.join(root ?? '.', kNgxDefaultDir);
 
   /// `xcstrings_catalogs`: the folders of an iOS app with several targets
   /// (the app, a widget, an extension), each holding the

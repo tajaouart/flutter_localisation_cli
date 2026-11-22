@@ -480,4 +480,45 @@ void main() {
     expect(File(p.join(tmp.path, 'flutterlocalisation.json')).existsSync(),
         isTrue);
   });
+
+  test(
+      'pull_arbs on an ngx-translate project guards the base file and writes JSON',
+      () async {
+    backend.platforms = <String>['ngx'];
+    backend.languages = <String>['en', 'fr'];
+    backend.extraKeys = <String>['home.title', 'home.greeting'];
+    addTearDown(() {
+      backend.extraKeys = <String>[];
+      backend.languages = <String>['en'];
+    });
+    final Directory dir = Directory(p.join(tmp.path, 'i18n'))
+      ..createSync(recursive: true);
+    final File en = File(p.join(dir.path, 'en.json'))
+      ..writeAsStringSync('{"home": {"title": "Hello", "new": "Brand new"}}');
+
+    final Map<String, dynamic> refused = await mcp
+        .call('pull_arbs', <String, dynamic>{'apply': true, 'dir': dir.path});
+    expect(refused['ok'], isFalse);
+    expect(refused['local_only_keys'], <String>['home.new']);
+    expect(refused['message'], contains('en.json'));
+
+    final Map<String, dynamic> adopted = await mcp.call('pull_arbs',
+        <String, dynamic>{'apply': true, 'adopt': true, 'dir': dir.path});
+    expect(adopted['ok'], isTrue, reason: adopted.toString());
+    expect(backend.imports.single.language, 'en');
+    expect(jsonDecode(en.readAsStringSync()), <String, dynamic>{
+      'home': <String, dynamic>{
+        'title': 'Hello (en)',
+        'greeting': 'Hi {{name}} (en)',
+      },
+    });
+    expect(File(p.join(dir.path, 'fr.json')).existsSync(), isTrue);
+
+    File(p.join(tmp.path, 'package.json')).writeAsStringSync(
+        '{"dependencies": {"@ngx-translate/core": "^16.0.0"}}');
+    addTearDown(() => File(p.join(tmp.path, 'package.json')).deleteSync());
+    final Map<String, dynamic> doctor = await mcp
+        .call('check_l10n_setup', <String, dynamic>{'project_root': tmp.path});
+    expect(doctor['ngx'], isTrue, reason: doctor.toString());
+  });
 }
