@@ -480,6 +480,8 @@ class ManagementClient {
     final String dart = Platform.version.split(' ').first;
     return <String, String>{
       'X-FL-Client': '$clientName/$kCliVersion',
+      // pub or npm: the service answers with the command that updates this copy.
+      'X-FL-Install': installedByNpm() ? 'npm' : 'pub',
       'User-Agent':
           '$clientName/$kCliVersion (dart $dart; ${Platform.operatingSystem})',
     };

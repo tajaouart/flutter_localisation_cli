@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.1] - 2026-11-22
+### Changed
+- Every request says how this copy was installed (`X-FL-Install: pub` or `npm`), so an update
+  notice or a forced update from the service names the command that updates it:
+  `npm install --save-dev @flutterlocalisation/cli@latest` for the npm package,
+  `dart pub global activate flutter_localisation_cli` otherwise.
+
 ## [1.23.0] - 2026-11-22
 ### Added
 - **Angular apps, the official way.** A project can ship Angular (`@angular/localize`, an

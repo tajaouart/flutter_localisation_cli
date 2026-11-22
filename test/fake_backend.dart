@@ -123,6 +123,9 @@ class FakeBackend {
   final List<String?> clients = <String?>[];
   final List<String?> userAgents = <String?>[];
 
+  /// `X-FL-Install` of every request: `pub` or `npm`.
+  final List<String?> installs = <String?>[];
+
   static const String _upgrade =
       'dart pub global activate flutter_localisation_cli';
 
@@ -264,6 +267,7 @@ class FakeBackend {
     final String? client = req.headers.value('x-fl-client');
     clients.add(client);
     userAgents.add(req.headers.value('user-agent'));
+    installs.add(req.headers.value('x-fl-install'));
     if (latestVersion != null) {
       res.headers.set('X-FL-Latest-Version', latestVersion!);
       res.headers.set('X-FL-Upgrade-Command', _upgrade);

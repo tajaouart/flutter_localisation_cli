@@ -292,6 +292,19 @@ void main() {
       expect(backend.requests, isEmpty);
     });
 
+    test('every request says how this copy was installed', () async {
+      backend.installs.clear();
+      expect((await fl(<String>['pull'])).code, 0);
+      expect(backend.installs, everyElement('pub'));
+      backend.installs.clear();
+      expect(
+          (await fl(<String>['pull'],
+                  env: <String, String>{'FL_INSTALLED_BY': 'npm'}))
+              .code,
+          0);
+      expect(backend.installs, everyElement('npm'));
+    });
+
     test('every request names the client and its version', () async {
       expect((await fl(<String>['pull'])).code, 0);
       expect(backend.clients, everyElement('fl/$version'));
