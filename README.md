@@ -338,6 +338,30 @@ with more than one argument they are numbered (`%1$@`, `%2$lld`). ICU plurals be
 variations. Not supported in a catalog: ICU `select`, substitutions (several plural arguments
 in one string) and device variations; the export names the offending keys and refuses.
 
+### Angular (`@angular/localize`)
+
+An Angular project uses Angular's own i18n, nothing else: `@angular/localize`, an `@@id` on
+every message, `ng extract-i18n --format=arb`, and one build per locale
+(`ng build --localize`). The service converts Angular's placeholders (`{$INTERPOLATION}`,
+`{$START_LINK}…{$CLOSE_LINK}`) for the editor and the AI and writes them back unchanged.
+
+```bash
+ng extract-i18n --format=arb --output-path src/locale   # writes src/locale/messages.arb
+fl import src/locale/messages.arb --translate          # the source up, every language filled
+fl pull                                                # messages.<locale>.arb back, angular.json listed
+ng build --localize
+```
+
+`fl pull` writes the translated files from the API (an Angular repo is the app itself, not a
+translations mirror) and adds each locale under `i18n.locales` in `angular.json`; a locale
+already listed keeps what it says. It never writes `messages.arb`: new strings there are
+named, and `fl pull --adopt` imports them. Two Angular shapes have no stable name and are
+left out of an import, with the fix: a message without an `@@id` (Angular names it by a hash
+of its text) and a plural or select inside a sentence (Angular splits it into a second
+message with a hash id; make the plural the whole message, the sentence inside each case).
+`fl doctor` lists both before an upload. Angular apps get their strings with the build, so
+live updates are for Flutter and iOS only.
+
 ### `fl doctor` — after a Flutter upgrade
 
 Flutter no longer generates `package:flutter_gen`: since 3.47, `synthetic-package: true` fails

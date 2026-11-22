@@ -21,6 +21,7 @@ import 'package:args/args.dart';
 import 'package:args/command_runner.dart';
 import 'package:path/path.dart' as path;
 
+import 'package:flutter_localisation_cli/src/angular.dart';
 import 'package:flutter_localisation_cli/src/arb_sync.dart';
 import 'package:flutter_localisation_cli/src/codegen.dart';
 import 'package:flutter_localisation_cli/src/config.dart';
@@ -31,6 +32,7 @@ import 'package:flutter_localisation_cli/src/init_detect.dart';
 import 'package:flutter_localisation_cli/src/l10n_doctor.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
+import 'package:flutter_localisation_cli/src/platform.dart';
 import 'package:flutter_localisation_cli/src/native_sync.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:flutter_localisation_cli/src/project_resolver.dart';
@@ -381,6 +383,10 @@ class InitCommand extends Command<int> with _ApiCommand {
       ..addOption('xcstrings-dir',
           help: 'Where the String Catalogs go (default: the folder of an '
               'existing Localizable.xcstrings, else beside Info.plist).')
+      ..addOption('angular-dir',
+          help: 'Where Angular\'s messages.<locale>.arb files go (default: '
+              'the outputPath of extract-i18n in angular.json, else '
+              'src/locale).')
       ..addFlag('yes',
           abbr: 'y',
           negatable: false,
@@ -464,11 +470,12 @@ class InitCommand extends Command<int> with _ApiCommand {
       }
       final ProjectSummary project = _pickProject(ask, projects);
       final FlavorSummary flavor = _pickFlavor(ask, project);
-      final bool flutter = project.platforms.contains('flutter');
-      final bool ios = project.platforms.contains('ios');
-      stdout
-          .writeln('Project: ${project.name} (${project.platforms.join(' + ')})'
-              '${project.flavors.length > 1 ? ', flavor ${flavor.name}' : ''}');
+      final bool flutter = project.platforms.contains(AppPlatform.flutter);
+      final bool ios = project.platforms.contains(AppPlatform.ios);
+      final bool angular = project.platforms.contains(AppPlatform.angular);
+      stdout.writeln(
+          'Project: ${project.name} (${platformLabels(project.platforms)})'
+          '${project.flavors.length > 1 ? ', flavor ${flavor.name}' : ''}');
 
       // 3. Folders, prefilled from the repository.
       String? arbDir;
@@ -482,6 +489,12 @@ class InitCommand extends Command<int> with _ApiCommand {
             ask.ask('String Catalog folder',
                 existingCatalogDir(root) ?? defaultCatalogDir(root));
       }
+      String? angularDir;
+      if (angular) {
+        angularDir = (argResults!['angular-dir'] as String?) ??
+            ask.ask('Angular locale folder',
+                angularExtractDir(root.path) ?? kAngularDefaultDir);
+      }
 
       // 4. The config every later command reads.
       final Map<String, dynamic> cfg = <String, dynamic>{
@@ -491,6 +504,7 @@ class InitCommand extends Command<int> with _ApiCommand {
         if (project.flavors.isNotEmpty) 'flavor': flavor.name,
         if (arbDir != null) 'arb_dir': arbDir,
         if (catalogDir != null) 'xcstrings_dir': catalogDir,
+        if (angularDir != null) 'angular_dir': angularDir,
       };
       configFile.writeAsStringSync(
           '${const JsonEncoder.withIndent('  ').convert(cfg)}\n');
@@ -569,7 +583,7 @@ class InitCommand extends Command<int> with _ApiCommand {
       'Which project?',
       <String>[
         for (final ProjectSummary p in projects)
-          '${p.name}  (${p.platforms.join(' + ')}, ${p.workspace})',
+          '${p.name}  (${platformLabels(p.platforms)}, ${p.workspace})',
       ],
     );
     if (i == null) {
@@ -626,7 +640,7 @@ class ProjectsCommand extends Command<int> with _ApiCommand {
                     'id': p.id,
                     'name': p.name,
                     'workspace': p.workspace,
-                    'platforms': p.platforms,
+                    'platforms': platformWires(p.platforms),
                     'flavors': p.flavors
                         .map(
                           (final FlavorSummary f) => <String, dynamic>{
@@ -653,7 +667,7 @@ class ProjectsCommand extends Command<int> with _ApiCommand {
             ? '  ⚠️  git sync disconnected — reconnect GitHub in the dashboard'
             : '';
         stdout.writeln(
-            '${p.name}  (id ${p.id}, platforms: ${p.platforms.join(', ')})$warn');
+            '${p.name}  (id ${p.id}, platforms: ${platformLabels(p.platforms, separator: ', ')})$warn');
         for (final FlavorSummary f in p.flavors) {
           final String base =
               f.baseLanguage != null ? '  [base ${f.baseLanguage}]' : '';
@@ -1574,9 +1588,12 @@ Future<int> _pullArbs(
     // strings from a repository the project left.
     final GitMirror mirror = GitMirror(dir);
     final GitRepository? linked = project.repository;
-    // The mirror holds the one catalog the service writes; an app that cuts
-    // it into several is written from the API.
-    final bool skipGit = noGit || (targets != null && !project.shipsFlutter);
+    // The mirror holds the ARBs and the one catalog the service writes; an
+    // app that cuts the catalog into several is written from the API, and so
+    // is an Angular app, whose files live in the app's own repository.
+    final bool mirrorHasFiles =
+        project.shipsFlutter || (project.shipsIos && targets == null);
+    final bool skipGit = noGit || !mirrorHasFiles;
     final ({String name, String url, String root})? local =
         skipGit || linked == null ? null : await mirror.remote();
     final bool appRepo = local != null &&
@@ -1660,6 +1677,43 @@ Future<int> _pullArbs(
     // With --json stdout carries the object and nothing else, so a script
     // can pipe it straight into a parser.
     final IOSink say = cmd.jsonOut ? stderr : stdout;
+
+    // Angular's source file is the developer's and a pull never writes it, so
+    // strings only it holds are not at risk: they are named, or imported
+    // with --adopt, but they never stop the pull.
+    final String angularDir = cfg.angularLocaleDir;
+    final File angularSource = File('$angularDir/$kAngularSource');
+    if (project.shipsAngular && angularSource.existsSync()) {
+      final Map<String, dynamic> extracted =
+          jsonDecode(angularSource.readAsStringSync()) as Map<String, dynamic>;
+      final Set<String> refused = <String>{
+        for (final String problem in angularImportProblems(extracted))
+          problem.split(':').first,
+      };
+      final List<String> fresh = <String>[
+        for (final String k in localOnlyKeys(angularSource, serviceKeys))
+          if (!refused.contains(k)) k,
+      ];
+      if (fresh.isNotEmpty && adopt && !cmd.dryRun) {
+        say.writeln('Importing ${fresh.length} new string(s) from '
+            '${path.relative(angularSource.path)} …');
+        final OpResult imported = await built.ops.importArb(
+            angularSource.readAsStringSync(),
+            fileName: kAngularSource);
+        if (!imported.ok) {
+          stderr.writeln(imported.message);
+          return 1;
+        }
+        say.writeln('  ${imported.message.replaceAll('\n', '\n  ')}');
+      } else if (fresh.isNotEmpty) {
+        final String shown = path.relative(angularSource.path);
+        say.writeln('$shown has ${fresh.length} string(s) the service does '
+            'not have yet (${fresh.take(5).join(', ')}'
+            '${fresh.length > 5 ? ', …' : ''}). Import them with '
+            '`fl import $shown --translate` or `fl pull --adopt`.');
+      }
+    }
+
     if (staged.isNotEmpty && adopt) {
       if (cmd.dryRun) {
         stdout.writeln(
@@ -1724,11 +1778,22 @@ Future<int> _pullArbs(
                 '${outcome.recoveryRef}');
           }
         }
+        OpResult? angularFiles;
+        if (project.shipsAngular) {
+          angularFiles = await built.ops.exportAngular(angularDir,
+              appRoot: cfg.root ?? Directory.current.path);
+          if (!angularFiles.ok) {
+            stderr.writeln(angularFiles.message);
+            return 1;
+          }
+          say.writeln('✓ ${angularFiles.message}');
+        }
         if (cmd.jsonOut) {
           stdout.writeln(
             const JsonEncoder.withIndent('  ').convert(
               <String, dynamic>{
                 'ok': true,
+                if (angularFiles != null) ...angularFiles.data,
                 'method': ArbSyncMethod.git.name,
                 'dir': dir,
                 'upstream': outcome.upstream,
@@ -1750,8 +1815,10 @@ Future<int> _pullArbs(
       project,
       arbDir: arbDir,
       catalogDir: catalogDir,
+      angularDir: angularDir,
+      appRoot: cfg.root ?? Directory.current.path,
       targets: targets,
-      stale: staged.isNotEmpty && adopt,
+      stale: (staged.isNotEmpty || project.shipsAngular) && adopt,
     );
     if (cmd.jsonOut) {
       return cmd.emit(
@@ -1781,6 +1848,8 @@ Future<OpResult> _exportFromApi(
   final ProjectData project, {
   required final String arbDir,
   required final String catalogDir,
+  required final String angularDir,
+  final String? appRoot,
   final List<CatalogTarget>? targets,
   final bool dryRun = false,
   final bool stale = false,
@@ -1789,11 +1858,15 @@ Future<OpResult> _exportFromApi(
   // translation a second time. [stale] says an import ran since.
   final ProjectData? fetched = stale ? null : project;
   final List<OpResult> results = <OpResult>[
-    if (project.shipsFlutter)
-      await ops.exportArbs(arbDir, dryRun: dryRun, fetched: fetched),
-    if (project.shipsIos)
-      await ops.exportCatalogs(catalogDir,
-          dryRun: dryRun, fetched: fetched, targets: targets),
+    for (final AppPlatform platform in project.platforms)
+      switch (platform) {
+        AppPlatform.flutter =>
+          await ops.exportArbs(arbDir, dryRun: dryRun, fetched: fetched),
+        AppPlatform.ios => await ops.exportCatalogs(catalogDir,
+            dryRun: dryRun, fetched: fetched, targets: targets),
+        AppPlatform.angular => await ops.exportAngular(angularDir,
+            dryRun: dryRun, fetched: fetched, appRoot: appRoot),
+      },
   ];
   final OpResult? failed = results
       .cast<OpResult?>()
@@ -1810,6 +1883,7 @@ Future<OpResult> _exportFromApi(
       if (project.shipsFlutter) 'template': results.first.data['template'],
       if (project.shipsFlutter) 'dir': arbDir,
       if (project.shipsIos) 'catalog_dir': catalogDir,
+      if (project.shipsAngular) 'angular_dir': angularDir,
     },
   );
 }
@@ -2156,9 +2230,28 @@ class DoctorCommand extends Command<int> {
   Future<int> run() async {
     final bool fix = argResults!['fix'] as bool;
     final L10nDoctorReport r = checkL10nSetup(Directory.current, fix: fix);
+    final String root = Directory.current.path;
+    final bool angularApp = looksLikeAngularApp(root);
+    final List<String> angularIssues = angularApp
+        ? angularSetupIssues(root, _angularDirHere(root))
+        : const <String>[];
     if (_jsonOut) {
-      stdout.writeln(const JsonEncoder.withIndent('  ').convert(r.toJson()));
-      return r.ok ? 0 : 1;
+      stdout
+          .writeln(const JsonEncoder.withIndent('  ').convert(<String, dynamic>{
+        ...r.toJson(),
+        if (angularApp) 'angular': <String, dynamic>{'issues': angularIssues},
+      }));
+      return r.ok && angularIssues.isEmpty ? 0 : 1;
+    }
+    if (angularApp) {
+      if (angularIssues.isEmpty) {
+        stdout.writeln('✓ Angular i18n setup is in place.');
+      } else {
+        for (final String i in angularIssues) {
+          stdout.writeln('✗ $i');
+        }
+      }
+      if (!r.applicable) return angularIssues.isEmpty ? 0 : 1;
     }
     if (!r.applicable) {
       stdout.writeln('No l10n.yaml and no package:flutter_gen import here.');
@@ -2181,6 +2274,20 @@ class DoctorCommand extends Command<int> {
     }
     return 1;
   }
+}
+
+/// `angular_dir` from the config here if there is one, else where
+/// `ng extract-i18n` writes, else Angular's default.
+String _angularDirHere(final String root) {
+  try {
+    final ProjectConfig cfg = ProjectConfig.load();
+    if (cfg.angularDir != null) {
+      return path.relative(cfg.angularDir!, from: root);
+    }
+  } on ConfigException {
+    // No config yet: doctor works before `fl init`.
+  }
+  return angularExtractDir(root) ?? kAngularDefaultDir;
 }
 
 /// `fl native` — the half of localisation that is not the ARBs.
@@ -2370,7 +2477,8 @@ class ExportCommand extends Command<int> with _ApiCommand {
   @override
   String get description =>
       'Write every locale straight from the API: app_<locale>.arb files in '
-      'arb_dir for Flutter, Localizable.xcstrings in xcstrings_dir for iOS. '
+      'arb_dir for Flutter, Localizable.xcstrings in xcstrings_dir for iOS, '
+      'messages.<locale>.arb in angular_dir for Angular. '
       'Use when the git repo is not linked (otherwise prefer `pull`).';
   @override
   String get invocation => 'fl export [<dir>]';
@@ -2450,6 +2558,8 @@ class ExportCommand extends Command<int> with _ApiCommand {
         project,
         arbDir: arbDir,
         catalogDir: catalogDir,
+        angularDir: positional ?? cfg.angularLocaleDir,
+        appRoot: positional == null ? cfg.root ?? Directory.current.path : null,
         targets: targets,
         dryRun: dryRun,
       );

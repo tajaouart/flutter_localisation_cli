@@ -261,6 +261,34 @@ void main() {
     expect(applied['locales'], <String>['en']);
   });
 
+  test(
+      'pull_arbs on an Angular project writes messages.<locale>.arb from '
+      'the API, never the source', () async {
+    backend.platforms = <String>['angular'];
+    backend.languages = <String>['en', 'fr'];
+    addTearDown(() => backend.languages = <String>['en']);
+    final Map<String, dynamic> data =
+        await mcp.call('pull_arbs', <String, dynamic>{'apply': true});
+    expect(data['ok'], isTrue, reason: data.toString());
+    expect(data['method'], 'api');
+    final File fr = File(p.join(tmp.path, 'src', 'locale', 'messages.fr.arb'));
+    expect(jsonDecode(fr.readAsStringSync())['@@locale'], 'fr');
+    expect(File(p.join(tmp.path, 'src', 'locale', 'messages.arb')).existsSync(),
+        isFalse);
+  });
+
+  test('import_arb sends an Angular extraction without a language', () async {
+    backend.platforms = <String>['angular'];
+    final Map<String, dynamic> data =
+        await mcp.call('import_arb', <String, dynamic>{
+      'content':
+          r'{"@@locale":"en-US","home.title":"Hi","@home.title":{"x-locations":[]}}',
+      'apply': true,
+    });
+    expect(data['ok'], isTrue, reason: data.toString());
+    expect(backend.imports.single.hasLanguage, isFalse);
+  });
+
   test('import_arb with an ARB still carries the language', () async {
     backend.platforms = <String>['flutter'];
     final File arb = File(p.join(tmp.path, 'app_en.arb'))

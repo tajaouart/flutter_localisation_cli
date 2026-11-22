@@ -24,6 +24,8 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_localisation_cli/src/angular.dart';
+import 'package:path/path.dart' as path;
 import 'package:flutter_localisation_cli/src/arb_sync.dart';
 import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
@@ -31,6 +33,7 @@ import 'package:flutter_localisation_cli/src/glossary.dart';
 import 'package:flutter_localisation_cli/src/l10n_doctor.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
+import 'package:flutter_localisation_cli/src/platform.dart';
 import 'package:flutter_localisation_cli/src/native_sync.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
@@ -246,6 +249,10 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             'without strings, and a project still on the discontinued '
             'intl_utils. Use it when the build says AppLocalizations or '
             'package:flutter_gen is not found, or after a Flutter upgrade. '
+            'In an Angular app (angular.json) it checks the i18n setup instead: '
+            '@angular/localize, extract-i18n writing ARB, messages.arb present '
+            'with an @@id on every message and no plural inside a sentence, and '
+            'every messages.<locale>.arb listed under i18n.locales. '
             'Offline, no token. Call with apply=false first.',
         'inputSchema': <String, dynamic>{
           'type': 'object',
@@ -631,13 +638,16 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       },
       <String, dynamic>{
         'name': 'import_arb',
-        'description': 'Bulk-create keys by importing a whole ARB file or an Xcode String Catalog '
-            '(.xcstrings) in ONE request, the right tool for adding MANY strings at '
+        'description': 'Bulk-create keys by importing a whole ARB file, an Xcode String Catalog '
+            '(.xcstrings) or an Angular ARB (messages.arb from `ng extract-i18n --format=arb`, '
+            'or a messages.<locale>.arb) in ONE request, the right tool for adding MANY strings at '
             'once. Put all the strings in an ARB JSON (a flat {"key":"value"} map, '
             '@-metadata allowed) and import it, instead of many add_string calls. '
             'Provide `path` (a file on disk) or `content` (raw JSON). A String '
-            'Catalog carries every locale and names its source language, so '
-            '`language` is ignored for it. translate=true batch-translates the other '
+            'Catalog carries every locale and names its source language, and an '
+            'Angular file names its locale, so `language` is ignored for both. '
+            'Angular messages need an @@id, and a plural or select must be the whole '
+            'message; the result lists any that were left out. translate=true batch-translates the other '
             'locales after import (one batch call, not per key). Preview by default; '
             'apply=true writes.',
         'inputSchema': <String, dynamic>{
@@ -683,7 +693,9 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       <String, dynamic>{
         'name': 'pull_arbs',
         'description': 'Bring the repo\'s ARB files (and the String Catalogs of a project that '
-            'ships iOS) in line with the service, the step after any write. Uses the git mirror when there is a usable one and the API when '
+            'ships iOS, and the messages.<locale>.arb files of one that ships Angular, '
+            'written from the API into angular_dir with the locales listed in angular.json) '
+            'in line with the service, the step after any write. Uses the git mirror when there is a usable one and the API when '
             'there is not, so a dirty clone, a stale local commit, a wrong git '
             'credential or an unlinked repo can never block it. Never run git '
             'commands in the ARB directory yourself. It refuses only when the '
@@ -746,6 +758,27 @@ Future<void> _callTool(
       }
       final L10nDoctorReport r = checkL10nSetup(root, fix: apply);
       final int fixed = r.issues.where((final L10nIssue i) => i.fixed).length;
+      if (looksLikeAngularApp(root.path) && !r.applicable) {
+        String dir = angularExtractDir(root.path) ?? kAngularDefaultDir;
+        try {
+          final ProjectConfig cfg = ProjectConfig.load(
+              path: File('${root.path}/$kProjectConfigName').path);
+          if (cfg.angularDir != null) {
+            dir = path.relative(cfg.angularDir!, from: root.path);
+          }
+        } on ConfigException {
+          // Before `fl init`: Angular's own folder.
+        }
+        final List<String> issues = angularSetupIssues(root.path, dir);
+        _toolResult(id, <String, dynamic>{
+          'ok': issues.isEmpty,
+          'angular': <String, dynamic>{'issues': issues, 'dir': dir},
+          'message': issues.isEmpty
+              ? 'Angular i18n setup is in place.'
+              : '${issues.length} Angular i18n issue(s):\n${issues.join('\n')}',
+        });
+        return;
+      }
       _toolResult(id, <String, dynamic>{
         ...r.toJson(),
         'applied': apply,
@@ -820,7 +853,7 @@ Future<void> _callTool(
                 'name': p.name,
                 'id': p.id,
                 'workspace': p.workspace,
-                'platforms': p.platforms,
+                'platforms': platformWires(p.platforms),
                 if (p.gitNeedsReauth)
                   'warning':
                       'Git sync is disconnected — reconnect GitHub in the dashboard; '
@@ -955,17 +988,47 @@ Future<void> _callTool(
         steps.add(imported.message);
       }
 
-      // An app that cuts the catalog into several is written from the API:
-      // the mirror holds the one catalog the service writes.
-      final GitSyncOutcome outcome = targets != null && !p.shipsFlutter
+      // Angular's source file is the developer's and is never written, so
+      // its new strings only need importing, never block the pull.
+      final String angularDir = cfg.angularLocaleDir;
+      final File angularSource = File('$angularDir/$kAngularSource');
+      if (p.shipsAngular && adopt && angularSource.existsSync()) {
+        final OpResult imported = await ops.importArb(
+            angularSource.readAsStringSync(),
+            fileName: kAngularSource);
+        if (!imported.ok) {
+          _toolResult(id, <String, dynamic>{
+            'ok': false,
+            'message':
+                'Importing ${angularSource.path} failed: ${imported.message}',
+          });
+          return;
+        }
+        steps.add(imported.message);
+      }
+      OpResult? angularFiles;
+      Future<bool> writeAngular() async {
+        if (!p.shipsAngular) return true;
+        angularFiles = await ops.exportAngular(angularDir,
+            appRoot: cfg.root ?? Directory.current.path);
+        return angularFiles!.ok;
+      }
+
+      // The mirror holds the ARBs and the one catalog the service writes; a
+      // cut-up catalog and Angular's files are written from the API.
+      final bool mirrorHasFiles =
+          p.shipsFlutter || (p.shipsIos && targets == null);
+      final GitSyncOutcome outcome = !mirrorHasFiles
           ? const GitSyncOutcome.skipped(GitSkipReason.notARepo)
           : await GitMirror(dir).syncMirrorOf(
               p.repository?.url,
               appRoot: cfg.root ?? Directory.current.path,
             );
       if (outcome.ok) {
+        final bool angularOk = await writeAngular();
+        if (angularFiles != null) steps.add(angularFiles!.message);
         _toolResult(id, <String, dynamic>{
-          'ok': true,
+          'ok': angularOk,
           'applied': true,
           'method': ArbSyncMethod.git.name,
           'dir': dir,
@@ -983,8 +1046,14 @@ Future<void> _callTool(
         return;
       }
       final List<OpResult> written = <OpResult>[
-        if (p.shipsFlutter) await ops.exportArbs(arbDir),
-        if (p.shipsIos) await ops.exportCatalogs(catalogDir, targets: targets),
+        for (final AppPlatform platform in p.platforms)
+          switch (platform) {
+            AppPlatform.flutter => await ops.exportArbs(arbDir),
+            AppPlatform.ios =>
+              await ops.exportCatalogs(catalogDir, targets: targets),
+            AppPlatform.angular => await ops.exportAngular(angularDir,
+                appRoot: cfg.root ?? Directory.current.path),
+          },
       ];
       final OpResult exported = OpResult(
         written.every((final OpResult r) => r.ok),
@@ -998,8 +1067,10 @@ Future<void> _callTool(
         'git_skipped': outcome.skip?.name,
         if (outcome.detail.isNotEmpty) 'git_detail': outcome.detail,
         'steps': steps,
-        'message': '${exported.message} (git mirror unavailable: '
-            '${outcome.detail.isEmpty ? outcome.skip?.name : outcome.detail})',
+        'message': mirrorHasFiles
+            ? '${exported.message} (git mirror unavailable: '
+                '${outcome.detail.isEmpty ? outcome.skip?.name : outcome.detail})'
+            : exported.message,
       });
       return;
     }

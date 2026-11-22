@@ -1,6 +1,6 @@
 ---
 name: flutter-localisation
-description: Manage the translations of a Flutter or native iOS app that uses FlutterLocalisation (flutterlocalisation.com, the `flutter_localisation` package, the `fl` CLI or the `fl_mcp` MCP server). Use when adding, editing, translating or deleting strings, adding a language, pulling ARBs, wiring live (over-the-air) translation updates, or when gen-l10n breaks after a Flutter upgrade (`package:flutter_gen` not found, `synthetic-package`, a missing generate flag, Material widgets showing English on `material_ui`).
+description: Manage the translations of a Flutter, native iOS or Angular app that uses FlutterLocalisation (flutterlocalisation.com, the `flutter_localisation` package, the `fl` CLI or the `fl_mcp` MCP server). Use when adding, editing, translating or deleting strings, adding a language, pulling ARBs, wiring live (over-the-air) translation updates, or when gen-l10n breaks after a Flutter upgrade (`package:flutter_gen` not found, `synthetic-package`, a missing generate flag, Material widgets showing English on `material_ui`).
 ---
 # FlutterLocalisation
 
@@ -26,7 +26,8 @@ fl / fl_mcp -> backend stores and AI-translates -> backend pushes ARBs to git
 
 - `fl` is the CLI and `fl_mcp` the MCP server, both from `dart pub global activate flutter_localisation_cli`. They need a workspace token (`flk_live_...`) from the dashboard: `fl login --token ...` or `FL_API_TOKEN`.
 - `flutter_localisation` is the runtime package the app depends on. It generates `lib/generated_translation_methods.dart` and, on paid plans, applies live updates at runtime.
-- `flutterlocalisation.json` at the app root holds `project`, `flavor`, `arb_dir` (and optionally `xcstrings_dir`), so commands need no `--project`.
+- `flutterlocalisation.json` at the app root holds `project`, `flavor`, `arb_dir` (and optionally `xcstrings_dir`, or `angular_dir` for an Angular app), so commands need no `--project`.
+- In an Angular app (`angular.json`), strings are marked with `i18n="@@some.id"` or `$localize`:@@some.id:Text``, every message with an `@@id`, and a plural or select is the whole message. Run `ng extract-i18n`, then `fl import src/locale/messages.arb --translate`, then `fl pull`; never edit `messages.<locale>.arb` by hand and never write `messages.arb` yourself.
 
 When the `fl_mcp` tools are available, prefer them to shelling out. Mutating tools only preview until called with `apply: true`.
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.23.0] - 2026-11-22
+### Added
+- **Angular apps, the official way.** A project can ship Angular (`@angular/localize`, an
+  `@@id` on every message, `ng extract-i18n --format=arb`). `fl init` asks for the locale
+  folder (from `extract-i18n`'s `outputPath`, else `src/locale`) and writes `angular_dir`.
+  `fl pull` and `fl export` write one `messages.<locale>.arb` per language from the API and
+  list each locale under `i18n.locales` in `angular.json`; `messages.arb` stays the
+  extraction's. New strings in `messages.arb` are named by `fl pull` and imported by
+  `fl pull --adopt`; `fl import messages.arb` sends the extraction whatever its `@@locale`
+  says. `fl doctor` checks the Angular setup: `@angular/localize`, ARB extraction, messages
+  without an `@@id`, a plural inside a sentence, locale files `angular.json` does not list.
+  The MCP `pull_arbs`, `import_arb` and `check_l10n_setup` tools do the same.
+### Changed
+- Platforms are a typed `AppPlatform` (`flutter`, `ios`, `angular`); `ProjectData.platforms`
+  and `ProjectSummary.platforms` are `List<AppPlatform>`, and JSON output still names them
+  `"flutter"`, `"ios"`, `"angular"`.
+
 ## [1.22.1] - 2026-11-18
 ### Fixed
 - `fl pull --adopt` in an app with several catalogs sent every string of every target, which a

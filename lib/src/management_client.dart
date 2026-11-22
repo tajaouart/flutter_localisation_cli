@@ -15,6 +15,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
 import 'package:flutter_localisation_cli/src/exceptions.dart';
+import 'package:flutter_localisation_cli/src/platform.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/version.dart';
 
@@ -161,11 +162,6 @@ class GitRepository {
 ///
 /// Every project that predates the field is a Flutter project, and a backend
 /// that predates it omits the field altogether, so absence means Flutter.
-List<String> platformsFromJson(final Object? raw) {
-  if (raw is! List) return const <String>['flutter'];
-  final List<String> found = raw.whereType<String>().toList();
-  return found.isEmpty ? const <String>['flutter'] : found;
-}
 
 class ProjectData {
   ProjectData({
@@ -173,7 +169,7 @@ class ProjectData {
     required this.name,
     required this.flavors,
     this.repository,
-    this.platforms = const <String>['flutter'],
+    this.platforms = const <AppPlatform>[AppPlatform.flutter],
     this.xcstringsDir = '',
   });
 
@@ -184,15 +180,16 @@ class ProjectData {
   /// The linked ARB repo, or null when the dashboard has no git provider set up.
   final GitRepository? repository;
 
-  /// What consumes the strings: `flutter` (ARBs) and/or `ios` (String
-  /// Catalogs). Decides which files `pull` and `export` write.
-  final List<String> platforms;
+  /// What consumes the strings. Decides which files `pull` and `export` write.
+  final List<AppPlatform> platforms;
 
   /// Folder of the catalogs inside the git mirror; empty means `<flavor>/`.
   final String xcstringsDir;
 
-  bool get shipsFlutter => platforms.contains('flutter');
-  bool get shipsIos => platforms.contains('ios');
+  bool ships(final AppPlatform platform) => platforms.contains(platform);
+  bool get shipsFlutter => ships(AppPlatform.flutter);
+  bool get shipsIos => ships(AppPlatform.ios);
+  bool get shipsAngular => ships(AppPlatform.angular);
 
   factory ProjectData.fromJson(final Map<String, dynamic> j) => ProjectData(
         id: j['id'] as int,
@@ -397,7 +394,7 @@ class ProjectSummary {
     required this.workspace,
     required this.flavors,
     this.gitNeedsReauth = false,
-    this.platforms = const <String>['flutter'],
+    this.platforms = const <AppPlatform>[AppPlatform.flutter],
   });
 
   final int id;
@@ -409,8 +406,8 @@ class ProjectSummary {
   /// dashboard — ARB pushes are failing, so `pull` won't see new strings.
   final bool gitNeedsReauth;
 
-  /// `flutter` and/or `ios`; see [ProjectData.platforms].
-  final List<String> platforms;
+  /// See [ProjectData.platforms].
+  final List<AppPlatform> platforms;
 
   factory ProjectSummary.fromJson(final Map<String, dynamic> j) =>
       ProjectSummary(
@@ -767,6 +764,21 @@ class ManagementClient {
       'GET',
       '/api/project/$projectId/export/?flavor_id=$flavorId&format=xcstrings'
           '&table=$table',
+    );
+    return utf8.decode(res.bodyBytes);
+  }
+
+  /// One Angular translation file (`messages.<locale>.arb`) of a flavor, as
+  /// the backend renders it: `@@locale` and the messages, nothing else.
+  Future<String> downloadAngular(
+    final int projectId,
+    final int flavorId,
+    final String languageCode,
+  ) async {
+    final http.Response res = await _send(
+      'GET',
+      '/api/project/$projectId/export/?flavor_id=$flavorId&format=angular'
+          '&language_code=${Uri.encodeQueryComponent(languageCode)}',
     );
     return utf8.decode(res.bodyBytes);
   }

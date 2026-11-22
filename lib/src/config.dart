@@ -18,6 +18,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'package:flutter_localisation_cli/src/exceptions.dart';
+import 'package:flutter_localisation_cli/src/angular.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
 
 const String kDefaultBaseUrl = 'https://api.flutterlocalisation.com';
@@ -32,6 +33,7 @@ class ProjectConfig {
     this.flavor,
     this.arbDir,
     this.xcstringsDir,
+    this.angularDir,
     this.iosPermissionKeys,
     this.xcstringsCatalogs,
     this.root,
@@ -52,6 +54,14 @@ class ProjectConfig {
   /// with native iOS strings keeps them beside the ARBs, an iOS-only app
   /// points this at its Xcode resources folder.
   final String? xcstringsDir;
+
+  /// `angular_dir`: where `fl pull` writes Angular's `messages.<locale>.arb`
+  /// files and where `ng extract-i18n` writes `messages.arb`.
+  final String? angularDir;
+
+  /// The Angular folder in effect: `angular_dir`, else Angular's own default.
+  String get angularLocaleDir =>
+      angularDir ?? p.join(root ?? '.', kAngularDefaultDir);
 
   /// `xcstrings_catalogs`: the folders of an iOS app with several targets
   /// (the app, a widget, an extension), each holding the
@@ -179,6 +189,7 @@ class ProjectConfig {
       flavor: text('flavor'),
       arbDir: relativeToConfig('arb_dir'),
       xcstringsDir: relativeToConfig('xcstrings_dir'),
+      angularDir: relativeToConfig('angular_dir'),
       xcstringsCatalogs: catalogs,
       iosPermissionKeys: permissionKeys == null
           ? null

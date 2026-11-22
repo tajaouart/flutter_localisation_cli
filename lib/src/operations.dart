@@ -9,11 +9,14 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_localisation_cli/src/angular.dart';
 import 'package:flutter_localisation_cli/src/call_budget.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
+import 'package:flutter_localisation_cli/src/platform.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
+import 'package:path/path.dart' as path;
 
 /// Parse `--placeholder name:type[:format]` specs into the backend's placeholder
 /// map: `{name: {type, format?}}`. Returns null when [raw] is empty so callers
@@ -454,6 +457,12 @@ class Operations {
         (fileName != null && fileName.endsWith('.xcstrings'))) {
       return run(null);
     }
+    // Angular's extraction is the source whatever its `@@locale` says
+    // (`en-US` on an `en` project), and a translated Angular file names its
+    // locale: the service sorts both out.
+    if (isAngularArbJson(parsed) || await _angularProjectFile(fileName)) {
+      return run(null);
+    }
     final ({String code, String source})? inferred =
         inferArbLocale(parsed, fileName);
     if (inferred == null) return run(null);
@@ -507,6 +516,17 @@ class Operations {
     );
   }
 
+  /// An Angular-only project takes every ARB as Angular's.
+  Future<bool> _angularProjectFile(final String? fileName) async {
+    if (fileName == null ||
+        !(fileName == kAngularSource ||
+            RegExp(r'^messages\.[A-Za-z0-9_-]+\.arb$').hasMatch(fileName))) {
+      return false;
+    }
+    final ProjectData project = await client.getProject(projectId);
+    return project.shipsAngular && !project.shipsFlutter;
+  }
+
   Future<OpResult> _importArb(
     final String arbContent, {
     required final bool noteUntranslated,
@@ -519,6 +539,7 @@ class Operations {
   }) async {
     int keyCount;
     bool catalog;
+    bool angularFile = false;
     try {
       final Object? parsed = jsonDecode(arbContent);
       if (parsed is! Map<String, dynamic>) {
@@ -527,6 +548,7 @@ class Operations {
       }
       catalog = isCatalogJson(parsed) ||
           (fileName != null && fileName.endsWith('.xcstrings'));
+      angularFile = isAngularArbJson(parsed);
       keyCount = catalog
           ? catalogKeys(parsed).length
           : parsed.keys.where((final String k) => !k.startsWith('@')).length;
@@ -536,12 +558,22 @@ class Operations {
 
     final ProjectData project = await client.getProject(projectId);
     final FlavorData fl = project.flavor(flavor);
+    angularFile = angularFile ||
+        (project.shipsAngular &&
+            !project.shipsFlutter &&
+            !catalog &&
+            languageCode == null);
     // A String Catalog names its own source language and carries every
-    // locale, so there is no language to pick for it.
-    final String? lang = catalog
+    // locale, and an Angular file says which locale it is, so there is no
+    // language to pick for either.
+    final String? lang = catalog || angularFile
         ? null
         : languageCode ?? project.baseLanguage(flavor)?.code ?? 'en';
-    final String kind = catalog ? 'String Catalog' : 'ARB';
+    final String kind = switch ((catalog, angularFile)) {
+      (true, _) => 'String Catalog',
+      (false, true) => 'Angular file',
+      (false, false) => 'ARB',
+    };
 
     if (dryRun) {
       return OpResult(
@@ -555,7 +587,11 @@ class Operations {
           'keys': keyCount,
           'flavor': fl.name,
           if (lang != null) 'language': lang,
-          'format': catalog ? 'xcstrings' : 'arb',
+          'format': catalog
+              ? 'xcstrings'
+              : angularFile
+                  ? 'angular'
+                  : 'arb',
         },
       );
     }
@@ -1966,10 +2002,10 @@ class Operations {
     return OpResult(
       true,
       'Status for "${project.name}" / flavor "${f.name}" '
-      '(platforms: ${project.platforms.join(', ')}).',
+      '(platforms: ${platformLabels(project.platforms, separator: ', ')}).',
       <String, dynamic>{
         'flavor': f.name,
-        'platforms': project.platforms,
+        'platforms': platformWires(project.platforms),
         'locales': rows,
       },
     );
@@ -2166,6 +2202,77 @@ extension ArbExport on Operations {
         'files': written,
         'dir': dir,
         if (targets != null) 'unassigned': unassigned,
+      },
+    );
+  }
+
+  /// Angular's translated files, one `messages.<locale>.arb` per language
+  /// other than the base, written to [dir]. The source `messages.arb` is the
+  /// developer's: `ng extract-i18n` writes it. With [appRoot], the locales
+  /// are also listed in that app's `angular.json`.
+  Future<OpResult> exportAngular(
+    final String dir, {
+    final bool dryRun = false,
+    final ProjectData? fetched,
+    final String? appRoot,
+  }) async {
+    final ProjectData project = fetched ?? await client.getProject(projectId);
+    final FlavorData f = project.flavor(flavor);
+    final LanguageData? base = project.baseLanguage(flavor);
+    final List<Map<String, dynamic>> written = <Map<String, dynamic>>[];
+    final List<String> codes = <String>[
+      for (final LanguageData l in f.languages)
+        if (l.code != base?.code) l.code,
+    ];
+    for (final String code in codes) {
+      final String body;
+      try {
+        body = await client.downloadAngular(projectId, f.id, code);
+      } on ApiException catch (e) {
+        if (e.statusCode != 422) rethrow;
+        final List<String> details = <String>[
+          for (final Object? d
+              in (e.body?['details'] as List?) ?? const <Object?>[])
+            '$d',
+        ];
+        return OpResult(
+          false,
+          '${e.message}\n${details.map((final String d) => '  $d').join('\n')}',
+          <String, dynamic>{'details': details},
+        );
+      }
+      final int keys = (jsonDecode(body) as Map<String, dynamic>)
+          .keys
+          .where((final String k) => !k.startsWith('@'))
+          .length;
+      final String file = '$dir/${angularTargetName(code)}';
+      written.add(<String, dynamic>{'file': _shown(file), 'keys': keys});
+      if (dryRun) continue;
+      final File out = File(file);
+      out.parent.createSync(recursive: true);
+      out.writeAsStringSync(body);
+    }
+    List<String>? listed;
+    if (appRoot != null) {
+      final String rel =
+          path.relative(dir, from: appRoot).replaceAll(r'\', '/');
+      listed = syncAngularLocales(appRoot, rel, codes,
+          sourceLocale: base?.code, dryRun: dryRun);
+    }
+    return OpResult(
+      true,
+      codes.isEmpty
+          ? 'No Angular file to write: the flavor has only its base language. '
+              'Add one with `fl languages add fr`.'
+          : '${dryRun ? 'DRY RUN: would write' : 'Wrote'} ${written.length} '
+              'Angular file(s) to ${_shown(dir)} '
+              '(${written.map((final Map<String, dynamic> w) => path.basename(w['file'] as String)).join(', ')}).'
+              '${listed == null || listed.isEmpty ? '' : '\n${dryRun ? 'Would list' : 'Listed'} '
+                  '${listed.join(', ')} under i18n.locales in angular.json.'}',
+      <String, dynamic>{
+        'files': written,
+        'angular_dir': dir,
+        if (listed != null) 'angular_json_added': listed,
       },
     );
   }

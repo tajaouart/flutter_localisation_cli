@@ -16,6 +16,7 @@ import 'package:flutter_localisation_cli/src/xcstrings.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:path/path.dart' as p;
+import 'package:flutter_localisation_cli/src/platform.dart';
 import 'package:test/test.dart';
 
 /// Bytes the way the backend serves them: Xcode's ` : ` separator, which a
@@ -102,7 +103,7 @@ void main() {
         'name': 'Old',
         'flavors': <dynamic>[],
       });
-      expect(old.platforms, <String>['flutter']);
+      expect(old.platforms, <AppPlatform>[AppPlatform.flutter]);
       expect(old.shipsFlutter, isTrue);
       expect(old.shipsIos, isFalse);
 
@@ -117,7 +118,8 @@ void main() {
         'name': 'Gush',
         'platforms': <String>['flutter', 'ios'],
       });
-      expect(summary.platforms, <String>['flutter', 'ios']);
+      expect(summary.platforms,
+          <AppPlatform>[AppPlatform.flutter, AppPlatform.ios]);
     });
   });
 

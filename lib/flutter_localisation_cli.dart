@@ -9,4 +9,5 @@ export 'src/config.dart';
 export 'src/exceptions.dart';
 export 'src/management_client.dart';
 export 'src/operations.dart';
+export 'src/platform.dart';
 export 'src/project_resolver.dart';

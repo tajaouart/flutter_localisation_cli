@@ -178,6 +178,9 @@ class FakeBackend {
   /// What the translator is told for every language.
   String projectInstructions = '';
 
+  /// What an import reports it left out, as the service words it.
+  List<String> importProblems = <String>[];
+
   /// Ids of every batch translation request, in order.
   final List<List<int>> translated = <List<int>>[];
 
@@ -374,6 +377,15 @@ class FakeBackend {
           'failed': <dynamic>[],
         },
       }));
+    } else if (req.method == 'GET' &&
+        path == '/api/project/7/export/' &&
+        req.uri.queryParameters['format'] == 'angular') {
+      final String code = req.uri.queryParameters['language_code'] ?? '';
+      res.write('${const JsonEncoder.withIndent('  ').convert(<String, String>{
+            '@@locale': code,
+            'home.title': 'Hello ($code)',
+            'home.greeting': r'Hi {$INTERPOLATION} ' '($code)',
+          })}\n');
     } else if (req.method == 'GET' && path == '/api/project/7/export/') {
       final String table = req.uri.queryParameters['table'] ?? 'Localizable';
       if (table == 'AppShortcuts' && appShortcuts == null) {
@@ -421,7 +433,7 @@ class FakeBackend {
           'rows': <String, int>{},
           'skipped_keys': <String>[],
           'locales': <String>['en'],
-          'problems': <String>[],
+          'problems': importProblems,
         },
       }));
     } else {
