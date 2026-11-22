@@ -3,8 +3,14 @@ name: npm release
 # A version tag (v1.23.0) compiles fl and fl_mcp for every target in
 # npm/targets.json and publishes @flutterlocalisation/cli, one
 # @flutterlocalisation/cli-<os>-<cpu> per target and @flutterlocalisation/angular,
-# all at the version of pubspec.yaml. Needs the NPM_TOKEN secret (an
-# automation token of the flutterlocalisation npm org).
+# all at the version of pubspec.yaml.
+#
+# Publishing uses npm trusted publishing (this workflow's OIDC identity, no
+# stored token): npm is restricting tokens that bypass 2FA. Each package needs
+# this repository and workflow added as its trusted publisher on npmjs.com;
+# a package can only get one once it exists, so the very first publish of a
+# new package is done by hand (`npm publish --access public` from
+# npm/dist/<package>, signed in with 2FA).
 
 on:
   push:
@@ -59,8 +65,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@latest
       - uses: actions/download-artifact@v4
         with:
           pattern: bins-*
@@ -84,8 +92,6 @@ jobs:
         run: for d in npm/dist/*/; do (cd "$d" && npm pack --dry-run); done
       - name: Publish, binaries first so the launcher never points at a missing version
         if: startsWith(github.ref, 'refs/tags/') || inputs.publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for d in npm/dist/cli-*/ npm/dist/cli/ npm/dist/angular/; do
             (cd "$d" && npm publish --access public --provenance)
