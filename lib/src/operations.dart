@@ -12,6 +12,7 @@ import 'dart:io';
 import 'package:flutter_localisation_cli/src/angular.dart';
 import 'package:flutter_localisation_cli/src/call_budget.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
+import 'package:flutter_localisation_cli/src/file_diff.dart';
 import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/ngx.dart';
@@ -426,7 +427,86 @@ class Operations {
   /// Without [languageCode], an ARB that names another language of the flavor
   /// (`@@locale`, else its file name) is imported as that language: read as
   /// the base, `app_en.arb` on a German project would land as German text.
+  ///
+  /// A dry run also says, key by key, what the import would add, change and
+  /// leave, and what the service holds that the file no longer has. With
+  /// [prune] (the source file only) those keys are deleted after the import.
   Future<OpResult> importArb(
+    final String arbContent, {
+    final String? languageCode,
+    final bool overwrite = false,
+    final bool translate = false,
+    final bool dryRun = false,
+    final bool prune = false,
+    final int chunkSize = _defaultChunkSize,
+    final String? fileName,
+    final bool noteUntranslated = true,
+  }) async {
+    FileDiff? diff;
+    if (dryRun || prune) {
+      try {
+        diff = await compareFile(arbContent,
+            fileName: fileName, languageCode: languageCode);
+      } on ManagementException catch (e) {
+        if (prune) {
+          return OpResult(false,
+              'Nothing was imported: --prune needs to compare the file first. ${e.message}');
+        }
+      }
+    }
+    if (prune && diff != null && !diff.isBase) {
+      return OpResult(
+        false,
+        'Nothing was imported: --prune deletes keys the SOURCE file no longer '
+        'has, and ${fileName ?? 'this file'} is "${diff.language}". Import it '
+        'without --prune.',
+        <String, dynamic>{
+          'error': 'prune_needs_source',
+          'language': diff.language
+        },
+      );
+    }
+    final OpResult r = await _importResolved(arbContent,
+        languageCode: languageCode,
+        overwrite: overwrite,
+        translate: translate,
+        dryRun: dryRun,
+        chunkSize: chunkSize,
+        fileName: fileName,
+        noteUntranslated: noteUntranslated);
+    if (diff == null) return r;
+    final FileDiff d = diff;
+    if (dryRun) {
+      final int changed = d.changed.length;
+      final String lines = <String>[
+        '  ${d.added.length} new key(s) would be added.',
+        if (changed > 0)
+          overwrite
+              ? '  $changed would be overwritten with the file\'s text.'
+              : '  $changed differ and would keep the service\'s text (--overwrite replaces it).',
+        '  ${d.same} already the same.',
+        if (d.gone.isNotEmpty)
+          '  ${d.gone.length} on the service are not in the file'
+              '${prune ? ' and would be deleted' : d.isBase ? ' (--prune deletes them)' : ''}: '
+              '${d.gone.take(10).join(', ')}${d.gone.length > 10 ? ' …' : ''}',
+        '  `fl diff ${fileName ?? '<file>'}` shows each key.',
+      ].join('\n');
+      return OpResult(r.ok, '${r.message}\n$lines',
+          <String, dynamic>{...r.data, 'diff': d.toJson()});
+    }
+    if (!r.ok || d.gone.isEmpty) return r;
+    for (final String key in d.gone) {
+      await client.deleteKey(projectId, key);
+    }
+    return OpResult(
+      true,
+      '${r.message}\nDeleted ${d.gone.length} key(s) the file no longer has: '
+      '${d.gone.take(10).join(', ')}${d.gone.length > 10 ? ' …' : ''}',
+      <String, dynamic>{...r.data, 'pruned': d.gone},
+    );
+  }
+
+  Future<OpResult> _importResolved(
     final String arbContent, {
     final String? languageCode,
     final bool overwrite = false,
@@ -2261,6 +2341,10 @@ extension ArbExport on Operations {
       for (final LanguageData l in f.languages)
         if (l.code != base?.code) l.code,
     ];
+    // The files follow the developer's messages.arb, so an export adds lines
+    // where they belong instead of re-sorting every file.
+    final List<String>? sourceOrder =
+        angularSourceOrder(File('$dir/$kAngularSource'));
     for (final String code in codes) {
       final String body;
       try {
@@ -2278,16 +2362,17 @@ extension ArbExport on Operations {
           <String, dynamic>{'details': details},
         );
       }
-      final int keys = (jsonDecode(body) as Map<String, dynamic>)
-          .keys
-          .where((final String k) => !k.startsWith('@'))
-          .length;
+      final Map<String, dynamic> served =
+          inSourceOrder(jsonDecode(body) as Map<String, dynamic>, sourceOrder);
+      final int keys =
+          served.keys.where((final String k) => !k.startsWith('@')).length;
       final String file = '$dir/${angularTargetName(code)}';
       written.add(<String, dynamic>{'file': _shown(file), 'keys': keys});
       if (dryRun) continue;
       final File out = File(file);
       out.parent.createSync(recursive: true);
-      out.writeAsStringSync(body);
+      out.writeAsStringSync(
+          '${const JsonEncoder.withIndent('  ').convert(served)}\n');
     }
     List<String>? listed;
     if (appRoot != null) {

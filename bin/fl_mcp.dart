@@ -125,7 +125,13 @@ void _bootstrap() {
     // then ~/.config/flutterlocalisation/credentials.json (written by
     // `fl login`). Previously fl_mcp only read $FL_API_TOKEN, forcing users to
     // duplicate the token into their MCP config even after `fl login`.
-    token = Credentials.resolve(baseUrl: baseUrl).token;
+    String? tokenFile;
+    try {
+      tokenFile = ProjectConfig.load().tokenFile;
+    } on Object {
+      tokenFile = null;
+    }
+    token = Credentials.resolve(baseUrl: baseUrl, tokenFile: tokenFile).token;
   } on AuthConfigException {
     stderr.writeln(
       'fl_mcp: no API token found. Set \$FL_API_TOKEN or run '
@@ -650,8 +656,10 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             'Angular file names its locale, so `language` is ignored for both. '
             'Angular messages need an @@id, and a plural or select must be the whole '
             'message; the result lists any that were left out. translate=true batch-translates the other '
-            'locales after import (one batch call, not per key). Preview by default; '
-            'apply=true writes.',
+            'locales after import (one batch call, not per key). Preview by default: '
+            'the preview lists the keys the import would add, the ones whose text differs '
+            'and the ones only the service has; apply=true writes. prune=true (source file '
+            'only) also deletes the keys only the service has.',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
@@ -681,6 +689,13 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
               'description': 'Create the keys AND translate them into every other '
                   'locale in the same request. The backend does the filling, so '
                   'there is no separate discovery-and-translate round trip.',
+              'default': false,
+            },
+            'prune': <String, dynamic>{
+              'type': 'boolean',
+              'description':
+                  'Source file only: after the import, delete the keys '
+                      'the service has and the file no longer does.',
               'default': false,
             },
             'apply': <String, dynamic>{
@@ -1356,6 +1371,7 @@ Future<void> _callTool(
             overwrite: (a['overwrite'] ?? false) as bool,
             translate: (a['translate'] ?? false) as bool,
             dryRun: !apply,
+            prune: (a['prune'] ?? false) as bool,
             fileName: path == null ? null : File(path).uri.pathSegments.last,
           );
         }

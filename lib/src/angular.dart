@@ -222,3 +222,37 @@ List<String> angularSetupIssues(final String root, final String dir) {
   }
   return issues;
 }
+
+/// The message ids of an Angular source file, in its order; null when there is none.
+List<String>? angularSourceOrder(final File source) {
+  if (!source.existsSync()) return null;
+  try {
+    final Object? doc = jsonDecode(source.readAsStringSync());
+    if (doc is! Map<String, dynamic>) return null;
+    return <String>[
+      for (final String k in doc.keys)
+        if (!k.startsWith('@')) k,
+    ];
+  } on FormatException {
+    return null;
+  }
+}
+
+/// [doc] with `@@locale` first, then the ids of [order] in that order, then
+/// the rest sorted.
+Map<String, dynamic> inSourceOrder(
+    final Map<String, dynamic> doc, final List<String>? order) {
+  if (order == null) return doc;
+  final Map<String, int> rank = <String, int>{
+    for (int i = 0; i < order.length; i++) order[i]: i,
+  };
+  final List<String> keys = doc.keys.toList()
+    ..sort((final String a, final String b) {
+      if (a == '@@locale') return -1;
+      if (b == '@@locale') return 1;
+      final int ra = rank[a] ?? order.length;
+      final int rb = rank[b] ?? order.length;
+      return ra != rb ? ra.compareTo(rb) : a.compareTo(b);
+    });
+  return <String, dynamic>{for (final String k in keys) k: doc[k]};
+}

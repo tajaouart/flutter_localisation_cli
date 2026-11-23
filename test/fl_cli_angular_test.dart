@@ -86,6 +86,7 @@ void main() {
     backend.platforms = <String>['angular'];
     backend.languages = <String>['en', 'fr', 'pt-BR'];
     backend.imports.clear();
+    backend.deletedKeys.clear();
     backend.importProblems = <String>[];
     tmp = Directory(Directory.systemTemp
         .createTempSync('fl_cli_angular_test')
@@ -200,6 +201,95 @@ void main() {
     final Run r = await fl(<String>['export', 'out']);
     expect(r.code, 0, reason: r.err);
     expect(inApp('out/messages.fr.arb').existsSync(), isTrue);
+  });
+
+  // The service answers home.title "Hello (en)" and home.greeting
+  // "Hi {$INTERPOLATION} (en)" for the source; kExtraction has other texts
+  // for both and adds home.new.
+  void writeSource([final String content = kExtraction]) =>
+      inApp('src/locale/messages.arb')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(content);
+
+  test(
+      'diff lists what only the file has, what differs and what only the '
+      'service has', () async {
+    writeSource();
+    Run r = await fl(<String>['diff', 'src/locale/messages.arb']);
+    expect(r.code, 0, reason: r.err);
+    expect(r.out, contains('against "en" (the source)'));
+    expect(r.out, contains('1 new, not on the service yet: home.new'));
+    expect(r.out, contains('2 different'));
+    expect(r.out, contains('service: "Hello (en)"'));
+
+    r = await fl(<String>['--json', 'diff', 'src/locale/messages.arb']);
+    expect(r.json['added'], <String>['home.new']);
+    expect((r.json['changed'] as Map<String, dynamic>).keys,
+        <String>['home.title', 'home.greeting']);
+    expect(r.json['gone'], isEmpty);
+    expect(backend.imports, isEmpty, reason: 'diff changes nothing');
+  });
+
+  test('a dry-run import says key by key what it would do', () async {
+    writeSource();
+    final Run r =
+        await fl(<String>['--dry-run', 'import', 'src/locale/messages.arb']);
+    expect(r.code, 0, reason: r.err);
+    expect(r.out, contains('1 new key(s) would be added'));
+    expect(
+        r.out,
+        contains(
+            "2 differ and would keep the service's text (--overwrite replaces it)"));
+    expect(backend.imports, isEmpty);
+  });
+
+  test('--prune deletes the keys the source no longer has, after the import',
+      () async {
+    writeSource(jsonEncode(
+        <String, String>{'@@locale': 'en', 'home.title': 'Hello world'}));
+    Run r = await fl(
+        <String>['--dry-run', 'import', 'src/locale/messages.arb', '--prune']);
+    expect(r.code, 0, reason: r.err);
+    expect(
+        r.out,
+        contains(
+            '1 on the service are not in the file and would be deleted: home.greeting'));
+    expect(backend.deletedKeys, isEmpty);
+
+    r = await fl(<String>['import', 'src/locale/messages.arb', '--prune']);
+    expect(r.code, 0, reason: r.err);
+    expect(backend.imports, hasLength(1));
+    expect(backend.deletedKeys, <String>['home.greeting']);
+    expect(r.out,
+        contains('Deleted 1 key(s) the file no longer has: home.greeting'));
+  });
+
+  test('--prune refuses a translated file', () async {
+    inApp('src/locale/messages.fr.arb')
+      ..createSync(recursive: true)
+      ..writeAsStringSync(jsonEncode(
+          <String, String>{'@@locale': 'fr', 'home.title': 'Bonjour'}));
+    final Run r =
+        await fl(<String>['import', 'src/locale/messages.fr.arb', '--prune']);
+    expect(r.code, isNot(0));
+    expect(r.out + r.err,
+        contains('--prune deletes keys the SOURCE file no longer has'));
+    expect(backend.imports, isEmpty);
+    expect(backend.deletedKeys, isEmpty);
+  });
+
+  test('export writes the ids in the order of the source file', () async {
+    writeSource(jsonEncode(<String, String>{
+      '@@locale': 'en',
+      'home.greeting': r'Hi {$INTERPOLATION}',
+      'home.title': 'Hello world',
+    }));
+    final Run r = await fl(<String>['export', 'src/locale']);
+    expect(r.code, 0, reason: r.err);
+    final String fr = inApp('src/locale/messages.fr.arb').readAsStringSync();
+    expect((jsonDecode(fr) as Map<String, dynamic>).keys,
+        <String>['@@locale', 'home.greeting', 'home.title']);
+    expect(fr, endsWith('}\n'));
   });
 
   test('a Flutter + Angular project writes both', () async {

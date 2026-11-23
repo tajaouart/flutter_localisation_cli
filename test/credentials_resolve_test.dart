@@ -35,6 +35,53 @@ void main() {
     return f;
   }
 
+  group('token_file in flutterlocalisation.json', () {
+    test('is read before the credentials file, ~ meaning home', () {
+      final File creds = writeCreds(<String, dynamic>{'token': 'flk_login'});
+      File('${tmp.path}/project_token').writeAsStringSync('flk_project\n');
+      expect(
+        Credentials.resolve(
+          credentialsFile: creds,
+          tokenFile: '~/project_token',
+          env: <String, String>{'HOME': tmp.path},
+        ).token,
+        'flk_project',
+      );
+    });
+
+    test('loses to FL_API_TOKEN', () {
+      expect(
+        Credentials.resolve(
+          tokenFile: '${tmp.path}/nowhere',
+          env: <String, String>{'FL_API_TOKEN': 'flk_env'},
+        ).token,
+        'flk_env',
+      );
+    });
+
+    test('a missing file says so instead of falling back to another token', () {
+      expect(
+        () => Credentials.resolve(
+          credentialsFile: writeCreds(<String, dynamic>{'token': 'flk_login'}),
+          tokenFile: '${tmp.path}/nowhere',
+          env: <String, String>{},
+        ),
+        throwsA(isA<AuthConfigException>().having(
+            (final AuthConfigException e) => e.message,
+            'message',
+            contains('does not exist'))),
+      );
+    });
+
+    test('is read from the config file', () {
+      final File cfg = File('${tmp.path}/flutterlocalisation.json')
+        ..writeAsStringSync(
+            jsonEncode(<String, String>{'token_file': '~/.config/fl/studio'}));
+      expect(
+          ProjectConfig.load(path: cfg.path).tokenFile, '~/.config/fl/studio');
+    });
+  });
+
   test('explicit token wins over everything', () {
     expect(Credentials.resolve(explicit: 'flk_explicit').token, 'flk_explicit');
   });

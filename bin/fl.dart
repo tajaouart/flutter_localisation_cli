@@ -27,6 +27,7 @@ import 'package:flutter_localisation_cli/src/arb_sync.dart';
 import 'package:flutter_localisation_cli/src/codegen.dart';
 import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/exceptions.dart';
+import 'package:flutter_localisation_cli/src/file_diff.dart';
 import 'package:flutter_localisation_cli/src/glossary.dart';
 import 'package:flutter_localisation_cli/src/guard.dart';
 import 'package:flutter_localisation_cli/src/init_detect.dart';
@@ -44,7 +45,7 @@ import 'package:flutter_localisation_cli/src/xcstrings.dart';
 Future<void> main(final List<String> args) async {
   final CommandRunner<int> runner = CommandRunner<int>(
     'fl',
-    'FlutterLocalisation management CLI — manage translation keys from the terminal.',
+    'FlutterLocalisation management CLI: manage the strings of a Flutter, iOS or Angular app from the terminal.',
   )
     ..argParser.addOption('config', help: 'Path to flutterlocalisation.json.')
     ..argParser
@@ -76,6 +77,7 @@ Future<void> main(final List<String> args) async {
   runner.addCommand(ProjectsCommand());
   runner.addCommand(AddCommand());
   runner.addCommand(ImportCommand());
+  runner.addCommand(DiffCommand());
   runner.addCommand(EditCommand());
   runner.addCommand(DeleteCommand());
   runner.addCommand(TranslateCommand());
@@ -261,6 +263,7 @@ mixin _ApiCommand on Command<int> {
     final Credentials creds = Credentials.resolve(
       explicit: globalResults?['token'] as String?,
       baseUrl: cfg.baseUrl,
+      tokenFile: cfg.tokenFile,
     );
     _tokenSource = creds.source;
     return ManagementClient(baseUrl: cfg.baseUrl, token: creds.token);
@@ -396,13 +399,18 @@ class InitCommand extends Command<int> with _ApiCommand {
               'the outputPath of extract-i18n in angular.json, else '
               'src/locale), or the <locale>.json files of an ngx-translate '
               'project (default: an existing src/assets/i18n or public/i18n).')
+      ..addOption('token-file',
+          help: 'A file holding this project\'s token (~ allowed), written '
+              'into the config as "token_file": the repo then uses that token '
+              'whatever `fl login` stored.')
       ..addFlag('yes',
           abbr: 'y',
           negatable: false,
           help: 'Take every default without asking.')
       ..addFlag('pull',
           defaultsTo: true,
-          help: 'Pull the strings (and regenerate the Dart) once configured.')
+          help:
+              'Pull the strings (and, for Flutter, regenerate the Dart) once configured.')
       ..addFlag('guard',
           negatable: false,
           help: 'Also write the AI guard rules (asked for when interactive).')
@@ -448,8 +456,10 @@ class InitCommand extends Command<int> with _ApiCommand {
       creds = Credentials.resolve(
         explicit: globalResults?['token'] as String?,
         baseUrl: baseUrl,
+        tokenFile: argResults!['token-file'] as String?,
       );
     } on AuthConfigException {
+      if (argResults!['token-file'] != null) rethrow;
       if (!ask.interactive) rethrow;
       stdout.writeln('No API token stored yet. Create one in the dashboard:\n'
           '  $kDashboardUrl  →  workspace  →  API keys\n'
@@ -524,6 +534,8 @@ class InitCommand extends Command<int> with _ApiCommand {
         if (arbDir != null) 'arb_dir': arbDir,
         if (catalogDir != null) 'xcstrings_dir': catalogDir,
         if (angularDir != null) 'angular_dir': angularDir,
+        if (argResults!['token-file'] != null)
+          'token_file': argResults!['token-file'],
       };
       configFile.writeAsStringSync(
           '${const JsonEncoder.withIndent('  ').convert(cfg)}\n');
@@ -779,6 +791,12 @@ class ImportCommand extends Command<int> with _ApiCommand {
       negatable: false,
       help: 'AI-translate the other locales after import (one batch pass).',
     );
+    argParser.addFlag(
+      'prune',
+      negatable: false,
+      help: 'Source file only: after the import, delete the keys the service '
+          'has and the file no longer does. --dry-run lists them first.',
+    );
   }
 
   @override
@@ -791,8 +809,7 @@ class ImportCommand extends Command<int> with _ApiCommand {
   @override
   String get invocation =>
       'fl import <file.arb|file.xcstrings|locale.json> [--language <code>] '
-      '[--overwrite] '
-      '[--translate]';
+      '[--overwrite] [--translate] [--prune]';
 
   @override
   Future<int> run() async {
@@ -818,9 +835,59 @@ class ImportCommand extends Command<int> with _ApiCommand {
         overwrite: argResults!['overwrite'] as bool,
         translate: argResults!['translate'] as bool,
         dryRun: dryRun,
+        prune: argResults!['prune'] as bool,
         fileName: file.uri.pathSegments.last,
       );
       return emit(r);
+    } finally {
+      built.client.close();
+    }
+  }
+}
+
+/// A file on disk against the service, before an import or an export
+/// overwrites one side.
+class DiffCommand extends Command<int> with _ApiCommand {
+  DiffCommand() {
+    argParser.addOption(
+      'language',
+      abbr: 'l',
+      help: 'Locale the file stands for (default: what the file says).',
+    );
+  }
+
+  @override
+  String get name => 'diff';
+  @override
+  String get description =>
+      'Compare a translation file (Flutter or Angular ARB, ngx-translate '
+      'json) with the service: keys only the file has, keys whose text '
+      'differs, keys only the service has. Changes nothing.';
+  @override
+  String get invocation => 'fl diff <file> [--language <code>]';
+
+  @override
+  Future<int> run() async {
+    final List<String> rest = argResults!.rest;
+    if (rest.isEmpty) {
+      throw UsageException('Missing <file> path argument.', usage);
+    }
+    final File file = File(rest.first);
+    if (!file.existsSync()) {
+      stderr.writeln('Error: file not found: ${rest.first}');
+      return 1;
+    }
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
+    try {
+      final String name = file.uri.pathSegments.last;
+      final FileDiff d = await built.ops.compareFile(file.readAsStringSync(),
+          fileName: name,
+          languageCode: _locale(argResults!['language'] as String?));
+      return emit(OpResult(true, describeDiff(d, name), d.toJson()));
     } finally {
       built.client.close();
     }
@@ -927,6 +994,12 @@ class DeleteCommand extends Command<int> with _ApiCommand {
       'locale',
       help: 'Delete only this locale (default: the whole key, all locales).',
     );
+    argParser.addFlag(
+      'yes',
+      abbr: 'y',
+      negatable: false,
+      help: 'Do not ask first (asked only at a terminal).',
+    );
   }
 
   @override
@@ -934,11 +1007,27 @@ class DeleteCommand extends Command<int> with _ApiCommand {
   @override
   String get description => 'Delete a key (all locales) or a single locale.';
   @override
-  String get invocation => 'fl delete <key> [--locale <code>]';
+  String get invocation => 'fl delete <key> [--locale <code>] [--yes]';
 
   @override
   Future<int> run() async {
     final String key = _requireKey(this);
+    final String? locale = _locale(argResults!['locale'] as String?);
+    final Prompter ask = Prompter(
+        interactive: !(argResults!['yes'] as bool) &&
+            !jsonOut &&
+            !dryRun &&
+            (stdin.hasTerminal ||
+                Platform.environment['FL_INTERACTIVE'] == '1'));
+    if (ask.interactive &&
+        !ask.confirm(
+            locale == null
+                ? 'Delete "$key" in every locale? This cannot be undone.'
+                : 'Delete the $locale text of "$key"?',
+            fallback: false)) {
+      stderr.writeln('Nothing deleted.');
+      return 1;
+    }
     final ({
       ManagementClient client,
       Operations ops,
@@ -947,7 +1036,7 @@ class DeleteCommand extends Command<int> with _ApiCommand {
     try {
       final OpResult r = await built.ops.delete(
         key,
-        locale: _locale(argResults!['locale'] as String?),
+        locale: locale,
         dryRun: dryRun,
       );
       return emit(r);
@@ -1185,7 +1274,7 @@ class StatusCommand extends Command<int> with _ApiCommand {
         final int untranslated = (m['untranslated'] as int?) ?? 0;
         totalUntranslated += untranslated;
         final String gap = untranslated > 0
-            ? '  ⚠ $untranslated same as source — `fl retranslate`'
+            ? '  ⚠ $untranslated not translated yet (still the source text): `fl retranslate`'
             : '';
         final int outdated = (m['outdated'] as int?) ?? 0;
         totalOutdated += outdated;
@@ -1996,7 +2085,7 @@ class SyncCommand extends Command<int> with _ApiCommand {
   @override
   String get description =>
       'Import an ARB or String Catalog (optional), sync arb_dir, then '
-      'regenerate the Dart, the whole flow in one command. With '
+      'regenerate the Dart (Flutter), the whole flow in one command. With '
       '"ios_permission_keys" in flutterlocalisation.json it ends with '
       '`fl native`.';
   @override
@@ -2278,7 +2367,7 @@ class DoctorCommand extends Command<int> {
   String get name => 'doctor';
   @override
   String get description =>
-      'Check l10n.yaml, pubspec.yaml and imports against current Flutter '
+      'Flutter only: check l10n.yaml, pubspec.yaml and imports against current Flutter '
       '(synthetic-package, generate: true, package:flutter_gen).';
   @override
   String get invocation => 'fl doctor [--fix]';

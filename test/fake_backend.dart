@@ -188,6 +188,9 @@ class FakeBackend {
   final List<List<int>> translated = <List<int>>[];
 
   final List<ReceivedImport> imports = <ReceivedImport>[];
+
+  /// Keys deleted through `/translation_keys/delete/`, in order.
+  final List<String> deletedKeys = <String>[];
   final List<String> requests = <String>[];
 
   String get url => 'http://127.0.0.1:${_server.port}';
@@ -421,6 +424,11 @@ class FakeBackend {
           _ => servedCatalog ?? kServedCatalog,
         });
       }
+    } else if (req.method == 'POST' &&
+        path == '/api/projects/7/translation_keys/delete/') {
+      deletedKeys.add((jsonDecode(await utf8.decoder.bind(req).join())
+          as Map<String, dynamic>)['key'] as String);
+      res.write('{}');
     } else if (req.method == 'POST' && path == '/api/project/7/import-arb/') {
       final String body = await utf8.decoder.bind(req).join();
       final ReceivedImport received = ReceivedImport(body);

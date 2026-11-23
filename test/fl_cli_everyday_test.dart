@@ -87,6 +87,28 @@ void main() {
   });
   tearDown(() => tmp.deleteSync(recursive: true));
 
+  group('delete', () {
+    test('asks at a terminal, and a no deletes nothing', () async {
+      backend.deletedKeys.clear();
+      final Run r = await fl(<String>['delete', 'home.title'],
+          env: <String, String>{'FL_INTERACTIVE': '1'});
+      expect(r.code, 1);
+      expect(r.out, contains('Delete "home.title" in every locale?'));
+      expect(r.err, contains('Nothing deleted.'));
+      expect(backend.deletedKeys, isEmpty);
+    });
+
+    test('--yes, or no terminal, deletes without asking', () async {
+      backend.deletedKeys.clear();
+      Run r = await fl(<String>['delete', 'home.title', '--yes'],
+          env: <String, String>{'FL_INTERACTIVE': '1'});
+      expect(r.code, 0, reason: r.err);
+      r = await fl(<String>['delete', 'home.other']);
+      expect(r.code, 0, reason: r.err);
+      expect(backend.deletedKeys, <String>['home.title', 'home.other']);
+    });
+  });
+
   group('a newer version', () {
     test('is said once a day at a desk, not after every command', () async {
       backend.latestVersion = '99.0.0';

@@ -289,6 +289,35 @@ void main() {
     expect(backend.imports.single.hasLanguage, isFalse);
   });
 
+  test(
+      'import_arb previews key by key, and prune deletes what only the '
+      'service has', () async {
+    backend.platforms = <String>['angular'];
+    backend.deletedKeys.clear();
+    const String source =
+        r'{"@@locale":"en-US","home.title":"Hello (en)","home.new":"N","@home.title":{"x-locations":[]}}';
+    final Map<String, dynamic> preview = await mcp.call(
+        'import_arb', <String, dynamic>{
+      'path': _write(tmp, 'messages.arb', source),
+      'prune': true
+    });
+    expect(preview['ok'], isTrue, reason: preview.toString());
+    final Map<String, dynamic> diff =
+        (preview['data'] ?? preview)['diff'] as Map<String, dynamic>;
+    expect(diff['added'], <String>['home.new']);
+    expect(diff['gone'], <String>['home.greeting']);
+    expect(backend.imports, isEmpty);
+
+    final Map<String, dynamic> applied =
+        await mcp.call('import_arb', <String, dynamic>{
+      'path': p.join(tmp.path, 'messages.arb'),
+      'prune': true,
+      'apply': true,
+    });
+    expect(applied['ok'], isTrue, reason: applied.toString());
+    expect(backend.deletedKeys, <String>['home.greeting']);
+  });
+
   test('import_arb with an ARB still carries the language', () async {
     backend.platforms = <String>['flutter'];
     final File arb = File(p.join(tmp.path, 'app_en.arb'))
@@ -521,4 +550,9 @@ void main() {
         .call('check_l10n_setup', <String, dynamic>{'project_root': tmp.path});
     expect(doctor['ngx'], isTrue, reason: doctor.toString());
   });
+}
+
+String _write(final Directory dir, final String name, final String content) {
+  final File f = File(p.join(dir.path, name))..writeAsStringSync(content);
+  return f.path;
 }

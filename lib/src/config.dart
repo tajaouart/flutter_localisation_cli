@@ -7,7 +7,9 @@
 ///  * **Credentials** — the `flk_live_…` API token. Resolved from (in order):
 ///      1. `--token` flag / explicit argument,
 ///      2. `FL_API_TOKEN` environment variable,
-///      3. `~/.config/flutterlocalisation/credentials.json` (written by `fl login`, chmod 600).
+///      3. the file `token_file` in `flutterlocalisation.json` names (a repo
+///         tied to one workspace, on a machine whose login is another one),
+///      4. `~/.config/flutterlocalisation/credentials.json` (written by `fl login`, chmod 600).
 ///
 /// Pure Dart — safe under `dart run`.
 library;
@@ -38,7 +40,12 @@ class ProjectConfig {
     this.iosPermissionKeys,
     this.xcstringsCatalogs,
     this.root,
+    this.tokenFile,
   });
+
+  /// `token_file`: a file holding this project's token, `~` allowed. The
+  /// token itself never goes in the config, which is committed.
+  final String? tokenFile;
 
   final String baseUrl;
 
@@ -200,6 +207,7 @@ class ProjectConfig {
           ? null
           : Map<String, String>.from(permissionKeys as Map<dynamic, dynamic>),
       root: p.normalize(file.absolute.parent.path),
+      tokenFile: text('token_file'),
     );
   }
 
@@ -236,12 +244,32 @@ class Credentials {
     final String? explicit,
     final String? baseUrl,
     final File? credentialsFile,
+    final String? tokenFile,
+    final Map<String, String>? env,
   }) {
     if (explicit != null && explicit.isNotEmpty) return Credentials(explicit);
 
-    final String? fromEnv = Platform.environment[kTokenEnvVar];
+    final Map<String, String> environment = env ?? Platform.environment;
+    final String? fromEnv = environment[kTokenEnvVar];
     if (fromEnv != null && fromEnv.isNotEmpty) {
       return Credentials(fromEnv, source: '\$$kTokenEnvVar');
+    }
+
+    if (tokenFile != null && tokenFile.isNotEmpty) {
+      final String home =
+          environment['HOME'] ?? environment['USERPROFILE'] ?? '';
+      final String path = tokenFile.startsWith('~/')
+          ? p.join(home, tokenFile.substring(2))
+          : tokenFile;
+      final File f = File(path);
+      final String token = f.existsSync() ? f.readAsStringSync().trim() : '';
+      if (token.isEmpty) {
+        throw AuthConfigException(
+            '"token_file" in $kProjectConfigName names $path, which '
+            '${f.existsSync() ? 'is empty' : 'does not exist'}. Put the '
+            'project\'s flk_live_ token in it, or remove "token_file".');
+      }
+      return Credentials(token, source: path);
     }
 
     final File file = credentialsFile ?? _credentialsFile();

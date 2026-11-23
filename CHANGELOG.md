@@ -12,6 +12,29 @@
   language from the file name, else `--language`, else the base language. `fl doctor` does
   not ask an ngx-translate app for `@angular/localize`. The MCP `pull_arbs`, `import_arb` and
   `check_l10n_setup` tools do the same.
+- **`fl diff <file>`** compares a translation file (Flutter or Angular ARB, ngx-translate json)
+  with what the service holds for the same language: keys only the file has, keys whose text
+  differs (both texts shown), keys only the service has. It changes nothing; `--json` lists
+  every key.
+- **`fl import --dry-run` says key by key what it would do**: how many keys it would add, how
+  many differ (kept, or overwritten with `--overwrite`), how many are already the same, and
+  which keys the service has that the file no longer does. The MCP `import_arb` preview
+  carries the same lists.
+- **`fl import --prune`** (the source file only) deletes, after the import, the keys the
+  service has and the file no longer does; a translated file is refused. MCP: `prune`.
+- **`token_file` in flutterlocalisation.json** names a file holding the project's token
+  (`~` allowed), read after `--token` and `$FL_API_TOKEN` and before `fl login`'s token, so a
+  repository tied to one workspace works on a machine logged in to another. `fl init
+  --token-file` writes it. `fl_mcp` reads it too.
+
+### Changed
+- `fl export` and `fl pull` write an Angular `messages.<locale>.arb` in the order of the
+  `messages.arb` beside it, new ids after, so an export no longer re-sorts the whole file.
+- `fl delete` asks before deleting when run at a terminal (`--yes` skips the question);
+  scripts and `--json` runs are not asked.
+- `fl status` calls a value still holding the source text "not translated yet" instead of
+  "same as source".
+- The help names Angular and iOS beside Flutter, and marks the Flutter-only steps.
 
 ## [1.23.1] - 2026-11-22
 ### Changed
