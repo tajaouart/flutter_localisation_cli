@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.5] - 2026-11-26
+### Added
+- **`fl show <key>`** prints one key: its text in every locale with its flags, each target
+  text (`ios`, `ios/iphone`, `flutter`, ...) with "to check" and "outdated", the key's
+  platforms and max lengths. `--json` gives the same as data. The MCP server has the same as
+  `show_string`. Until now reading a key meant the dashboard or the exported files.
+
 ## [1.25.4] - 2026-11-26
 ### Fixed
 - **Named String Catalog tables on Windows.** A folder of `xcstrings_catalogs` built its

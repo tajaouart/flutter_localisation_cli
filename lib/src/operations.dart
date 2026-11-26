@@ -1769,6 +1769,89 @@ class Operations {
     );
   }
 
+  /// Every locale's text of one key, with its target texts, platforms and
+  /// max lengths. Reads only.
+  Future<OpResult> show(final String key) async {
+    final ProjectData project = await client.getProject(projectId);
+    final String full = project.canonicalKey(key, flavorName: flavor);
+    final FlavorData f = project.flavor(flavor);
+    final List<Map<String, dynamic>> rows = <Map<String, dynamic>>[];
+    TranslationEntry? any;
+    final List<LanguageData> languages = <LanguageData>[
+      ...f.languages.where((final LanguageData l) => l.isBase),
+      ...f.languages.where((final LanguageData l) => !l.isBase),
+    ];
+    final List<String> missing = <String>[];
+    for (final LanguageData l in languages) {
+      TranslationEntry? t;
+      for (final TranslationEntry e in l.translations) {
+        if (e.key == full) t = e;
+      }
+      if (t == null) {
+        missing.add(l.code);
+        continue;
+      }
+      any ??= t;
+      rows.add(<String, dynamic>{
+        'locale': l.code,
+        'base': l.isBase,
+        'value': t.value,
+        'checked': t.isChecked,
+        'outdated': t.isOutdated,
+        'ai': t.isAiTranslated,
+        'overrides': <Map<String, dynamic>>[
+          for (final TextOverride o in t.overrides)
+            <String, dynamic>{
+              'target': o.target,
+              'value': o.value,
+              'needs_review': o.needsReview,
+              'is_outdated': o.isOutdated,
+            },
+        ],
+      });
+    }
+    final StringBuffer out = StringBuffer(full);
+    if (any != null && any.description.isNotEmpty) {
+      out.write('\n  ${any.description}');
+    }
+    if (any != null && any.platforms.isNotEmpty) {
+      out.write('\n  platforms: ${any.platforms.join(', ')}');
+    }
+    if (any != null && any.maxLength.isNotEmpty) {
+      out.write(
+          '\n  max length: ${any.maxLength.entries.map((final MapEntry<String, int> e) => '${e.key}=${e.value}').join(', ')}');
+    }
+    for (final Map<String, dynamic> r in rows) {
+      final List<String> flags = <String>[
+        if (r['base'] == true) 'base',
+        if (r['outdated'] == true) 'outdated',
+        if (r['base'] != true && r['checked'] != true) 'unchecked',
+      ];
+      out.write('\n  ${r['locale']}: ${r['value']}'
+          '${flags.isEmpty ? '' : '  (${flags.join(', ')})'}');
+      for (final Map<String, dynamic> o
+          in r['overrides'] as List<Map<String, dynamic>>) {
+        final List<String> of = <String>[
+          if (o['needs_review'] == true) 'to check',
+          if (o['is_outdated'] == true) 'outdated',
+        ];
+        out.write('\n    ${o['target']}: ${o['value']}'
+            '${of.isEmpty ? '' : '  (${of.join(', ')})'}');
+      }
+    }
+    if (missing.isNotEmpty) {
+      out.write('\n  no row in: ${missing.join(', ')}');
+    }
+    return OpResult(true, out.toString(), <String, dynamic>{
+      'key': full,
+      if (any != null) 'description': any.description,
+      if (any != null) 'platforms': any.platforms,
+      if (any != null) 'max_length': any.maxLength,
+      'locales': rows,
+      if (missing.isNotEmpty) 'missing': missing,
+    });
+  }
+
   /// AI-translate a key's locales. Defaults to the missing ones; pass [all] for every
   /// non-base locale, or [locales] for a specific set.
   Future<OpResult> translate(

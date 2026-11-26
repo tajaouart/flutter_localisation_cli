@@ -79,6 +79,7 @@ Future<void> main(final List<String> args) async {
   runner.addCommand(AddCommand());
   runner.addCommand(ImportCommand());
   runner.addCommand(DiffCommand());
+  runner.addCommand(ShowCommand());
   runner.addCommand(EditCommand());
   runner.addCommand(DeleteCommand());
   runner.addCommand(TranslateCommand());
@@ -1000,6 +1001,35 @@ class DiffCommand extends Command<int> with _ApiCommand {
           fileName: name,
           languageCode: _locale(argResults!['language'] as String?));
       return emit(OpResult(true, describeDiff(d, name), d.toJson()));
+    } finally {
+      built.client.close();
+    }
+  }
+}
+
+class ShowCommand extends Command<int> with _ApiCommand {
+  @override
+  String get name => 'show';
+  @override
+  String get description =>
+      'Print one key: its text in every locale, its target texts (ios, ...), '
+      'platforms and max lengths. Changes nothing.';
+  @override
+  String get invocation => 'fl show <key>';
+
+  @override
+  Future<int> run() async {
+    final String key = _requireKey(this);
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
+    try {
+      final OpResult r = await built.ops.show(key);
+      if (jsonOut) return emit(r);
+      stdout.writeln(r.message);
+      return 0;
     } finally {
       built.client.close();
     }

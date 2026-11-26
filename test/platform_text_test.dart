@@ -412,4 +412,32 @@ void main() {
           throwsA(isA<ArgumentError>()));
     });
   });
+
+  group('fl show', () {
+    test('prints every locale with its target texts and key settings',
+        () async {
+      final OpResult r = await _Service().ops().show('paywall');
+      expect(r.ok, isTrue);
+      expect(r.message.split('\n').first, 'paywall');
+      expect(r.message, contains('max length: ios=10, flutter=40'));
+      expect(r.message, contains('en: Upgrade to the Pro plan today  (base)'));
+      expect(r.message, contains('    ios: Pro'));
+      expect(r.message, contains('fr: Passez au forfait Pro'));
+      final List<dynamic> locales = r.data['locales'] as List<dynamic>;
+      expect(
+          locales.map((final dynamic l) => l['locale']), <String>['en', 'fr']);
+      expect((locales.first['overrides'] as List<dynamic>).length, 2);
+    });
+
+    test('names the platforms of a key limited to some', () async {
+      final OpResult r = await _Service().ops().show('watch_only');
+      expect(r.message, contains('platforms: ios'));
+      expect(r.data['platforms'], <String>['ios']);
+    });
+
+    test('an unknown key suggests the close ones', () async {
+      await expectLater(
+          _Service().ops().show('pay'), throwsA(isA<ResolveException>()));
+    });
+  });
 }

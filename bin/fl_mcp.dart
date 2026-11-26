@@ -483,6 +483,21 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
         },
       },
       <String, dynamic>{
+        'name': 'show_string',
+        'description':
+            'Read one key: its text in every locale, its target texts (ios, '
+                'flutter, ...) with their review flags, its platforms and max '
+                'lengths. Changes nothing.',
+        'inputSchema': <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'key': <String, dynamic>{'type': 'string'},
+            ..._projectProps,
+          },
+          'required': <String>['key'],
+        },
+      },
+      <String, dynamic>{
         'name': 'delete_string',
         'description':
             'Delete a key entirely (all locales) or, with locale, just one locale. '
@@ -1371,6 +1386,8 @@ Future<void> _callTool(
             dryRun: !apply,
           );
         }
+      case 'show_string':
+        r = await ops.show(a['key'] as String);
       case 'delete_string':
         r = await ops.delete(
           a['key'] as String,

@@ -86,6 +86,7 @@ fl init                                  # first run: token, project, folders, f
 fl projects                              # list your projects (name, flavors, locales)
 fl status --project "Chat Bot"           # completion % per locale
 fl add greeting --value "Hello" -t       # add key + AI-translate every other locale
+fl show greeting                                 # every locale, target texts, platforms, max lengths
 fl edit greeting --locale fr --value "Bonjour"   # no --locale: the base language
 fl edit done_body --locale fr --value "{arg1} en {arg2} s"   # catalog key by its stem
 fl import strings.arb -t                 # bulk-create MANY keys from one ARB, then translate
@@ -636,7 +637,7 @@ developer runs `fl login` once, or exports `FL_API_TOKEN`, so no token is commit
 
 Then ask: *"list my projects"*, then *"in Chat Bot, add `checkout_button` = 'Buy now' and
 translate it to all locales."* Tools: `list_projects`, `list_status`, `list_languages`,
-`add_language`, `project_repo`, `add_string`, `edit_string`, `delete_string`, `translate_key`,
+`add_language`, `project_repo`, `add_string`, `show_string`, `edit_string`, `delete_string`, `translate_key`,
 `retranslate`, `shorten`, `import_arb`, `pull_arbs`, `glossary`, `language_style`,
 `lock_keys` (each
 takes an optional `project`/`flavor`), and
