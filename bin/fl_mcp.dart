@@ -22,6 +22,7 @@
 /// Run: `dart run flutter_localisation:fl_mcp`
 library;
 
+import 'package:flutter_localisation_cli/src/self_update.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -100,6 +101,8 @@ late final ManagementClient _client;
 late final ProjectResolver _resolver;
 
 Future<void> main(final List<String> args) async {
+  final int? newer = await runNewerIfAny(args);
+  if (newer != null) exit(newer);
   _bootstrap();
 
   final Stream<String> lines =

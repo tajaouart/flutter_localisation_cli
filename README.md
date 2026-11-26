@@ -593,6 +593,11 @@ run in a build (`CI` or `TF_BUILD` set), and every time when the service says wh
 matters. `fl_mcp` hands it to the agent once per session. Set `FL_NO_UPDATE_NOTICE=1` to
 silence it.
 
+Installed with `dart pub global activate`, `fl` and `fl_mcp` also update themselves: when one
+starts and pub.dev has a newer version, it installs it and runs it instead, so an MCP server
+opened after a release is the release. Not in CI, not for a checkout, a binary or the npm
+package. Set `FL_NO_AUTO_UPDATE=1` to stay on the installed version.
+
 ## MCP server (Claude, GitHub Copilot)
 
 `fl_mcp` lets an AI agent manage your translations. Mutating tools are **preview-by-default**:

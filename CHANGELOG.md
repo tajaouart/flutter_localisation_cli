@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.26.0] - 2026-11-26
+### Added
+- **`fl` and `fl_mcp` keep themselves up to date.** A copy installed with
+  `dart pub global activate` looks at pub.dev when it starts; when a newer version is out it
+  installs it and runs it in its place, on the same input and output. An MCP server opened
+  again after a release runs the release, with no `fl upgrade` and no restart of the editor.
+  It looks at most every 10 minutes while current and never waits more than 3 seconds for
+  pub.dev. A checkout, a compiled binary, the npm package and CI runs are left alone, and
+  `FL_NO_AUTO_UPDATE=1` turns it off. A process already running keeps its version until it
+  is started again.
+
 ## [1.25.5] - 2026-11-26
 ### Added
 - **`fl show <key>`** prints one key: its text in every locale with its flags, each target

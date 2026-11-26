@@ -21,6 +21,7 @@ import 'package:args/args.dart';
 import 'package:args/command_runner.dart';
 import 'package:path/path.dart' as path;
 
+import 'package:flutter_localisation_cli/src/self_update.dart';
 import 'package:flutter_localisation_cli/src/angular.dart';
 import 'package:flutter_localisation_cli/src/ngx.dart';
 import 'package:flutter_localisation_cli/src/arb_sync.dart';
@@ -44,6 +45,10 @@ import 'package:flutter_localisation_cli/src/version.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
 
 Future<void> main(final List<String> args) async {
+  if (!args.contains('upgrade')) {
+    final int? newer = await runNewerIfAny(args);
+    if (newer != null) exit(newer);
+  }
   final CommandRunner<int> runner = CommandRunner<int>(
     'fl',
     'FlutterLocalisation management CLI: manage the strings of a Flutter, iOS or Angular app from the terminal.',
