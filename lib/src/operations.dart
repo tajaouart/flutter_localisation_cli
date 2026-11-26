@@ -540,7 +540,7 @@ class Operations {
   ) {
     final List<String> foreign = <String>[
       for (final String p in platforms ?? const <String>[])
-        if (!project.ships(AppPlatform.fromWire(p)!)) p,
+        if (!project.platforms.contains(AppPlatform.fromWire(p)!)) p,
     ];
     if (foreign.isEmpty) return null;
     return '"${project.name}" does not ship to ${foreign.join(', ')} '
@@ -2620,13 +2620,17 @@ class Operations {
         if (overLimit.isNotEmpty) 'over_limit': overLimit,
       });
     }
+    final bool narrowed =
+        project.localPlatforms.length != project.platforms.length;
     return OpResult(
       true,
       'Status for "${project.name}" / flavor "${f.name}" '
-      '(platforms: ${platformLabels(project.platforms, separator: ', ')}).',
+      '(platforms: ${platformLabels(project.platforms, separator: ', ')}'
+      '${narrowed ? '; this repository: ${platformLabels(project.localPlatforms, separator: ', ')}' : ''}).',
       <String, dynamic>{
         'flavor': f.name,
         'platforms': platformWires(project.platforms),
+        if (narrowed) 'repo_platforms': platformWires(project.localPlatforms),
         'locales': rows,
       },
     );

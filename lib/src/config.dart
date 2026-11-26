@@ -22,6 +22,7 @@ import 'package:path/path.dart' as p;
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/angular.dart';
 import 'package:flutter_localisation_cli/src/ngx.dart';
+import 'package:flutter_localisation_cli/src/platform.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
 
 const String kDefaultBaseUrl = 'https://api.flutterlocalisation.com';
@@ -41,7 +42,14 @@ class ProjectConfig {
     this.xcstringsCatalogs,
     this.root,
     this.tokenFile,
+    this.platforms,
   });
+
+  /// `platforms`: the platforms of the project this repository holds
+  /// (`["ios"]` in the iPhone app's repository of a project that also ships
+  /// a website). Commands that read or write files touch only these. Absent,
+  /// they are inferred from the repository when the project has several.
+  final List<AppPlatform>? platforms;
 
   /// `token_file`: a file holding this project's token, `~` allowed. The
   /// token itself never goes in the config, which is committed.
@@ -218,7 +226,24 @@ class ProjectConfig {
       ];
     }
 
+    List<AppPlatform>? platforms;
+    final Object? rawPlatforms = json['platforms'];
+    if (rawPlatforms != null) {
+      if (rawPlatforms is! List ||
+          rawPlatforms.isEmpty ||
+          rawPlatforms
+              .any((final Object? v) => AppPlatform.fromWire(v) == null)) {
+        throw ConfigException(
+            '${file.path}: "platforms" must list the platforms this '
+            'repository holds, among '
+            '${AppPlatform.values.map((final AppPlatform p) => p.wire).join(', ')}, '
+            'for example ["ios"].');
+      }
+      platforms = platformsFromJson(rawPlatforms);
+    }
+
     return ProjectConfig(
+      platforms: platforms,
       baseUrl: text('base_url')?.trimRight() ?? kDefaultBaseUrl,
       projectId: pid is int ? pid : null,
       project: rawProject is int ? null : text('project'),

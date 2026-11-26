@@ -26,7 +26,7 @@ fl / fl_mcp -> backend stores and AI-translates -> backend pushes ARBs to git
 
 - `fl` is the CLI and `fl_mcp` the MCP server, both from `dart pub global activate flutter_localisation_cli`. They need a workspace token (`flk_live_...`) from the dashboard: `fl login --token ...` or `FL_API_TOKEN`.
 - `flutter_localisation` is the runtime package the app depends on. It generates `lib/generated_translation_methods.dart` and, on paid plans, applies live updates at runtime.
-- `flutterlocalisation.json` at the app root holds `project`, `flavor`, `arb_dir` (and optionally `xcstrings_dir`, or `angular_dir` for an Angular app), so commands need no `--project`.
+- `flutterlocalisation.json` at the app root holds `project`, `flavor`, `arb_dir` (and optionally `xcstrings_dir`, or `angular_dir` for an Angular app), so commands need no `--project`. When the project ships to several platforms from separate repositories, `"platforms": ["ios"]` there says which ones this repository holds; pull, export and the other file commands touch only those.
 - In an Angular app (`angular.json`), strings are marked with `i18n="@@some.id"` or `$localize`:@@some.id:Text``, every message with an `@@id`, and a plural or select is the whole message. Run `ng extract-i18n`, then `fl import src/locale/messages.arb --translate`, then `fl pull`; never edit `messages.<locale>.arb` by hand and never write `messages.arb` yourself.
 
 When the `fl_mcp` tools are available, prefer them to shelling out. Mutating tools only preview until called with `apply: true`.

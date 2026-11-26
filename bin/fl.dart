@@ -38,6 +38,7 @@ import 'package:flutter_localisation_cli/src/platform.dart';
 import 'package:flutter_localisation_cli/src/native_sync.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:flutter_localisation_cli/src/project_resolver.dart';
+import 'package:flutter_localisation_cli/src/repo_platforms.dart';
 import 'package:flutter_localisation_cli/src/repo_url.dart';
 import 'package:flutter_localisation_cli/src/version.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
@@ -269,7 +270,10 @@ mixin _ApiCommand on Command<int> {
       tokenFile: cfg.tokenFile,
     );
     _tokenSource = creds.source;
-    return ManagementClient(baseUrl: cfg.baseUrl, token: creds.token);
+    final ManagementClient client =
+        ManagementClient(baseUrl: cfg.baseUrl, token: creds.token);
+    narrowToRepo(client, cfg, stderr.writeln);
+    return client;
   }
 
   /// Live progress goes to stderr, so `--json` output on stdout stays clean.
@@ -402,6 +406,11 @@ class InitCommand extends Command<int> with _ApiCommand {
               'the outputPath of extract-i18n in angular.json, else '
               'src/locale), or the <locale>.json files of an ngx-translate '
               'project (default: an existing src/assets/i18n or public/i18n).')
+      ..addOption('platforms',
+          help: 'The platforms of the project this repository holds, for a '
+              'project that ships to several (ios, or flutter,ios). Default: '
+              'what the repository shows (pubspec.yaml, an Xcode project, '
+              'angular.json).')
       ..addOption('token-file',
           help: 'A file holding this project\'s token (~ allowed), written '
               'into the config as "token_file": the repo then uses that token '
@@ -492,13 +501,15 @@ class InitCommand extends Command<int> with _ApiCommand {
       }
       final ProjectSummary project = _pickProject(ask, projects);
       final FlavorSummary flavor = _pickFlavor(ask, project);
-      final bool flutter = project.platforms.contains(AppPlatform.flutter);
-      final bool ios = project.platforms.contains(AppPlatform.ios);
-      final bool angular = project.platforms.contains(AppPlatform.angular);
-      final bool ngx = project.platforms.contains(AppPlatform.ngx);
       stdout.writeln(
           'Project: ${project.name} (${platformLabels(project.platforms)})'
           '${project.flavors.length > 1 ? ', flavor ${flavor.name}' : ''}');
+      final List<AppPlatform>? held = _heldPlatforms(ask, project, root);
+      if (held == null) return 1;
+      final bool flutter = held.contains(AppPlatform.flutter);
+      final bool ios = held.contains(AppPlatform.ios);
+      final bool angular = held.contains(AppPlatform.angular);
+      final bool ngx = held.contains(AppPlatform.ngx);
 
       // 3. Folders, prefilled from the repository.
       String? arbDir;
@@ -532,7 +543,8 @@ class InitCommand extends Command<int> with _ApiCommand {
             ask.ask(
                 'ngx-translate folder', ngxDirIn(root.path) ?? kNgxDefaultDir);
       }
-      if (!ngx && usesNgxTranslate(root.path)) {
+      if (!project.platforms.contains(AppPlatform.ngx) &&
+          usesNgxTranslate(root.path)) {
         stdout.writeln('This app loads its strings with ngx-translate. Set the '
             'project\'s platform to ngx-translate in the dashboard (project '
             'settings) so `fl pull` writes <locale>.json files.');
@@ -544,6 +556,8 @@ class InitCommand extends Command<int> with _ApiCommand {
         'project': project.name,
         'project_id': project.id,
         if (project.flavors.isNotEmpty) 'flavor': flavor.name,
+        if (project.platforms.length > 1 || argResults!['platforms'] != null)
+          'platforms': platformWires(held),
         if (arbDir != null) 'arb_dir': arbDir,
         if (catalogDir != null) 'xcstrings_dir': catalogDir,
         if (catalogs != null) 'xcstrings_catalogs': catalogs,
@@ -610,6 +624,61 @@ class InitCommand extends Command<int> with _ApiCommand {
 
     stdout.writeln();
     return await runner!.run(<String>[...passthrough, 'status']) ?? 0;
+  }
+
+  /// The platforms of [project] this repository holds: `--platforms`, else
+  /// asked with what the repository shows as the answer, which `--yes`
+  /// takes. Null, with the reason printed, when none can be settled on.
+  List<AppPlatform>? _heldPlatforms(
+      final Prompter ask, final ProjectSummary project, final Directory root) {
+    final String? given = argResults!['platforms'] as String?;
+    if (given == null && project.platforms.length < 2) return project.platforms;
+    final Map<AppPlatform, String> seen = detectRepoPlatforms(root.path);
+    final List<AppPlatform> shown = <AppPlatform>[
+      for (final AppPlatform pl in project.platforms)
+        if (seen.containsKey(pl)) pl,
+    ];
+    String answer = given ?? platformWires(shown).join(',');
+    if (given == null) {
+      if (shown.isNotEmpty) {
+        stdout.writeln('This repository shows ${<String>[
+          for (final AppPlatform pl in shown) '${pl.label} (${seen[pl]})',
+        ].join(', ')}.');
+      }
+      answer = ask.ask(
+          'Platforms this repository holds '
+          '(${platformWires(project.platforms).join(', ')})',
+          answer.isEmpty ? platformWires(project.platforms).join(',') : answer);
+      if (!ask.interactive && shown.isEmpty) {
+        stderr.writeln('The project ships '
+            '${platformLabels(project.platforms, separator: ', ')} and nothing '
+            'here shows which of them this repository holds. Pass '
+            '--platforms (for example --platforms '
+            '${project.platforms.first.wire}).');
+        return null;
+      }
+    }
+    final List<AppPlatform> wanted;
+    try {
+      wanted = <AppPlatform>[
+        for (final String w in parsePlatformList(<String>[answer]))
+          AppPlatform.fromWire(w)!,
+      ];
+    } on ArgumentError catch (e) {
+      stderr.writeln(e.message);
+      return null;
+    }
+    final List<AppPlatform> held = <AppPlatform>[
+      for (final AppPlatform pl in project.platforms)
+        if (wanted.contains(pl)) pl,
+    ];
+    if (held.isEmpty || held.length < wanted.toSet().length) {
+      stderr.writeln('The project ships '
+          '${platformLabels(project.platforms, separator: ', ')}; "$answer" '
+          'names ${held.isEmpty ? 'none of them' : 'others too'}.');
+      return null;
+    }
+    return held;
   }
 
   ProjectSummary _pickProject(
@@ -1869,6 +1938,10 @@ Future<int> _pullArbs(
   try {
     final ProjectData project =
         await built.client.getProject(built.ops.projectId);
+    if (project.repoProblem != null) {
+      stderr.writeln(project.repoProblem);
+      return 1;
+    }
     final LanguageData? base = project.baseLanguage(built.ops.flavor);
     if (base == null) {
       stderr.writeln('Project "${project.name}" has no base language.');
@@ -2244,9 +2317,10 @@ Future<OpResult> _exportFromApi(
 }) async {
   // [project] is what the caller just fetched; asking again downloaded every
   // translation a second time. [stale] says an import ran since.
+  if (project.repoProblem != null) return OpResult(false, project.repoProblem!);
   final ProjectData? fetched = stale ? null : project;
   final List<OpResult> results = <OpResult>[
-    for (final AppPlatform platform in project.platforms)
+    for (final AppPlatform platform in project.localPlatforms)
       switch (platform) {
         AppPlatform.flutter =>
           await ops.exportArbs(arbDir, dryRun: dryRun, fetched: fetched),
@@ -2620,10 +2694,17 @@ class DoctorCommand extends Command<int> {
   @override
   Future<int> run() async {
     final bool fix = argResults!['fix'] as bool;
-    final L10nDoctorReport r = checkL10nSetup(Directory.current, fix: fix);
     final String root = Directory.current.path;
-    final bool angularApp = looksLikeLocalizeApp(root);
-    if (!angularApp && usesNgxTranslate(root) && !_jsonOut) {
+    final List<AppPlatform>? pinned = pinnedPlatformsAt(root);
+    final L10nDoctorReport r = holdsPlatform(pinned, AppPlatform.flutter)
+        ? checkL10nSetup(Directory.current, fix: fix)
+        : L10nDoctorReport(<L10nIssue>[], applicable: false);
+    final bool angularApp = holdsPlatform(pinned, AppPlatform.angular) &&
+        looksLikeLocalizeApp(root);
+    if (!angularApp &&
+        holdsPlatform(pinned, AppPlatform.ngx) &&
+        usesNgxTranslate(root) &&
+        !_jsonOut) {
       stdout.writeln('✓ ngx-translate app: its <locale>.json files need no '
           'build setup.');
       if (!r.applicable) return 0;
@@ -2913,6 +2994,10 @@ class ExportCommand extends Command<int> with _ApiCommand {
     try {
       final ProjectData project =
           await built.client.getProject(built.ops.projectId);
+      if (project.repoProblem != null) {
+        stderr.writeln(project.repoProblem);
+        return 1;
+      }
       // A given directory is where the files go, whichever kind they are;
       // without one each kind has its own configured home.
       final String arbDir = positional ?? cfg.arbDir ?? 'arbs/Default';

@@ -341,9 +341,10 @@ void main() {
   test('a Flutter + Angular project writes both', () async {
     backend.platforms = <String>['flutter', 'angular'];
     inApp('flutterlocalisation.json')
-        .writeAsStringSync(jsonEncode(<String, String>{
+        .writeAsStringSync(jsonEncode(<String, Object>{
       'base_url': backend.url,
       'project': 'Gush',
+      'platforms': <String>['flutter', 'angular'],
       'arb_dir': 'lib/l10n',
       'angular_dir': 'web/src/locale',
     }));

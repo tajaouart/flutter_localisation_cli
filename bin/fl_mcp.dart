@@ -40,6 +40,7 @@ import 'package:flutter_localisation_cli/src/native_sync.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:flutter_localisation_cli/src/project_resolver.dart';
+import 'package:flutter_localisation_cli/src/repo_platforms.dart';
 import 'package:flutter_localisation_cli/src/version.dart';
 
 const String _protocolVersion = '2024-11-05';
@@ -149,6 +150,8 @@ void _bootstrap() {
     token: token,
     clientName: 'fl_mcp',
   );
+  narrowToRepo(_client, cfg ?? ProjectConfig(baseUrl: baseUrl),
+      (final String line) => stderr.writeln('fl_mcp: $line'));
   _resolver = ProjectResolver(
     _client,
     // Accept either FL_PROJECT (name or id) or the legacy FL_PROJECT_ID.
@@ -896,9 +899,14 @@ Future<void> _callTool(
         });
         return;
       }
-      final L10nDoctorReport r = checkL10nSetup(root, fix: apply);
+      final List<AppPlatform>? pinned = pinnedPlatformsAt(root.path);
+      final L10nDoctorReport r = holdsPlatform(pinned, AppPlatform.flutter)
+          ? checkL10nSetup(root, fix: apply)
+          : L10nDoctorReport(<L10nIssue>[], applicable: false);
       final int fixed = r.issues.where((final L10nIssue i) => i.fixed).length;
-      if (usesNgxTranslate(root.path) && !r.applicable) {
+      if (holdsPlatform(pinned, AppPlatform.ngx) &&
+          usesNgxTranslate(root.path) &&
+          !r.applicable) {
         _toolResult(id, <String, dynamic>{
           'ok': true,
           'ngx': true,
@@ -907,7 +915,9 @@ Future<void> _callTool(
         });
         return;
       }
-      if (looksLikeLocalizeApp(root.path) && !r.applicable) {
+      if (holdsPlatform(pinned, AppPlatform.angular) &&
+          looksLikeLocalizeApp(root.path) &&
+          !r.applicable) {
         String dir = angularExtractDir(root.path) ?? kAngularDefaultDir;
         try {
           final ProjectConfig cfg = ProjectConfig.load(
@@ -1038,6 +1048,11 @@ Future<void> _callTool(
     // user notices.
     if (name == 'pull_arbs') {
       final ProjectData p = await _client.getProject(target.projectId);
+      if (p.repoProblem != null) {
+        _toolResult(
+            id, <String, dynamic>{'ok': false, 'message': p.repoProblem});
+        return;
+      }
       final LanguageData? base = p.baseLanguage(target.flavor);
       if (base == null) {
         _toolResult(id, <String, dynamic>{
@@ -1242,7 +1257,7 @@ Future<void> _callTool(
         return;
       }
       final List<OpResult> written = <OpResult>[
-        for (final AppPlatform platform in p.platforms)
+        for (final AppPlatform platform in p.localPlatforms)
           switch (platform) {
             AppPlatform.flutter => await ops.exportArbs(arbDir),
             AppPlatform.ios =>

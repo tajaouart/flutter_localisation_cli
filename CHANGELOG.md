@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.25.2] - 2026-11-26
+### Added
+- **Platforms per repository.** `flutterlocalisation.json` takes `"platforms": ["ios"]`, the
+  platforms of the project this repository holds. A project that ships a website and an
+  iPhone app from two repositories no longer writes String Catalogs into the website or
+  `messages.<locale>.arb` into the app: `fl pull`, `fl export`, `fl diff`, `fl status`,
+  `fl sync`, `fl doctor`, the platform `fl import` picks for an ARB, and the MCP tools
+  `pull_arbs`, `import_arb` and `check_l10n_setup` touch only the files of those platforms.
+  Without it, a single-platform project is unchanged; a project with several takes what the
+  repository shows (`pubspec.yaml` with Flutter, an `.xcodeproj` or `.xcstrings`,
+  `angular.json` with `@angular/localize`, ngx-translate), says once which ones and how to pin
+  them, and writes nothing when the repository shows none of them. A pin naming only platforms
+  the project does not ship writes nothing either, with a sentence. `fl status` names the
+  repository's platforms beside the project's (`repo_platforms` in `--json`).
+- **`fl init`** on a project with several platforms asks which ones this repository holds
+  (`-y` takes what it shows, `--platforms` answers), writes `platforms`, and asks only for the
+  folders of those platforms: an iOS repository with several catalogs gets
+  `xcstrings_catalogs` and no `angular_dir`.
+
 ## [1.25.1] - 2026-11-26
 ### Added
 - **Named String Catalog tables.** `xcstrings_catalogs` also takes the path of any

@@ -53,6 +53,32 @@ default; `fl init -y` takes them all, and `--project`, `--flavor`, `--arb-dir`,
 `--xcstrings-dir` answer the ones that have no default. `--no-pull` only writes the config.
 The project itself is still created in the dashboard: the token cannot do that.
 
+### One project, several repositories
+
+A project can ship to several platforms whose apps live in separate repositories: a website
+in Angular and an iPhone app, say. Each repository has its own `flutterlocalisation.json`, and
+its `platforms` says which of the project's platforms that repository holds:
+
+```json
+{
+  "project": "Studio Posting",
+  "project_id": 138,
+  "platforms": ["ios"],
+  "xcstrings_catalogs": ["App/Resources", "Widgets", "App/Posts/Posts.xcstrings"]
+}
+```
+
+`fl pull`, `fl export`, `fl diff`, `fl status`, `fl sync`, `fl doctor`, the platform `fl import`
+picks for an ARB, and the MCP tools `pull_arbs`, `import_arb` and `check_l10n_setup` then touch
+the files of those platforms only: the iPhone app never gets `messages.<locale>.arb`, the
+website never gets a String Catalog. Without `platforms`, a project with one platform works as
+it always did; with several, the CLI reads them off the repository (`pubspec.yaml` with Flutter,
+an `.xcodeproj` or `.xcstrings`, `angular.json` with `@angular/localize`, ngx-translate in
+`package.json`), keeps those the project ships, and says once which ones it took and the line
+that pins them. A repository that shows none of them gets no file at all until `platforms` is
+set. `fl init` on such a project asks (`-y` takes what the repository shows, `--platforms ios`
+answers) and writes `platforms` with the folder settings of those platforms only.
+
 ## CLI
 
 ```bash

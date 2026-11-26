@@ -11,3 +11,4 @@ export 'src/management_client.dart';
 export 'src/operations.dart';
 export 'src/platform.dart';
 export 'src/project_resolver.dart';
+export 'src/repo_platforms.dart';

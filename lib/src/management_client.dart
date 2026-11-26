@@ -297,7 +297,20 @@ class ProjectData {
     );
   }
 
-  bool ships(final AppPlatform platform) => platforms.contains(platform);
+  /// The platforms of [platforms] this repository holds, when the client
+  /// was told (see [ManagementClient.repoPlatforms]); null is all of them.
+  List<AppPlatform>? repoPlatforms;
+
+  /// Why no platform of this repository could be settled on; set, nothing
+  /// may read or write the repository's files.
+  String? repoProblem;
+
+  /// The platforms whose files this repository holds.
+  List<AppPlatform> get localPlatforms => repoPlatforms ?? platforms;
+
+  /// Whether this repository holds [platform]'s files. A key's own platforms
+  /// are checked against [platforms], the whole project.
+  bool ships(final AppPlatform platform) => localPlatforms.contains(platform);
   bool get shipsFlutter => ships(AppPlatform.flutter);
   bool get shipsIos => ships(AppPlatform.ios);
   bool get shipsAngular => ships(AppPlatform.angular);
@@ -595,6 +608,10 @@ class ManagementClient {
   /// `fl` or `fl_mcp`: who the service is told is calling.
   final String clientName;
 
+  /// Narrows every fetched project to the platforms this repository holds.
+  ({List<AppPlatform> platforms, String? problem}) Function(
+      List<AppPlatform> projectPlatforms)? repoPlatforms;
+
   /// Sent on every request so the service knows which version runs where and
   /// can answer with the one to update to.
   Map<String, String> get _identity {
@@ -681,7 +698,16 @@ class ManagementClient {
   /// GET the full project (structure + translation ids).
   Future<ProjectData> getProject(final int projectId) async {
     final http.Response res = await _send('GET', '/api/projects/$projectId/');
-    return ProjectData.fromJson(_json(res));
+    final ProjectData project = ProjectData.fromJson(_json(res));
+    final narrow = repoPlatforms;
+    if (narrow != null) {
+      final ({List<AppPlatform> platforms, String? problem}) r =
+          narrow(project.platforms);
+      project
+        ..repoPlatforms = r.platforms
+        ..repoProblem = r.problem;
+    }
+    return project;
   }
 
   /// Add a translation key with its base value. Idempotent server-side.

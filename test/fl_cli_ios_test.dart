@@ -337,6 +337,12 @@ void main() {
       'pull on a mixed project writes the ARBs and the catalog in their own folders',
       () async {
     backend.platforms = <String>['flutter', 'ios'];
+    // A Flutter app with native iOS strings: pubspec.yaml and the Xcode
+    // project show both platforms.
+    File(p.join(tmp.path, 'pubspec.yaml'))
+        .writeAsStringSync('dependencies:\n  flutter:\n    sdk: flutter\n');
+    Directory(p.join(tmp.path, 'ios', 'Runner.xcodeproj'))
+        .createSync(recursive: true);
     final Run r = await fl(<String>['pull', '--no-git', '--json']);
     expect(r.code, 0, reason: r.err);
     expect(File(p.join(tmp.path, 'lib', 'l10n', 'app_en.arb')).existsSync(),

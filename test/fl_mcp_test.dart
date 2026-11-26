@@ -181,11 +181,19 @@ void main() {
       'pull_arbs preview on a mixed project names both files and the ARB folder',
       () async {
     backend.platforms = <String>['flutter', 'ios'];
+    // A Flutter app with native iOS strings: pubspec.yaml and the Xcode
+    // project show both platforms.
+    File(p.join(tmp.path, 'pubspec.yaml'))
+        .writeAsStringSync('dependencies:\n  flutter:\n    sdk: flutter\n');
+    Directory(p.join(tmp.path, 'ios', 'Runner.xcodeproj'))
+        .createSync(recursive: true);
     final Map<String, dynamic> data = await mcp.call('pull_arbs');
     expect(data['ok'], isTrue, reason: data.toString());
     expect(data['template'], 'app_en.arb');
     expect(data['catalog'], 'Localizable.xcstrings');
     expect(data['dir'], p.join(tmp.path, 'lib', 'l10n'));
+    File(p.join(tmp.path, 'pubspec.yaml')).deleteSync();
+    Directory(p.join(tmp.path, 'ios')).deleteSync(recursive: true);
   });
 
   test(
