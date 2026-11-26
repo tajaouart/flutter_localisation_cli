@@ -154,7 +154,8 @@ class FakeBackend {
   List<String> languages = <String>['en'];
 
   /// False for a token with `strings:write` only: an import that asks for
-  /// translation is refused, the way the service refuses it.
+  /// translation, and a translation itself, are refused the way the service
+  /// refuses them.
   bool translateScope = true;
 
   /// The linked git repo the project detail reports, or null for none.
@@ -367,6 +368,18 @@ class FakeBackend {
       res.write('{}');
     } else if (req.method == 'GET' && path == '/api/projects/7/glossary/') {
       res.write(jsonEncode(<String, dynamic>{'terms': <dynamic>[]}));
+    } else if (req.method == 'POST' &&
+        path == '/api/ai_batch_translate/' &&
+        !translateScope) {
+      res.statusCode = HttpStatus.forbidden;
+      res.write(jsonEncode(<String, dynamic>{
+        'status': 'error',
+        'code': 'scope',
+        'scopes': <String>['translate'],
+        'message': 'Your API token lacks the required scope (translate) for '
+            'this endpoint. A workspace owner or manager can switch it on for '
+            'this key at https://app.flutterlocalisation.com/api-keys.',
+      }));
     } else if (req.method == 'POST' && path == '/api/ai_batch_translate/') {
       final List<int> ids = ((jsonDecode(await utf8.decoder.bind(req).join())
               as Map<String, dynamic>)['translation_ids'] as List<dynamic>)

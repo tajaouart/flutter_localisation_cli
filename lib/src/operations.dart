@@ -404,7 +404,22 @@ class Operations {
         <String, dynamic>{'key': key},
       );
     }
-    final VerifyOutcome result = await _translateAndVerify(targets);
+    final VerifyOutcome result;
+    try {
+      result = await _translateAndVerify(targets);
+    } on ApiException catch (e) {
+      if (!e.isScopeRefusal) rethrow;
+      // The key exists by now. A bare "lacks the scope" read as "nothing
+      // happened", and the second try then failed on "already exists".
+      return OpResult(
+        false,
+        'Added "$key", but it was not translated: the other locales hold the '
+        'base text.\n${e.message}\n'
+        'Then run `fl translate $key --all`, or set each one with '
+        '`fl edit $key --locale <code> --value "..."`.',
+        <String, dynamic>{'key': key, 'translated': 0, 'added': true},
+      );
+    }
     return OpResult(
       result.failed.isEmpty,
       'Added "$key" and translated ${result.translated}/${targets.length} locales'
@@ -1823,13 +1838,19 @@ class Operations {
         // rest of the list to collect 30 identical 429s is precisely the
         // behaviour this method exists to prevent. Stop and report.
         failures.add('${canonicalizeOrKeep(code)}: ${e.message}');
-        final bool throttled = e.message.toLowerCase().contains('rate limit');
+        // A key without the scope is refused for every locale alike.
+        final bool throttled = e.message.toLowerCase().contains('rate limit') ||
+            (e is ApiException && e.isScopeRefusal);
+        // The refusal used to reach the list of failures only, which a
+        // terminal never prints: the run ended on "Added 0/1" with no reason.
+        onProgress?.call('  [${results.length + 1}/${ordered.length}] '
+            '✗ ${canonicalizeOrKeep(code)}: ${e.message}');
         results.add(<String, dynamic>{
           'locale': canonicalizeOrKeep(code),
           'ok': false,
           'message': e.message,
         });
-        if (throttled) {
+        if (throttled && results.length < ordered.length) {
           failures.add('Stopped early: the remaining '
               '${ordered.length - results.length} locale(s) were not attempted.');
           break;

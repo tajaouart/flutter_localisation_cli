@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:http/http.dart' as http;
@@ -139,5 +140,78 @@ void main() {
     expect(r.data['translated'], 4);
     expect(r.data['unchanged'], isEmpty);
     expect(r.message, isNot(contains('unchanged')));
+  });
+
+  group('add --translate with a key that may not translate', () {
+    ManagementClient refusing(final Map<String, dynamic> refusal,
+        {final int status = 403}) {
+      final MockClient mock = MockClient((final http.Request req) async {
+        if (req.url.path == '/api/ai_batch_translate/') {
+          return http.Response(jsonEncode(refusal), status);
+        }
+        if (req.url.path == '/api/projects/9/translation_keys/') {
+          return http.Response('{}', 201);
+        }
+        return http.Response(jsonEncode(_project(esValue: 'Hello')), 200);
+      });
+      return ManagementClient(
+          baseUrl: 'http://t', token: 'flk_live_x', httpClient: mock);
+    }
+
+    const String message =
+        'Your API token lacks the required scope (translate) for this '
+        'endpoint. A workspace owner or manager can switch it on for this key '
+        'at https://app.flutterlocalisation.com/api-keys.';
+
+    test('says the key was added, why it was not translated and what to do',
+        () async {
+      final OpResult r = await Operations(
+              refusing(<String, dynamic>{'code': 'scope', 'message': message}),
+              9,
+              flavor: 'default')
+          .add('greeting', 'Hello', translate: true);
+      expect(r.ok, isFalse);
+      expect(
+          r.message, startsWith('Added "greeting", but it was not translated'));
+      expect(r.message, contains(message));
+      expect(r.message, contains('fl translate greeting --all'));
+      expect(r.data['added'], isTrue);
+      expect(r.data['translated'], 0);
+    });
+
+    test(
+        'a service from before the refusal carried a code is read by its words',
+        () async {
+      final OpResult r = await Operations(
+              refusing(<String, dynamic>{
+                'message': 'Your API token lacks the required scope '
+                    '(translate) for this endpoint.'
+              }),
+              9,
+              flavor: 'default')
+          .add('greeting', 'Hello', translate: true);
+      expect(r.ok, isFalse);
+      expect(
+          r.message, contains('Added "greeting", but it was not translated'));
+    });
+
+    test('any other refusal is still an error of its own', () async {
+      expect(
+          () => Operations(
+                  refusing(<String, dynamic>{'message': 'Plan limit reached.'}),
+                  9,
+                  flavor: 'default')
+              .add('greeting', 'Hello', translate: true),
+          throwsA(isA<ApiException>().having(
+              (final ApiException e) => e.isScopeRefusal, 'scope', isFalse)));
+      expect(
+          () => Operations(
+                  refusing(<String, dynamic>{'code': 'scope', 'message': 'x'},
+                      status: 500),
+                  9,
+                  flavor: 'default')
+              .add('greeting', 'Hello', translate: true),
+          throwsA(isA<ManagementException>()));
+    });
   });
 }

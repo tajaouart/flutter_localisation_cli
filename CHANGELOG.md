@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.24.1] - 2026-11-26
+### Fixed
+- **`fl add --translate` with a key that may not translate** said only that the token lacks
+  the scope, although the key had been created: a second try then failed on "already
+  exists". It now says the key was added and not translated, repeats the service's reason
+  (which names where a workspace owner or manager switches the scope on) and gives the two
+  ways to finish: `fl translate <key> --all` or `fl edit <key> --locale <code> --value`.
+- **`fl languages add <code> --auto-translate` refused by the service** ended on
+  "Added 0/1 locale(s)." with no reason. The reason is printed with the locale, and a
+  refusal that holds for every locale (a missing scope) stops the run after the first one.
+- A scope refusal is no longer followed by "Hint: your token may lack the required scope,
+  or the plan limit was reached": the message already says which scope and where to get it.
+
 ## [1.24.0] - 2026-11-22
 ### Added
 - **ngx-translate apps.** A project can ship ngx-translate (or Transloco): one `<locale>.json`

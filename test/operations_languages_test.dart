@@ -450,4 +450,45 @@ void main() {
       contains('were not attempted'),
     );
   });
+
+  test('a refused language says why where the terminal prints it', () async {
+    const String refusal =
+        'Your API token lacks the required scope (translate) to translate the '
+        'new language. Nothing was added.';
+    final List<String> posted = <String>[];
+    final MockClient mock = MockClient((final http.Request req) async {
+      if (req.url.path == '/api/add-languages/') {
+        return http.Response('{"detail": "Not found."}', 404);
+      }
+      if (req.url.path == '/api/projects/7/') {
+        return http.Response(_project(keys: 1), 200);
+      }
+      posted.add((jsonDecode(req.body) as Map<String, dynamic>)['languageCode']
+          as String);
+      return http.Response(
+          jsonEncode(<String, String>{'code': 'scope', 'message': refusal}),
+          403);
+    });
+    final ManagementClient client =
+        ManagementClient(baseUrl: 'http://t', token: 'x', httpClient: mock);
+    final List<String> printed = <String>[];
+
+    final OpResult one = await (Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+          ..onProgress = printed.add)
+        .addLanguages(<String>['fr'], autoTranslate: true);
+
+    expect(one.ok, isFalse);
+    expect(printed.single, '  [1/1] ✗ fr: $refusal');
+    expect((one.data['failures'] as List<dynamic>).single, 'fr: $refusal');
+
+    // The same key is refused for every locale: one attempt, not three.
+    posted.clear();
+    final OpResult many = await Operations(client, 7,
+            flavor: 'default', budget: CallBudget.disabled())
+        .addLanguages(<String>['fr', 'es', 'it'], autoTranslate: true);
+    expect(posted, <String>['fr']);
+    expect((many.data['failures'] as List<dynamic>).join(' '),
+        contains('remaining 2 locale(s) were not attempted'));
+  });
 }

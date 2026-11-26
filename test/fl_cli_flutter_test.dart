@@ -684,6 +684,24 @@ void main() {
       expect(r.err, isNot(contains('Hint: your token may lack')));
     });
 
+    test('a refused translation names where the scope is switched on',
+        () async {
+      backend.translateScope = false;
+      writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'lib/l10n'});
+      final Map<String, Map<String, dynamic>> before =
+          Map<String, Map<String, dynamic>>.of(backend.targets);
+      addTearDown(() => backend.targets
+        ..clear()
+        ..addAll(before));
+      backend.targets['en'] = <String, dynamic>{'value': ''};
+      backend.targets['fr'] = <String, dynamic>{'value': ''};
+      final Run r = await fl(<String>['translate', 'running %lld', '--all']);
+      expect(r.code, isNot(0));
+      expect(r.err, contains('lacks the required scope (translate)'));
+      expect(r.err, contains('https://app.flutterlocalisation.com/api-keys'));
+      expect(r.err, isNot(contains('Hint: your token may lack')));
+    });
+
     test('import reads the language of the file from its name', () async {
       writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'lib/l10n'});
       arb('app_en.arb', <String, String>{'title': 'Title'});

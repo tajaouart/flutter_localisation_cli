@@ -137,6 +137,8 @@ Future<void> main(final List<String> args) async {
           'Hint: the backend\'s GitHub connection is disconnected. The change '
           'was saved, but ARB files can\'t sync until you reconnect GitHub in the dashboard '
           '(project → Repo → reconnect).');
+    } else if (e is ApiException && e.isScopeRefusal) {
+      // The message already names the scope and where it is switched on.
     } else if (e is ApiException && e.isForbidden) {
       stderr
           .writeln('Hint: your token may lack the required scope, or the plan '

@@ -31,6 +31,13 @@ class ApiException extends ManagementException {
   /// carries the command that updates it.
   bool get isClientOutdated => statusCode == 426;
 
+  /// The key lacks a scope the request needs. The service's message names
+  /// the scope and where a workspace admin switches it on.
+  bool get isScopeRefusal =>
+      isForbidden &&
+      (body?['code'] == 'scope' ||
+          message.contains('lacks the required scope'));
+
   /// The import endpoint refusing `auto_translate` for a token without the
   /// Translate scope. Nothing was imported when this comes back.
   bool get isTranslateScopeRefusal =>
