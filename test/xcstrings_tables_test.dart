@@ -63,8 +63,8 @@ void main() {
 
     test('a table is its own file, in the folder that holds it', () {
       expect(targets[1].localizable.path,
-          p.join(tmp.path, 'App/Posts/Posts.xcstrings'));
-      expect(targets[1].dir, p.join(tmp.path, 'App/Posts'));
+          p.join(tmp.path, 'App', 'Posts', 'Posts.xcstrings'));
+      expect(targets[1].dir, p.join(tmp.path, 'App', 'Posts'));
       expect(targets[1].table, isNotNull);
       expect(targets[0].table, isNull);
     });

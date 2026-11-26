@@ -289,8 +289,7 @@ void main() {
         jsonDecode(at(app, 'flutterlocalisation.json').readAsStringSync())
             as Map<String, dynamic>;
     expect(cfg['platforms'], <String>['ios']);
-    expect(cfg['xcstrings_catalogs'],
-        <String>['Widgets', p.join('App', 'Resources')]);
+    expect(cfg['xcstrings_catalogs'], <String>['Widgets', 'App/Resources']);
     expect(cfg.containsKey('angular_dir'), isFalse);
     expect(cfg.containsKey('xcstrings_dir'), isFalse);
   });
