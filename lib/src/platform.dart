@@ -61,10 +61,11 @@ List<String> platformWires(final List<AppPlatform> platforms) =>
 const List<String> kAppleDevices = <String>[
   'iphone',
   'ipad',
+  'ipod',
   'mac',
-  'watch',
-  'vision',
-  'tv',
+  'applewatch',
+  'applevision',
+  'appletv',
   'other',
 ];
 

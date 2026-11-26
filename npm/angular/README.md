@@ -38,3 +38,7 @@ inside each case; inside a sentence Angular gives it a hash id of its own. `npx 
 lists both.
 
 Options: `--locale-dir`, `--source-locale`, `--project`, `--skip-install`.
+
+A project shared with an iOS or Flutter app gives the Angular app only the keys that ship to
+Angular, with their Angular text where a key has a shorter one. Set `"platforms": ["angular"]`
+in `flutterlocalisation.json` when the repository holds the Angular app only.

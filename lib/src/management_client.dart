@@ -23,7 +23,7 @@ import 'package:flutter_localisation_cli/src/version.dart';
 // Data models
 // --------------------------------------------------------------------------- //
 
-/// A row's text for one target (`ios`, `ios/watch`, `flutter`...) where it
+/// A row's text for one target (`ios`, `ios/applewatch`, `flutter`...) where it
 /// differs from the full text.
 class TextOverride {
   TextOverride({

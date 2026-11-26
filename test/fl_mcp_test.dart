@@ -573,7 +573,7 @@ void main() {
       expect(props(name)['max_length'], containsPair('type', 'object'));
     }
     expect((props('edit_string')['target'] as Map<String, dynamic>)['enum'],
-        containsAll(<String>['ios', 'flutter', 'ios/watch']));
+        containsAll(<String>['ios', 'flutter', 'ios/applewatch']));
     expect(props('translate_key'), contains('target'));
     expect(props('retranslate'), contains('target'));
     expect(props('shorten').keys,

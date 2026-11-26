@@ -122,8 +122,8 @@ fl translate paywall_title --target ios  # translate the iOS text from the base 
 A project that ships to several platforms can give a key a text of its own on one of them,
 without a second key: `fl edit <key> --target ios --value "..."` writes it for that locale,
 `--clear` removes it. A target is a platform (`flutter`, `ios`, `angular`, `ngx`) or an
-Apple device of `ios` (`ios/iphone`, `ios/ipad`, `ios/mac`, `ios/watch`, `ios/vision`,
-`ios/tv`, `ios/other`), which reach a String Catalog as device variations. A target without
+Apple device of `ios` (`ios/iphone`, `ios/ipad`, `ios/ipod`, `ios/mac`, `ios/applewatch`,
+`ios/applevision`, `ios/appletv`, `ios/other`, the names Xcode writes), which reach a String Catalog as device variations. A target without
 a text of its own gets the full text, as before. `--platforms ios,angular` on `fl add` or
 `fl edit` keeps a key out of the other platforms' files (`all` puts it back everywhere), and
 `--max-length ios=40` sets the longest text a target takes. `fl status` counts the texts

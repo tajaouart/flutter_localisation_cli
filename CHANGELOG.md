@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.26.1] - 2026-11-26
+### Changed
+- Device targets take the names Xcode writes (`ios/iphone`, `ios/ipad`, `ios/ipod`,
+  `ios/mac`, `ios/applewatch`, `ios/applevision`, `ios/appletv`, `ios/other`), so a text
+  for Apple Watch, Apple Vision or Apple TV reaches the app, and iPod touch can have one.
+- The `@flutterlocalisation/angular` README says what a project shared with iOS or Flutter
+  apps sends an Angular app.
+
 ## [1.26.0] - 2026-11-26
 ### Added
 - **`fl` and `fl_mcp` keep themselves up to date.** A copy installed with

@@ -404,8 +404,8 @@ void main() {
       expect(parsePlatformList(<String>['all']), isEmpty);
       expect(() => parsePlatformList(<String>['android']),
           throwsA(isA<ArgumentError>()));
-      expect(parseMaxLengths(<String>['ios=40,ios/watch=12', 'ngx=0']),
-          <String, int>{'ios': 40, 'ios/watch': 12, 'ngx': 0});
+      expect(parseMaxLengths(<String>['ios=40,ios/applewatch=12', 'ngx=0']),
+          <String, int>{'ios': 40, 'ios/applewatch': 12, 'ngx': 0});
       expect(() => parseMaxLengths(<String>['ios']),
           throwsA(isA<ArgumentError>()));
       expect(() => parseMaxLengths(<String>['ios/car=4']),

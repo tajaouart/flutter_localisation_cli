@@ -1085,8 +1085,8 @@ class EditCommand extends Command<int> with _ApiCommand {
     argParser.addOption('target',
         help: 'Write the text of one target instead of the full text: a '
             'platform (flutter, ios, angular, ngx) or an Apple device '
-            '(ios/iphone, ios/ipad, ios/mac, ios/watch, ios/vision, ios/tv, '
-            'ios/other). Targets without one get the full text.');
+            '(ios/iphone, ios/ipad, ios/ipod, ios/mac, ios/applewatch, '
+            'ios/applevision, ios/appletv, ios/other). Targets without one get the full text.');
     argParser.addFlag('clear',
         negatable: false,
         help: 'With --target: remove that target\'s text, so it gets the '

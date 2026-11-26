@@ -459,7 +459,7 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
               'type': 'string',
               'enum': kTextTargets,
               'description':
-                  'The target whose text value is, e.g. ios or ios/watch.',
+                  'The target whose text value is, e.g. ios or ios/applewatch.',
             },
             'platforms': <String, dynamic>{
               'type': 'array',
