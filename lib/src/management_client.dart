@@ -312,6 +312,26 @@ class ProjectData {
   /// are checked against [platforms], the whole project.
   bool ships(final AppPlatform platform) => localPlatforms.contains(platform);
   bool get shipsFlutter => ships(AppPlatform.flutter);
+
+  /// Keys of [f] that ship to none of the platforms this repository holds:
+  /// they are another repository's to count and translate. Empty when the
+  /// repository holds every platform of the project.
+  Set<String> keysElsewhere(final FlavorData f) {
+    if (localPlatforms.length >= platforms.length) return const <String>{};
+    final Map<String, List<String>> on = <String, List<String>>{};
+    for (final LanguageData l in f.languages) {
+      for (final TranslationEntry t in l.translations) {
+        if (t.platforms.isNotEmpty) on[t.key] ??= t.platforms;
+      }
+    }
+    return <String>{
+      for (final MapEntry<String, List<String>> e in on.entries)
+        if (!localPlatforms
+            .any((final AppPlatform pl) => e.value.contains(pl.wire)))
+          e.key,
+    };
+  }
+
   bool get shipsIos => ships(AppPlatform.ios);
   bool get shipsAngular => ships(AppPlatform.angular);
   bool get shipsNgx => ships(AppPlatform.ngx);

@@ -173,6 +173,9 @@ class FakeBackend {
   /// More keys of the base language, beside the one every flavor holds.
   List<String> extraKeys = <String>[];
 
+  /// Give every other language an empty row for each extra key too.
+  bool extraKeysInTargets = false;
+
   /// `platforms` of an extra key, by key.
   Map<String, List<String>> extraKeyPlatforms = <String, List<String>>{};
 
@@ -277,6 +280,20 @@ class FakeBackend {
                           ...targets[code]!,
                           ..._textFields(code),
                         },
+                      if (extraKeysInTargets)
+                        for (int k = 0; k < extraKeys.length; k++)
+                          <String, dynamic>{
+                            'id': 2000 +
+                                i * 1000 +
+                                languages.indexOf(code) * 100 +
+                                k,
+                            'key': extraKeys[k],
+                            'value': '',
+                            ..._textFields(null),
+                            if (platformText)
+                              'platforms':
+                                  extraKeyPlatforms[extraKeys[k]] ?? <String>[],
+                          },
                     ],
                   },
                 <String, dynamic>{

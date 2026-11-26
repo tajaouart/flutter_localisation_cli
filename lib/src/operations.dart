@@ -2050,11 +2050,14 @@ class Operations {
     if (baseCode == null) {
       return OpResult(false, 'No base language on flavor "${f.name}".');
     }
+    final Set<String> elsewhere = project.keysElsewhere(f);
     final Map<String, String> baseByKey = <String, String>{
       for (final LanguageData l in f.languages)
         if (l.code == baseCode)
           for (final TranslationEntry t in l.translations)
-            if (target == null || t.overrideFor(target) != null) t.key: t.value,
+            if ((target == null || t.overrideFor(target) != null) &&
+                !elsewhere.contains(t.key))
+              t.key: t.value,
     };
 
     if (locales != null && locales.isNotEmpty) {
@@ -2568,8 +2571,20 @@ class Operations {
         if (l.code == baseCode)
           for (final TranslationEntry t in l.translations) t.key: t.value,
     };
+    final Set<String> elsewhere = project.keysElsewhere(f);
     final List<Map<String, dynamic>> rows = <Map<String, dynamic>>[];
-    for (final LanguageData l in f.languages) {
+    for (final LanguageData raw in f.languages) {
+      final LanguageData l = elsewhere.isEmpty
+          ? raw
+          : LanguageData(
+              id: raw.id,
+              code: raw.code,
+              isBase: raw.isBase,
+              translations: <TranslationEntry>[
+                for (final TranslationEntry t in raw.translations)
+                  if (!elsewhere.contains(t.key)) t,
+              ],
+            );
       final int total = l.translations.length;
       final int filled =
           l.translations.where((final TranslationEntry t) => !t.isEmpty).length;

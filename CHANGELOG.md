@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.25.3] - 2026-11-26
+### Fixed
+- **`fl status` and `fl retranslate` count only the keys this repository ships.** In a
+  repository holding some of the project's platforms, a key whose `platforms` name none of
+  them belongs to another repository: the iOS app of a project shared with an Angular website
+  no longer reports thousands of website keys as not translated, and `fl retranslate` no
+  longer sends them. A key with no platforms ships everywhere and still counts. The MCP tools
+  `list_status` and `retranslate` do the same. A single-platform project is unchanged.
+
 ## [1.25.2] - 2026-11-26
 ### Added
 - **Platforms per repository.** `flutterlocalisation.json` takes `"platforms": ["ios"]`, the

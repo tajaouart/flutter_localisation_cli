@@ -71,6 +71,11 @@ void main() {
     backend.platforms = <String>['angular', 'ios'];
     backend.languages = <String>['en', 'fr'];
     backend.extraKeys = <String>[];
+    backend.extraKeyPlatforms = <String, List<String>>{};
+    backend.extraKeysInTargets = false;
+    backend.platformText = false;
+    backend.keyPlatforms = <String>[];
+    backend.targets = <String, Map<String, dynamic>>{};
     backend.imports.clear();
 
     // The website: Angular with @angular/localize.
@@ -149,6 +154,79 @@ void main() {
     expect(r.code, 0, reason: r.err);
     expect(r.json['platforms'], <String>['ios', 'angular']);
     expect(r.json['repo_platforms'], <String>['ios']);
+  });
+
+  group('keys of another platform', () {
+    setUp(() {
+      backend
+        ..platformText = true
+        ..extraKeys = <String>['web.title', 'web.footer', 'shared.ok']
+        ..extraKeyPlatforms = <String, List<String>>{
+          'web.title': <String>['angular'],
+          'web.footer': <String>['angular'],
+        }
+        ..extraKeysInTargets = true
+        ..keyPlatforms = <String>['ios']
+        ..targets = <String, Map<String, dynamic>>{
+          'fr': <String, dynamic>{'value': 'Nettoyage… {arg1} s restantes'},
+        };
+      writeConfig(app, <String, Object>{
+        'xcstrings_dir': 'App/Resources',
+        'platforms': <String>['ios'],
+      });
+    });
+
+    Map<String, dynamic> fr(final Run r) => (r.json['locales'] as List<dynamic>)
+        .cast<Map<String, dynamic>>()
+        .firstWhere((final Map<String, dynamic> m) => m['locale'] == 'fr');
+
+    test('status counts only the keys this repository ships', () async {
+      final Run r = await fl(app, <String>['status', '--json']);
+      expect(r.code, 0, reason: r.err);
+      expect(fr(r)['total'], 2);
+      expect(fr(r)['filled'], 1);
+    });
+
+    test('the website counts its own keys and the shared ones', () async {
+      writeConfig(web, <String, Object>{
+        'angular_dir': 'src/locale',
+        'platforms': <String>['angular'],
+      });
+      final Run r = await fl(web, <String>['status', '--json']);
+      expect(r.code, 0, reason: r.err);
+      expect(fr(r)['total'], 3);
+      expect(fr(r)['filled'], 0);
+    });
+
+    test('a single-platform project counts every key', () async {
+      backend.platforms = <String>['ios'];
+      final Run r = await fl(app, <String>['status', '--json']);
+      expect(r.code, 0, reason: r.err);
+      expect(fr(r)['total'], 4);
+    });
+
+    test('retranslate picks only the keys this repository ships', () async {
+      final Run r =
+          await fl(app, <String>['retranslate', '--dry-run', '--json']);
+      expect(r.code, 0, reason: r.err);
+      expect(r.out, contains('1 value'));
+    });
+
+    test('the MCP status counts the same', () async {
+      final McpProcess mcp = await McpProcess.start(
+          baseUrl: backend.url, workingDirectory: app.path);
+      try {
+        final Map<String, dynamic> data =
+            await mcp.call('list_status', <String, dynamic>{});
+        final Map<String, dynamic> row = ((data['data'] ?? data)['locales']
+                as List<dynamic>)
+            .cast<Map<String, dynamic>>()
+            .firstWhere((final Map<String, dynamic> m) => m['locale'] == 'fr');
+        expect(row['total'], 2);
+      } finally {
+        await mcp.stop();
+      }
+    });
   });
 
   test('a repository that shows none of the platforms writes nothing',
