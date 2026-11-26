@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.25.0] - 2026-11-26
+### Added
+- **Platform text.** A key keeps one meaning and can have a text of its own on one target:
+  a platform (`flutter`, `ios`, `angular`, `ngx`) or an Apple device of `ios` (`ios/iphone`,
+  `ios/ipad`, `ios/mac`, `ios/watch`, `ios/vision`, `ios/tv`, `ios/other`). `fl edit <key>
+  --target ios --value "..."` writes it for one locale, `--target ios --clear` removes it, and
+  a target without one gets the full text as before. A text that drops a placeholder of the
+  full text is refused; one over the target's max length is written and said to be over.
+- **`--platforms ios,angular` and `--max-length ios=40`** on `fl add` and `fl edit`: the
+  platforms a key ships to (`all` puts it back on every platform) and the longest text a
+  target takes (`0` removes a limit). A platform the project does not ship is refused.
+- **`fl shorten [--target ios] [--locale fr] [keys...]`** asks the service for a text that
+  fits the max length, written from the full text, for the keys named or every key over the
+  limit, then says which ones still do not fit. Without `--target`, the one target the keys
+  have a limit for.
+- **`fl translate <key> --target ios` and `fl retranslate --target ios`** translate a
+  target's text from the base language's, where a locale is missing it or it is outdated.
+- **`fl status`** counts, per locale, the platform texts to check (the full text or the base
+  text changed since) and the texts over each target's limit, and names the command for each.
+- The MCP `edit_string` and `add_string` tools take `target`, `platforms` and `max_length`
+  (an empty `value` with a `target` removes that text; `edit_string` no longer requires
+  `value`), `translate_key` and `retranslate` take `target`, and a `shorten` tool does what
+  `fl shorten` does.
+
+### Changed
+- `fl export`, `fl pull` written from the API, and `fl diff` of a Flutter ARB use the
+  `flutter` text of each key and leave out the keys that do not ship to Flutter, so a key's
+  own Flutter text is no longer reported as a difference.
+
+### Fixed
+- `fl_mcp` read the service address from `$FL_BASE_URL` only; it now falls back to
+  `base_url` in flutterlocalisation.json, as `fl` does.
+
+A service that does not answer with platform texts yet works exactly as before: the new
+flags and the `shorten` tool are refused there with a sentence, and nothing is written.
+
 ## [1.24.1] - 2026-11-26
 ### Fixed
 - **`fl add --translate` with a key that may not translate** said only that the token lacks

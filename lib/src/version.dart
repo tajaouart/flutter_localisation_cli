@@ -9,7 +9,7 @@ import 'dart:convert';
 import 'dart:io';
 
 /// Kept equal to `version:` in pubspec.yaml by a test.
-const String kCliVersion = '1.24.1';
+const String kCliVersion = '1.25.0';
 
 /// Set to any value to keep the "update available" line out of the output.
 const String kNoUpdateNoticeEnvVar = 'FL_NO_UPDATE_NOTICE';
