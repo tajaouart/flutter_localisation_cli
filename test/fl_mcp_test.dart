@@ -550,6 +550,15 @@ void main() {
         .call('check_l10n_setup', <String, dynamic>{'project_root': tmp.path});
     expect(doctor['ngx'], isTrue, reason: doctor.toString());
   });
+
+  test('fl_mcp reads base_url from flutterlocalisation.json', () async {
+    final McpProcess fromConfig =
+        await McpProcess.start(baseUrl: '', workingDirectory: tmp.path);
+    addTearDown(fromConfig.stop);
+    final Map<String, dynamic> data = await fromConfig.call('list_projects');
+    expect(data['ok'], isTrue, reason: data.toString());
+    expect(data['projects'], hasLength(1));
+  });
 }
 
 String _write(final Directory dir, final String name, final String content) {
