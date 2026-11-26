@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.25.1] - 2026-11-26
+### Added
+- **Named String Catalog tables.** `xcstrings_catalogs` also takes the path of any
+  `.xcstrings` file, such as `"App/Posts/Posts.xcstrings"` for the strings Swift reads with
+  `tableName: "Posts"`, beside the target folders it already took. A table's keys join the
+  service's one flat key set like a target's, and `fl pull` and `fl export` write each file
+  back with only the keys it declares, in Xcode's formatting. `InfoPlist.xcstrings` and
+  `AppShortcuts.xcstrings` still go beside the first folder of the list, which is no longer
+  a table even when one is listed first; listing either of them is refused with a sentence.
+- **A key declared in several catalogs** with the same text everywhere is one key on the
+  service, written back to every file that declares it, and a language only one of them
+  translates is kept. With a different text in two files (in any language, or a plural
+  against a plain string), `fl pull`, `fl pull --adopt`, `fl export`, `fl import` of a listed
+  catalog, `fl diff` and the MCP `pull_arbs` and `import_arb` tools stop before anything is
+  sent or written and name each key, its files and the languages that differ.
+  `--discard-local` still takes the service's text into every file.
+- **`fl diff`** compares String Catalogs: with no file, every catalog of
+  `xcstrings_catalogs`; with one, that catalog. Per file: the keys new to the service, those
+  whose text differs (with the languages), the same; then the service keys no file declares.
+- **`fl status`** lists each catalog of `xcstrings_catalogs` with its key count and the keys
+  the service does not have yet, and warns about a key with two texts.
+- **`fl init`** on an iOS app with two or more catalogs offers to write them all in
+  `xcstrings_catalogs` (the folder holding `InfoPlist.xcstrings` first), which `--yes` takes.
+- `fl pull --dry-run` lists, per catalog file, the keys it would write.
+
+### Changed
+- `fl import` of a named table listed in `xcstrings_catalogs` sends it as
+  `Localizable.xcstrings`, the table its keys live in on the service.
+
 ## [1.25.0] - 2026-11-26
 ### Added
 - **Platform text.** A key keeps one meaning and can have a text of its own on one target:
