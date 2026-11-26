@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.25.4] - 2026-11-26
+### Fixed
+- **Named String Catalog tables on Windows.** A folder of `xcstrings_catalogs` built its
+  `Localizable.xcstrings` and `InfoPlist.xcstrings` paths with `/`, so on Windows they came out
+  as `App\Resources/Localizable.xcstrings` and `fl export --dry-run` and `fl pull` showed them
+  that way. Every catalog path is now built and compared with the separator of the OS, and
+  `fl init` writes the entries of `xcstrings_catalogs` with `/` on every OS, so the config
+  reads the same wherever it is checked out.
+
 ## [1.25.3] - 2026-11-26
 ### Fixed
 - **`fl status` and `fl retranslate` count only the keys this repository ships.** In a

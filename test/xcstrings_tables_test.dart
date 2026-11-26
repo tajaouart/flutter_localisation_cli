@@ -174,7 +174,7 @@ void main() {
         'Widgets/Localizable.xcstrings',
       ]).path);
       final List<CatalogTarget> t = c.xcstringsCatalogs!;
-      expect(t[0].table, p.join(tmp.path, 'App/Posts/Posts.xcstrings'));
+      expect(t[0].table, p.join(tmp.path, 'App', 'Posts', 'Posts.xcstrings'));
       expect(t[1].table, isNull);
       expect(t[1].localizable.path,
           p.join(tmp.path, 'App', 'Localizable.xcstrings'));
@@ -207,17 +207,59 @@ void main() {
     write('StudioPosting/Posts/Posts.xcstrings', <String, dynamic>{});
     write('StudioPosting/Brand/Brand.xcstrings', <String, dynamic>{});
     write('build/Copy/Localizable.xcstrings', <String, dynamic>{});
-    expect(catalogEntries(tmp), <String>[
-      p.join('StudioPosting', 'Resources'),
-      'StudioPostingWidgets',
-      p.join('StudioPosting', 'Brand', 'Brand.xcstrings'),
-      p.join('StudioPosting', 'Posts', 'Posts.xcstrings'),
-    ]);
+    expect(
+        catalogEntries(tmp),
+        <String>[
+          'StudioPosting/Resources',
+          'StudioPostingWidgets',
+          'StudioPosting/Brand/Brand.xcstrings',
+          'StudioPosting/Posts/Posts.xcstrings',
+        ],
+        reason: 'written to the config, so the same on every OS');
   });
 
   test('init leaves an app with one catalog to xcstrings_dir', () {
     write('App/Localizable.xcstrings', <String, dynamic>{});
     write('App/InfoPlist.xcstrings', <String, dynamic>{});
     expect(catalogEntries(tmp), isNull);
+  });
+
+  test('catalog paths take the separator of the OS, a path matches either way',
+      () {
+    final CatalogTarget folder = CatalogTarget(p.join(tmp.path, 'App'));
+    final CatalogTarget table =
+        CatalogTarget.table('${tmp.path}/App/Posts/Posts.xcstrings');
+    for (final String path in <String>[
+      folder.localizable.path,
+      folder.infoPlist.path,
+      table.localizable.path,
+      table.infoPlist.path,
+    ]) {
+      expect(path, p.normalize(path));
+    }
+    expect(table.localizable.path,
+        p.join(tmp.path, 'App', 'Posts', 'Posts.xcstrings'));
+    expect(
+        catalogsNamed('${tmp.path}/App/Localizable.xcstrings',
+            <CatalogTarget>[table, folder]).single,
+        same(folder));
+  });
+
+  // On macOS and Linux '/' is the separator, so a path written as
+  // '$dir/$file' only shows up wrong on Windows; this catches it everywhere.
+  test('the catalog code joins paths with package:path', () {
+    final RegExp slashJoin = RegExp(r'''['"]\$\{?[\w.!()]+\}?/\$''');
+    for (final String source in <String>[
+      'lib/src/xcstrings.dart',
+      'lib/src/init_detect.dart',
+      'lib/src/repo_platforms.dart',
+      'lib/src/file_diff.dart',
+    ]) {
+      final List<String> lines = File(source).readAsLinesSync();
+      for (int i = 0; i < lines.length; i++) {
+        expect(slashJoin.hasMatch(lines[i]), isFalse,
+            reason: '$source:${i + 1}: ${lines[i].trim()}');
+      }
+    }
   });
 }

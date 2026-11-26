@@ -2934,11 +2934,11 @@ extension ArbExport on Operations {
       }
       final String file = '$table.xcstrings';
       written.add(<String, dynamic>{
-        'file': targets == null ? file : _shown('$dir/$file'),
+        'file': targets == null ? file : _shown(path.join(dir, file)),
         'keys': keys,
       });
       if (dryRun) continue;
-      final File out = File('$dir/$file');
+      final File out = File(path.join(dir, file));
       out.parent.createSync(recursive: true);
       out.writeAsStringSync(body);
     }
@@ -3088,10 +3088,8 @@ extension ArbExport on Operations {
   }
 
   /// [path] as the user would type it from where they stand.
-  static String _shown(final String path) {
-    final String here = '${Directory.current.path}${Platform.pathSeparator}';
-    return path.startsWith(here) ? path.substring(here.length) : path;
-  }
+  static String _shown(final String file) =>
+      path.isWithin(Directory.current.path, file) ? path.relative(file) : file;
 
   /// The `@@last_modified` value to write for one locale.
   ///

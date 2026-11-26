@@ -91,7 +91,9 @@ List<String>? catalogEntries(final Directory root) {
     } on FileSystemException {
       continue;
     }
-    final String rel = p.relative(dir.path, from: root.path);
+    // Written to the shared config, so in the form every OS reads.
+    final String rel =
+        p.posix.joinAll(p.split(p.relative(dir.path, from: root.path)));
     for (final FileSystemEntity e in entries) {
       if (e is! File || !e.path.endsWith('.xcstrings')) continue;
       final String name = p.basename(e.path);
@@ -100,7 +102,7 @@ List<String>? catalogEntries(final Directory root) {
       } else if (name == 'InfoPlist.xcstrings') {
         infoPlistDir ??= rel;
       } else if (name != 'AppShortcuts.xcstrings') {
-        tables.add(p.relative(e.path, from: root.path));
+        tables.add(p.posix.join(rel, name));
       }
     }
     for (final FileSystemEntity e in entries) {

@@ -92,8 +92,8 @@ class CatalogTarget {
 
   /// A named table: [path] is the `.xcstrings` file itself.
   CatalogTarget.table(final String path)
-      : dir = File(path).parent.path,
-        table = path,
+      : dir = p.dirname(p.normalize(path)),
+        table = p.normalize(path),
         infoPlistPrefix = null;
 
   final String dir;
@@ -102,17 +102,16 @@ class CatalogTarget {
   /// The path of a named table, null for a folder.
   final String? table;
 
-  File get localizable => File(table ?? '$dir/$kLocalizableCatalog');
-  File get infoPlist => File('$dir/$kInfoPlistCatalog');
+  File get localizable => File(table ?? p.join(dir, kLocalizableCatalog));
+  File get infoPlist => File(p.join(dir, kInfoPlistCatalog));
 }
 
 /// The catalogs of `xcstrings_catalogs` a path names, or a catalog on its
 /// own when the config does not list it.
 List<CatalogTarget> catalogsNamed(
     final String path, final List<CatalogTarget>? targets) {
-  final String wanted = p.normalize(p.absolute(path));
   for (final CatalogTarget t in targets ?? const <CatalogTarget>[]) {
-    if (p.normalize(p.absolute(t.localizable.path)) == wanted) {
+    if (p.equals(t.localizable.path, path)) {
       return <CatalogTarget>[t];
     }
   }

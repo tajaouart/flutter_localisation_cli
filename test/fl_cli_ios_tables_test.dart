@@ -319,9 +319,9 @@ void main() {
         jsonDecode(file('flutterlocalisation.json').readAsStringSync())
             as Map<String, dynamic>;
     expect(cfg['xcstrings_catalogs'], <String>[
-      p.join('App', 'Resources'),
-      p.join('App', 'Brand', 'Brand.xcstrings'),
-      p.join('App', 'Posts', 'Posts.xcstrings'),
+      'App/Resources',
+      'App/Brand/Brand.xcstrings',
+      'App/Posts/Posts.xcstrings',
     ]);
     expect(cfg.containsKey('xcstrings_dir'), isFalse);
     expect(stringsOf(brand)['brand.name'], entry('Brand', 'Marque'),
