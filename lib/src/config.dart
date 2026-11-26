@@ -77,7 +77,8 @@ class ProjectConfig {
 
   /// `xcstrings_catalogs`: the folders of an iOS app with several targets
   /// (the app, a widget, an extension), each holding the
-  /// `Localizable.xcstrings` of its own code. The service keeps one flat set
+  /// `Localizable.xcstrings` of its own code, and the named tables
+  /// (`App/Posts.xcstrings`) by their file. The service keeps one flat set
   /// of keys; `fl pull` writes into each catalog the keys it declares. The
   /// first folder also takes `InfoPlist.xcstrings` and
   /// `AppShortcuts.xcstrings`.
@@ -89,9 +90,17 @@ class ProjectConfig {
   /// ends with `fl native`.
   final Map<String, String>? iosPermissionKeys;
 
-  /// The catalog folder in effect: `xcstrings_dir`, else `arb_dir`, else here.
+  /// The catalog folder in effect: the first folder of `xcstrings_catalogs`,
+  /// else `xcstrings_dir`, else `arb_dir`, else here.
   String get catalogDir =>
-      xcstringsCatalogs?.first.dir ?? xcstringsDir ?? arbDir ?? '.';
+      (xcstringsCatalogs == null
+          ? null
+          : (xcstringsCatalogs!.firstWhere(
+              (final CatalogTarget t) => t.table == null,
+              orElse: () => xcstringsCatalogs!.first)).dir) ??
+      xcstringsDir ??
+      arbDir ??
+      '.';
 
   /// The folder holding the config file, which is the app's root; null when
   /// no config file was found.
@@ -173,13 +182,28 @@ class ProjectConfig {
     if (rawCatalogs != null) {
       Never refuse() => throw ConfigException(
           '${file.path}: "xcstrings_catalogs" must list the folders that hold '
-          'a Localizable.xcstrings, for example ["App", "Widgets"]. A folder '
+          'a Localizable.xcstrings, for example ["App", "Widgets"], and any '
+          'named table by its file ("App/Posts.xcstrings"). A folder '
           'with an Info.plist of its own is written '
           '{"dir": "Mac", "infoplist_prefix": "mac."}.');
       if (rawCatalogs is! List || rawCatalogs.isEmpty) refuse();
+      for (final Object? entry in rawCatalogs) {
+        if (entry is String &&
+            <String>{kInfoPlistCatalog, kAppShortcutsCatalog}
+                .contains(p.basename(entry))) {
+          throw ConfigException(
+              '${file.path}: "xcstrings_catalogs" lists $entry. '
+              '$kInfoPlistCatalog and $kAppShortcutsCatalog are written beside '
+              'the first folder of the list; name that folder instead.');
+        }
+      }
       catalogs = <CatalogTarget>[
         for (final Object? entry in rawCatalogs)
-          if (entry is String && entry.isNotEmpty)
+          if (entry is String && p.basename(entry) == kLocalizableCatalog)
+            CatalogTarget(underConfig(p.dirname(entry)))
+          else if (entry is String && entry.endsWith('.xcstrings'))
+            CatalogTarget.table(underConfig(entry))
+          else if (entry is String && entry.isNotEmpty)
             CatalogTarget(underConfig(entry))
           else if (entry is Map &&
               entry['dir'] is String &&

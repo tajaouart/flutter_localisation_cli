@@ -1080,6 +1080,20 @@ Future<void> _callTool(
       ];
       final bool adopt = (a['adopt'] ?? false) as bool;
       final bool discardLocal = (a['discard_local'] ?? false) as bool;
+      final List<CatalogConflict> conflicts = p.shipsIos && targets != null
+          ? catalogConflicts(targets)
+          : const <CatalogConflict>[];
+      if (conflicts.isNotEmpty && !discardLocal) {
+        _toolResult(id, <String, dynamic>{
+          'ok': false,
+          'error': 'catalog_conflicts',
+          'conflicts': <Map<String, dynamic>>[
+            for (final CatalogConflict c in conflicts) c.toJson(),
+          ],
+          'message': describeCatalogConflicts(conflicts),
+        });
+        return;
+      }
 
       if ((orphans.isNotEmpty || catalogOrphans.isNotEmpty) &&
           !adopt &&
@@ -1494,6 +1508,39 @@ Future<void> _callTool(
             }
             content = f.readAsStringSync();
           }
+          String? fileName =
+              path == null ? null : File(path).uri.pathSegments.last;
+          final List<CatalogTarget>? targets =
+              ProjectConfig.load().xcstringsCatalogs;
+          if (path != null &&
+              content != null &&
+              targets != null &&
+              fileName!.endsWith('.xcstrings') &&
+              targets.contains(catalogsNamed(path, targets).single)) {
+            Object? parsed;
+            try {
+              parsed = jsonDecode(content);
+            } on FormatException {
+              parsed = null;
+            }
+            final List<CatalogConflict> conflicts =
+                catalogConflicts(targets, only: catalogKeys(parsed).toSet());
+            if (conflicts.isNotEmpty) {
+              _toolResult(
+                  id,
+                  <String, dynamic>{
+                    'ok': false,
+                    'error': 'catalog_conflicts',
+                    'conflicts': <Map<String, dynamic>>[
+                      for (final CatalogConflict c in conflicts) c.toJson(),
+                    ],
+                    'message': describeCatalogConflicts(conflicts),
+                  },
+                  isError: true);
+              return;
+            }
+            fileName = kLocalizableCatalog;
+          }
           if (content == null || content.trim().isEmpty) {
             _toolResult(
                 id,
@@ -1512,7 +1559,7 @@ Future<void> _callTool(
             translate: (a['translate'] ?? false) as bool,
             dryRun: !apply,
             prune: (a['prune'] ?? false) as bool,
-            fileName: path == null ? null : File(path).uri.pathSegments.last,
+            fileName: fileName,
           );
         }
       default:

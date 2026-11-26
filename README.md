@@ -332,21 +332,35 @@ pull; `--adopt` imports it first. An iOS-only project has no ARBs and `fl sync` 
 Dart codegen for it. App Shortcut phrases (keys with `${applicationName}`) go to
 `AppShortcuts.xcstrings`, the only catalog Xcode reads them from.
 
-**An app with several targets** (the app, a widget, an extension) has one
-`Localizable.xcstrings` per target, and Xcode decides which string goes where when it extracts
-them from the code. The project still holds one flat set of keys. List the folders:
+**An app with several catalogs** (the app, a widget, an extension, each with its own
+`Localizable.xcstrings`, and named tables such as `Posts.xcstrings` that Swift reads with
+`tableName: "Posts"`) lists them all. Xcode decides which string goes where when it extracts
+them from the code; the project still holds one flat set of keys. A folder stands for its
+`Localizable.xcstrings`, a table is named by its file:
 
 ```json
 {
   "project": "Reelfree",
-  "xcstrings_catalogs": ["App", "Extensions/Widgets", "Extensions/Shield"]
+  "xcstrings_catalogs": [
+    "App",
+    "App/Posts/Posts.xcstrings",
+    "App/Settings/Settings.xcstrings",
+    "Extensions/Widgets"
+  ]
 }
 ```
 
-`fl pull` then writes into each catalog the keys that catalog declares, every language filled
-in, in Xcode's formatting. A string shared by two targets is one key on the service and lands
-in both files. Keys on the service that no catalog declares are counted and named, not
-written. The whole round after adding strings in the code:
+`fl init` writes this list itself when it finds two or more catalogs. `fl pull` then writes
+into each catalog the keys that catalog declares, every language filled in, in Xcode's
+formatting. A string declared in two catalogs with the same text is one key on the service and
+lands in both files. With two different texts (in any language) it cannot be one key: `pull`,
+`pull --adopt`, `export`, `import` and `diff` stop before sending or writing anything and name
+the key and its files. Rename the key in one table, in the catalog and in the Swift that reads
+it. Keys on the service that no catalog declares are counted and named, not written.
+
+`fl diff` with no file compares every listed catalog with the service, file by file, and
+`fl status` lists each catalog with the keys the service does not have yet. The whole round
+after adding strings in the code:
 
 ```bash
 xcodebuild -exportLocalizations -project App.xcodeproj -localizationPath build/loc -exportLanguage en
@@ -355,7 +369,7 @@ fl pull --adopt    # new keys up in one import, translated, then every catalog b
 
 The first line is Xcode's own extraction: it writes the new strings into each target's
 catalog (a build in Xcode does the same). `InfoPlist.xcstrings` and `AppShortcuts.xcstrings`
-go to the first folder. A target with an Info.plist of its own (a Mac app beside the iPhone
+go to the first folder of the list (a table is never that folder), and are not listed. A target with an Info.plist of its own (a Mac app beside the iPhone
 one) keeps its permission sentences under a prefix:
 `{"dir": "Mac", "infoplist_prefix": "mac."}` writes the key
 `mac.NSMicrophoneUsageDescription` to `Mac/InfoPlist.xcstrings` as

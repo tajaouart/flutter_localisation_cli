@@ -229,6 +229,108 @@ extension FileCompare on Operations {
   }
 }
 
+/// String Catalogs against the service's `Localizable` catalog, file by
+/// file: the keys each declares that the service lacks, those whose text
+/// differs in a language both have, and the service keys no file declares.
+///
+/// [files] are compared; [all] (default [files]) are the catalogs searched
+/// for a key declared twice with two texts, which refuses the comparison:
+/// there is no one local text to set against the service's.
+extension CatalogCompare on Operations {
+  Future<OpResult> compareCatalogs(
+    final List<CatalogTarget> files, {
+    final List<CatalogTarget>? all,
+    final String Function(String path)? shown,
+  }) async {
+    String show(final String path) => shown == null ? path : shown(path);
+    final List<String> missing = <String>[
+      for (final CatalogTarget t in files)
+        if (!t.localizable.existsSync()) show(t.localizable.path),
+    ];
+    if (missing.isNotEmpty) {
+      return OpResult(false, 'No catalog at ${missing.join(', ')}.',
+          <String, dynamic>{'missing': missing});
+    }
+    final Set<String> declared = <String>{
+      for (final CatalogTarget t in files)
+        ...catalogKeys(jsonDecode(t.localizable.readAsStringSync())),
+    };
+    final List<CatalogConflict> conflicts =
+        catalogConflicts(all ?? files, only: declared);
+    if (conflicts.isNotEmpty) {
+      return OpResult(
+        false,
+        describeCatalogConflicts(conflicts, shown: show),
+        <String, dynamic>{
+          'error': 'catalog_conflicts',
+          'conflicts': <Map<String, dynamic>>[
+            for (final CatalogConflict c in conflicts) c.toJson(),
+          ],
+        },
+      );
+    }
+    final ProjectData project = await client.getProject(projectId);
+    final FlavorData fl = project.flavor(flavor);
+    final Map<String, dynamic> served =
+        (jsonDecode(await client.downloadCatalog(projectId, fl.id))
+            as Map<String, dynamic>)['strings'] as Map<String, dynamic>;
+    final List<Map<String, dynamic>> rows = <Map<String, dynamic>>[];
+    final Set<String> seen = <String>{};
+    for (final CatalogTarget t in files) {
+      final Map<String, dynamic> local =
+          (jsonDecode(t.localizable.readAsStringSync())
+              as Map<String, dynamic>)['strings'] as Map<String, dynamic>;
+      final List<String> added = <String>[];
+      final Map<String, List<String>> changed = <String, List<String>>{};
+      int same = 0;
+      local.forEach((final String key, final dynamic v) {
+        if (key.isEmpty) return;
+        seen.add(key);
+        if (!served.containsKey(key)) {
+          added.add(key);
+          return;
+        }
+        final List<String> diff = catalogTextDifferences(v, served[key]);
+        if (diff.isEmpty) {
+          same++;
+        } else {
+          changed[key] = diff;
+        }
+      });
+      rows.add(<String, dynamic>{
+        'file': show(t.localizable.path),
+        'keys': local.keys.where((final String k) => k.isNotEmpty).length,
+        'added': added,
+        'changed': changed,
+        'same': same,
+      });
+    }
+    final List<String> gone = <String>[
+      for (final String key in served.keys)
+        if (!seen.contains(key)) key,
+    ]..sort();
+    String list(final Iterable<String> keys) =>
+        '${keys.take(10).join(', ')}${keys.length > 10 ? ', …' : ''}';
+    final List<String> lines = <String>[
+      for (final Map<String, dynamic> r in rows) ...<String>[
+        '${r['file']}: ${r['keys']} key(s)',
+        '  ${(r['added'] as List<String>).length} new, not on the service yet'
+            '${(r['added'] as List<String>).isEmpty ? '' : ': ${list(r['added'] as List<String>)}'}',
+        '  ${(r['changed'] as Map<String, List<String>>).length} different'
+            '${(r['changed'] as Map<String, List<String>>).isEmpty ? '' : ': ${list((r['changed'] as Map<String, List<String>>).entries.map((final MapEntry<String, List<String>> e) => '${e.key} (${e.value.join(', ')})'))}'}',
+        '  ${r['same']} the same.',
+      ],
+      '${gone.length} on the service are in none of these catalogs'
+          '${gone.isEmpty ? '.' : ': ${list(gone)}'}',
+    ];
+    return OpResult(true, lines.join('\n'), <String, dynamic>{
+      'format': 'xcstrings',
+      'files': rows,
+      'gone': gone,
+    });
+  }
+}
+
 /// [d] in a few lines: counts, and the keys of each list up to [limit].
 String describeDiff(final FileDiff d, final String fileName,
     {final int limit = 20}) {

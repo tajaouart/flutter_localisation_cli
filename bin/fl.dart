@@ -507,10 +507,20 @@ class InitCommand extends Command<int> with _ApiCommand {
             ask.ask('ARB folder', l10nArbDir(root) ?? 'arbs/${flavor.name}');
       }
       String? catalogDir;
+      List<String>? catalogs;
       if (ios) {
-        catalogDir = (argResults!['xcstrings-dir'] as String?) ??
-            ask.ask('String Catalog folder',
-                existingCatalogDir(root) ?? defaultCatalogDir(root));
+        final List<String>? found =
+            argResults!['xcstrings-dir'] == null ? catalogEntries(root) : null;
+        if (found != null &&
+            ask.confirm('This app has ${found.length} String Catalogs '
+                '(${found.join(', ')}). Give each one its own keys '
+                '(xcstrings_catalogs)?')) {
+          catalogs = found;
+        } else {
+          catalogDir = (argResults!['xcstrings-dir'] as String?) ??
+              ask.ask('String Catalog folder',
+                  existingCatalogDir(root) ?? defaultCatalogDir(root));
+        }
       }
       String? angularDir;
       if (angular) {
@@ -536,6 +546,7 @@ class InitCommand extends Command<int> with _ApiCommand {
         if (project.flavors.isNotEmpty) 'flavor': flavor.name,
         if (arbDir != null) 'arb_dir': arbDir,
         if (catalogDir != null) 'xcstrings_dir': catalogDir,
+        if (catalogs != null) 'xcstrings_catalogs': catalogs,
         if (angularDir != null) 'angular_dir': angularDir,
         if (argResults!['token-file'] != null)
           'token_file': argResults!['token-file'],
@@ -832,11 +843,24 @@ class ImportCommand extends Command<int> with _ApiCommand {
       return 1;
     }
     final String content = await file.readAsString();
+    final ProjectConfig cfg = loadProject();
+    String fileName = file.uri.pathSegments.last;
+    final List<CatalogTarget>? targets = cfg.xcstringsCatalogs;
+    if (targets != null && fileName.endsWith('.xcstrings')) {
+      final List<CatalogTarget> named = catalogsNamed(file.path, targets);
+      if (targets.contains(named.single)) {
+        final int? refused = _refuseConflicts(this, targets,
+            only: catalogKeys(_jsonOrNull(content)).toSet());
+        if (refused != null) return refused;
+        // A named table's keys live in the service's one Localizable table.
+        fileName = kLocalizableCatalog;
+      }
+    }
     final ({
       ManagementClient client,
       Operations ops,
       String projectName
-    }) built = await build(loadProject());
+    }) built = await build(cfg);
     try {
       final OpResult r = await built.ops.importArb(
         content,
@@ -845,7 +869,7 @@ class ImportCommand extends Command<int> with _ApiCommand {
         translate: argResults!['translate'] as bool,
         dryRun: dryRun,
         prune: argResults!['prune'] as bool,
-        fileName: file.uri.pathSegments.last,
+        fileName: fileName,
       );
       return emit(r);
     } finally {
@@ -870,19 +894,22 @@ class DiffCommand extends Command<int> with _ApiCommand {
   @override
   String get description =>
       'Compare a translation file (Flutter or Angular ARB, ngx-translate '
-      'json) with the service: keys only the file has, keys whose text '
-      'differs, keys only the service has. Changes nothing.';
+      'json, String Catalog) with the service: keys only the file has, keys '
+      'whose text differs, keys only the service has. Changes nothing. '
+      'Without a file, every catalog of "xcstrings_catalogs".';
   @override
-  String get invocation => 'fl diff <file> [--language <code>]';
+  String get invocation => 'fl diff [<file>] [--language <code>]';
 
   @override
   Future<int> run() async {
     final List<String> rest = argResults!.rest;
-    if (rest.isEmpty) {
+    final ProjectConfig cfg = loadProject();
+    final List<CatalogTarget>? targets = cfg.xcstringsCatalogs;
+    if (rest.isEmpty && targets == null) {
       throw UsageException('Missing <file> path argument.', usage);
     }
-    final File file = File(rest.first);
-    if (!file.existsSync()) {
+    final File? file = rest.isEmpty ? null : File(rest.first);
+    if (file != null && !file.existsSync()) {
       stderr.writeln('Error: file not found: ${rest.first}');
       return 1;
     }
@@ -890,8 +917,15 @@ class DiffCommand extends Command<int> with _ApiCommand {
       ManagementClient client,
       Operations ops,
       String projectName
-    }) built = await build(loadProject());
+    }) built = await build(cfg);
     try {
+      if (file == null || file.path.endsWith('.xcstrings')) {
+        return emit(await built.ops.compareCatalogs(
+          file == null ? targets! : catalogsNamed(file.path, targets),
+          all: targets,
+          shown: path.relative,
+        ));
+      }
       final String name = file.uri.pathSegments.last;
       final FileDiff d = await built.ops.compareFile(file.readAsStringSync(),
           fileName: name,
@@ -1332,13 +1366,52 @@ class StatusCommand extends Command<int> with _ApiCommand {
 
   @override
   Future<int> run() async {
+    final ProjectConfig cfg = loadProject();
     final ({
       ManagementClient client,
       Operations ops,
       String projectName
-    }) built = await build(loadProject());
+    }) built = await build(cfg);
     try {
-      final OpResult r = await built.ops.status();
+      OpResult r = await built.ops.status();
+      final List<CatalogTarget>? targets = cfg.xcstringsCatalogs;
+      final List<Map<String, dynamic>> catalogs = <Map<String, dynamic>>[];
+      List<CatalogConflict> conflicts = <CatalogConflict>[];
+      if (targets != null) {
+        final ProjectData project =
+            await built.client.getProject(built.ops.projectId);
+        final Set<String> serviceKeys = <String>{
+          for (final TranslationEntry t
+              in project.baseLanguage(built.ops.flavor)?.translations ??
+                  const <TranslationEntry>[])
+            t.key,
+        };
+        for (final CatalogTarget t in targets) {
+          final List<String> keys = <String>[
+            for (final String k in catalogKeys(t.localizable.existsSync()
+                ? _jsonOrNull(t.localizable.readAsStringSync())
+                : null))
+              if (k.isNotEmpty) k,
+          ];
+          catalogs.add(<String, dynamic>{
+            'file': path.relative(t.localizable.path),
+            'exists': t.localizable.existsSync(),
+            'keys': keys.length,
+            'not_on_service': <String>[
+              for (final String k in keys)
+                if (!serviceKeys.contains(k)) k,
+            ],
+          });
+        }
+        conflicts = catalogConflicts(targets);
+        r = OpResult(r.ok, r.message, <String, dynamic>{
+          ...r.data,
+          'catalogs': catalogs,
+          'catalog_conflicts': <Map<String, dynamic>>[
+            for (final CatalogConflict c in conflicts) c.toJson(),
+          ],
+        });
+      }
       if (jsonOut) return emit(r);
       stdout.writeln(r.message);
       var totalUntranslated = 0;
@@ -1378,6 +1451,20 @@ class StatusCommand extends Command<int> with _ApiCommand {
           '  ${m['locale']}$tag: ${m['translated'] ?? m['filled']}/${m['total']} '
           '(${m['translated_percent'] ?? m['percent']}%)$gap$old$check$long',
         );
+      }
+      if (catalogs.isNotEmpty) {
+        stdout.writeln('\nString Catalogs:');
+        for (final Map<String, dynamic> c in catalogs) {
+          final int fresh = (c['not_on_service'] as List<String>).length;
+          stdout.writeln(c['exists'] as bool
+              ? '  ${c['file']}: ${c['keys']} key(s)'
+                  '${fresh == 0 ? '' : ', $fresh not on the service yet (`fl pull --adopt`)'}'
+              : '  ${c['file']}: missing');
+        }
+        if (conflicts.isNotEmpty) {
+          stdout.writeln(
+              '\n${describeCatalogConflicts(conflicts, shown: path.relative, refused: false)}');
+        }
       }
       if (totalToCheck > 0) {
         stdout.writeln(
@@ -1797,6 +1884,12 @@ Future<int> _pullArbs(
       for (final TranslationEntry t in base.translations)
         if (t.key.isNotEmpty) t.key,
     };
+    // A key two catalogs give two texts would come back with the service's
+    // one text in both, or be imported with whichever was read first.
+    if (project.shipsIos && targets != null && !discardLocal) {
+      final int? refused = _refuseConflicts(cmd, targets);
+      if (refused != null) return refused;
+    }
 
     // Checked before anything reads the files: a clone of the old repo
     // holds the old repo's keys, and offering to adopt them would import
@@ -1988,6 +2081,12 @@ Future<int> _pullArbs(
 
     if (cmd.dryRun) {
       stdout.writeln('DRY RUN: would sync "$dir" to the service.');
+      if (project.shipsIos && targets != null) {
+        final OpResult plan = await built.ops.exportCatalogs(catalogDir,
+            dryRun: true, fetched: project, targets: targets);
+        stdout.writeln(plan.message);
+        _printFiles(plan);
+      }
       return 0;
     }
 
@@ -2085,6 +2184,47 @@ Future<int> _pullArbs(
     return r.ok ? 0 : 1;
   } finally {
     built.client.close();
+  }
+}
+
+/// Refuses, with every key and file named, when [targets] declare a key
+/// with two texts. Null when there is none.
+int? _refuseConflicts(
+  final _ApiCommand cmd,
+  final List<CatalogTarget> targets, {
+  final Set<String>? only,
+}) {
+  final List<CatalogConflict> conflicts = catalogConflicts(targets, only: only);
+  if (conflicts.isEmpty) return null;
+  final String message =
+      describeCatalogConflicts(conflicts, shown: path.relative);
+  if (cmd.jsonOut) {
+    return cmd.emit(OpResult(false, message, <String, dynamic>{
+      'error': 'catalog_conflicts',
+      'conflicts': <Map<String, dynamic>>[
+        for (final CatalogConflict c in conflicts) c.toJson(),
+      ],
+    }));
+  }
+  stderr.writeln(message);
+  return 1;
+}
+
+/// The files of an export, one line each.
+void _printFiles(final OpResult r) {
+  for (final dynamic row
+      in (r.data['files'] as List<dynamic>?) ?? const <dynamic>[]) {
+    final Map<String, dynamic> m = row as Map<String, dynamic>;
+    stdout.writeln('  ${m['file']}  ${m['keys']} key(s)'
+        '${m['base'] == true ? '  (template)' : ''}');
+  }
+}
+
+Object? _jsonOrNull(final String content) {
+  try {
+    return jsonDecode(content);
+  } on FormatException {
+    return null;
   }
 }
 
@@ -2788,6 +2928,12 @@ class ExportCommand extends Command<int> with _ApiCommand {
       // is how eight onboarding keys were lost once, and why this command
       // carried a "never run it here" warning in a consuming repo instead of
       // a check.
+      if (project.shipsIos &&
+          targets != null &&
+          !(argResults!['discard-local'] as bool)) {
+        final int? refused = _refuseConflicts(this, targets);
+        if (refused != null) return refused;
+      }
       if (!(argResults!['discard-local'] as bool)) {
         final LanguageData? base = project.baseLanguage(built.ops.flavor);
         if (base != null) {
@@ -2852,12 +2998,7 @@ class ExportCommand extends Command<int> with _ApiCommand {
       );
       if (jsonOut) return emit(r);
       stdout.writeln(r.message);
-      for (final dynamic row
-          in (r.data['files'] as List<dynamic>?) ?? const <dynamic>[]) {
-        final Map<String, dynamic> m = row as Map<String, dynamic>;
-        stdout.writeln('  ${m['file']}  ${m['keys']} key(s)'
-            '${m['base'] == true ? '  (template)' : ''}');
-      }
+      _printFiles(r);
       if (r.ok && !dryRun && project.shipsFlutter) {
         stdout.writeln('\nNow regenerate the Dart: '
             '`dart run flutter_localisation ${path.dirname(arbDir)} '

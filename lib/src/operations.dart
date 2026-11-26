@@ -2846,8 +2846,9 @@ extension ArbExport on Operations {
   /// comes back as a 422 whose details name the keys; that is the whole
   /// message, so it is passed through unchanged.
   ///
-  /// With [targets] (an app with several catalogs) `Localizable` is cut into
-  /// each target's file, see [splitCatalog]; the other tables go to [dir].
+  /// With [targets] (an app with several catalogs, folders and named tables)
+  /// `Localizable` is cut into each one's file, see [splitCatalog]; the other
+  /// tables go to [dir].
   Future<OpResult> exportCatalogs(
     final String dir, {
     final bool dryRun = false,
@@ -2868,7 +2869,8 @@ extension ArbExport on Operations {
           false,
           'No catalog at ${missing.join(', ')}. Each folder of '
           '"xcstrings_catalogs" needs the Localizable.xcstrings Xcode keeps '
-          'for that target: the keys it declares are the ones it is given.',
+          'for that target, and each named table its file: the keys a '
+          'catalog declares are the ones it is given.',
           <String, dynamic>{'missing': missing},
         );
       }

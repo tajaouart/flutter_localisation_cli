@@ -179,6 +179,9 @@ class FakeBackend {
   /// The `Localizable` catalog to serve in place of [kServedCatalog].
   String? servedCatalog;
 
+  /// The `InfoPlist` catalog to serve in place of [kEmptyInfoPlist].
+  String? infoPlist;
+
   /// The `AppShortcuts` catalog; null answers as a service from before it
   /// had one, with a 400.
   String? appShortcuts;
@@ -519,7 +522,7 @@ class FakeBackend {
         }));
       } else {
         res.write(switch (table) {
-          'InfoPlist' => kEmptyInfoPlist,
+          'InfoPlist' => infoPlist ?? kEmptyInfoPlist,
           'AppShortcuts' => appShortcuts!,
           _ => servedCatalog ?? kServedCatalog,
         });

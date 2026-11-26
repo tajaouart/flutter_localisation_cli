@@ -69,6 +69,53 @@ String? existingCatalogDir(final Directory root) {
   return null;
 }
 
+/// The entries of `xcstrings_catalogs` for an app with more than one string
+/// catalog, relative to [root]: the folder of each `Localizable.xcstrings`
+/// and each named table by its file. Null when there are fewer than two.
+///
+/// The folder beside `InfoPlist.xcstrings` comes first, since the first
+/// folder of the list is where that catalog is written; the rest follow in
+/// breadth-first order.
+List<String>? catalogEntries(final Directory root) {
+  final List<String> folders = <String>[];
+  final List<String> tables = <String>[];
+  String? infoPlistDir;
+  final List<Directory> queue = <Directory>[root];
+  while (queue.isNotEmpty) {
+    final Directory dir = queue.removeAt(0);
+    List<FileSystemEntity> entries;
+    try {
+      entries = dir.listSync()
+        ..sort((final FileSystemEntity a, final FileSystemEntity b) =>
+            a.path.compareTo(b.path));
+    } on FileSystemException {
+      continue;
+    }
+    final String rel = p.relative(dir.path, from: root.path);
+    for (final FileSystemEntity e in entries) {
+      if (e is! File || !e.path.endsWith('.xcstrings')) continue;
+      final String name = p.basename(e.path);
+      if (name == 'Localizable.xcstrings') {
+        folders.add(rel);
+      } else if (name == 'InfoPlist.xcstrings') {
+        infoPlistDir ??= rel;
+      } else if (name != 'AppShortcuts.xcstrings') {
+        tables.add(p.relative(e.path, from: root.path));
+      }
+    }
+    for (final FileSystemEntity e in entries) {
+      if (e is Directory && !_skippedDirs.contains(p.basename(e.path))) {
+        queue.add(e);
+      }
+    }
+  }
+  if (folders.length + tables.length < 2) return null;
+  if (infoPlistDir != null && folders.remove(infoPlistDir)) {
+    folders.insert(0, infoPlistDir);
+  }
+  return <String>[...folders, ...tables];
+}
+
 /// Where a first `fl pull` should write the String Catalogs for a project
 /// that has none on disk yet: beside `Info.plist` of the iOS target when
 /// there is one, else the repository root.
