@@ -55,3 +55,24 @@ String platformLabels(final List<AppPlatform> platforms,
 
 List<String> platformWires(final List<AppPlatform> platforms) =>
     <String>[for (final AppPlatform p in platforms) p.wire];
+
+/// The `variations.device` names of a String Catalog, each a target of its
+/// own under `ios`.
+const List<String> kAppleDevices = <String>[
+  'iphone',
+  'ipad',
+  'mac',
+  'watch',
+  'vision',
+  'tv',
+  'other',
+];
+
+/// Every name a platform text can be written for: a platform, or an Apple
+/// device of `ios` (`ios/ipad`).
+List<String> get kTextTargets => <String>[
+      for (final AppPlatform p in AppPlatform.values) p.wire,
+      for (final String d in kAppleDevices) 'ios/$d',
+    ];
+
+bool isTextTarget(final String target) => kTextTargets.contains(target);

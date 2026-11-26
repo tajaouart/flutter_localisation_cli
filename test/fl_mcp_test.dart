@@ -551,6 +551,107 @@ void main() {
     expect(doctor['ngx'], isTrue, reason: doctor.toString());
   });
 
+  test(
+      'tools/list: edit_string and add_string take a target, platforms and '
+      'max_length, and shorten is a tool', () async {
+    final List<dynamic> tools = ((await mcp.request('tools/list'))['result']
+        as Map<String, dynamic>)['tools'] as List<dynamic>;
+    Map<String, dynamic> props(final String name) =>
+        ((tools.firstWhere((final dynamic t) => t['name'] == name)
+                as Map<String, dynamic>)['inputSchema']
+            as Map<String, dynamic>)['properties'] as Map<String, dynamic>;
+    for (final String name in <String>['edit_string', 'add_string']) {
+      expect(props(name)['platforms'], containsPair('type', 'array'));
+      expect(props(name)['max_length'], containsPair('type', 'object'));
+    }
+    expect((props('edit_string')['target'] as Map<String, dynamic>)['enum'],
+        containsAll(<String>['ios', 'flutter', 'ios/watch']));
+    expect(props('translate_key'), contains('target'));
+    expect(props('retranslate'), contains('target'));
+    expect(props('shorten').keys,
+        containsAll(<String>['target', 'keys', 'locales', 'apply']));
+    final Map<String, dynamic> edit = tools.firstWhere(
+            (final dynamic t) => t['name'] == 'edit_string')['inputSchema']
+        as Map<String, dynamic>;
+    expect(edit['required'], <String>['key', 'locale']);
+  });
+
+  test('edit_string with a target writes that text; an empty value removes it',
+      () async {
+    backend
+      ..platformText = true
+      ..overrides = <String, List<Map<String, dynamic>>>{
+        'en': <Map<String, dynamic>>[
+          <String, dynamic>{'target': 'ios', 'value': '{arg1}s'},
+        ],
+      };
+    backend.updates.clear();
+    addTearDown(() => backend
+      ..platformText = false
+      ..overrides = <String, List<Map<String, dynamic>>>{});
+
+    final Map<String, dynamic> preview = await mcp.call(
+        'edit_string', <String, dynamic>{
+      'key': 'running',
+      'locale': 'en',
+      'target': 'ios',
+      'value': '{arg1} s'
+    });
+    expect(preview['ok'], isTrue, reason: preview.toString());
+    expect(preview['message'], contains('DRY RUN'));
+    expect(backend.updates, isEmpty);
+
+    await mcp.call('edit_string', <String, dynamic>{
+      'key': 'running',
+      'locale': 'en',
+      'target': 'ios',
+      'value': '{arg1} s',
+      'apply': true,
+    });
+    final Map<String, dynamic> cleared =
+        await mcp.call('edit_string', <String, dynamic>{
+      'key': 'running',
+      'locale': 'en',
+      'target': 'ios',
+      'value': '',
+      'platforms': <String>[],
+      'apply': true,
+    });
+    expect(cleared['ok'], isTrue, reason: cleared.toString());
+    expect(backend.updates, <Map<String, dynamic>>[
+      <String, dynamic>{'id': 1, 'target': 'ios', 'value': '{arg1} s'},
+      <String, dynamic>{'id': 1, 'target': 'ios', 'value': ''},
+    ]);
+  });
+
+  test('add_string sends platforms and max_length; shorten previews', () async {
+    backend
+      ..platformText = true
+      ..platforms = <String>['flutter', 'ios']
+      ..keyMaxLength = <String, int>{'ios': 4};
+    backend.keyPosts.clear();
+    addTearDown(() => backend
+      ..platformText = false
+      ..keyMaxLength = <String, int>{});
+
+    final Map<String, dynamic> added =
+        await mcp.call('add_string', <String, dynamic>{
+      'key': 'promo',
+      'value': 'Save now',
+      'platforms': <String>['ios'],
+      'max_length': <String, int>{'ios': 12},
+      'apply': true,
+    });
+    expect(added['ok'], isTrue, reason: added.toString());
+    expect(backend.keyPosts.single['platforms'], <String>['ios']);
+    expect(backend.keyPosts.single['max_length'], <String, int>{'ios': 12});
+
+    final Map<String, dynamic> shorten = await mcp.call('shorten');
+    expect(shorten['ok'], isTrue, reason: shorten.toString());
+    expect(shorten['target'], 'ios');
+    expect(shorten['keys'], <String>['running %lld']);
+  });
+
   test('fl_mcp reads base_url from flutterlocalisation.json', () async {
     final McpProcess fromConfig =
         await McpProcess.start(baseUrl: '', workingDirectory: tmp.path);

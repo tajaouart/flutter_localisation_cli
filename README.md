@@ -83,7 +83,28 @@ fl style set --all --instructions "Never use a dash."   # one rule, every langua
 fl retranslate --changed                 # redo translations of strings you reworded
 fl glossary apply                        # re-translate strings that use glossary terms
 fl lock support_url                      # this key keeps the base text in every locale
+fl edit paywall_title --target ios --value "Go Pro"   # iOS gets its own, shorter text
+fl edit paywall_title --target ios --clear            # iOS gets the full text again
+fl edit paywall_title --platforms ios --max-length ios=20   # ship to iOS only, 20 chars
+fl shorten --target ios                  # AI writes an iOS text for every key over the limit
+fl translate paywall_title --target ios  # translate the iOS text from the base language's
 ```
+
+### Platform text
+
+A project that ships to several platforms can give a key a text of its own on one of them,
+without a second key: `fl edit <key> --target ios --value "..."` writes it for that locale,
+`--clear` removes it. A target is a platform (`flutter`, `ios`, `angular`, `ngx`) or an
+Apple device of `ios` (`ios/iphone`, `ios/ipad`, `ios/mac`, `ios/watch`, `ios/vision`,
+`ios/tv`, `ios/other`), which reach a String Catalog as device variations. A target without
+a text of its own gets the full text, as before. `--platforms ios,angular` on `fl add` or
+`fl edit` keeps a key out of the other platforms' files (`all` puts it back everywhere), and
+`--max-length ios=40` sets the longest text a target takes. `fl status` counts the texts
+over a limit and the ones to check after the full text changed; `fl shorten [--target ios]
+[keys...]` writes texts that fit; `fl translate` and `fl retranslate` take `--target`.
+`fl export`, `fl pull` and `fl diff` give a Flutter app its own text and only the keys it
+ships. A service that does not know platform text yet refuses these flags and changes
+nothing.
 
 ### Glossary and voice
 
@@ -576,12 +597,16 @@ developer runs `fl login` once, or exports `FL_API_TOKEN`, so no token is commit
 Then ask: *"list my projects"*, then *"in Chat Bot, add `checkout_button` = 'Buy now' and
 translate it to all locales."* Tools: `list_projects`, `list_status`, `list_languages`,
 `add_language`, `project_repo`, `add_string`, `edit_string`, `delete_string`, `translate_key`,
-`retranslate`, `import_arb`, `pull_arbs`, `glossary`, `language_style`, `lock_keys` (each
+`retranslate`, `shorten`, `import_arb`, `pull_arbs`, `glossary`, `language_style`,
+`lock_keys` (each
 takes an optional `project`/`flavor`), and
 `sync_native_locales` — the MCP face of `fl native`, and `check_l10n_setup` — the MCP face of
 `fl doctor`, both needing no token and taking an optional `project_root`. `project_repo` returns the linked ARB git repo so the agent can clone it before
 codegen; `pull_arbs` writes the ARBs into `arb_dir` (and the String Catalogs into
 `xcstrings_dir`) the same way `fl pull` does. `import_arb` takes an `.xcstrings` too.
+`edit_string` and `add_string` take `target`, `platforms` and `max_length`, `translate_key`
+and `retranslate` take `target`, as the CLI flags do. `fl_mcp` reads `base_url` from
+`flutterlocalisation.json` when `FL_BASE_URL` is not set.
 
 ### With the Dart and Flutter MCP server
 

@@ -202,6 +202,30 @@ Future<void> _handle(final Map<String, dynamic> msg) async {
 // --------------------------------------------------------------------------- //
 
 /// Shared project/flavor selectors added to every project-scoped tool.
+/// A string argument, null when absent or empty: tool callers send "" for
+/// arguments they do not use.
+String? _textArg(final Map<String, dynamic> a, final String name) {
+  final Object? v = a[name];
+  return v is String && v.isNotEmpty ? v : null;
+}
+
+/// `platforms`, null when absent or empty for the same reason; ["all"] is
+/// every platform.
+List<String>? _platformsArg(final Map<String, dynamic> a) {
+  final List<dynamic>? raw = a['platforms'] as List<dynamic>?;
+  if (raw == null || raw.isEmpty) return null;
+  return parsePlatformList(raw.cast<String>());
+}
+
+Map<String, int>? _maxLengthArg(final Map<String, dynamic> a) {
+  final Map<String, dynamic>? raw = a['max_length'] as Map<String, dynamic>?;
+  if (raw == null || raw.isEmpty) return null;
+  return parseMaxLengths(<String>[
+    for (final MapEntry<String, dynamic> e in raw.entries)
+      '${e.key}=${e.value}',
+  ]);
+}
+
 Map<String, dynamic> get _projectProps => <String, dynamic>{
       'project': <String, dynamic>{
         'type': 'string',
@@ -355,6 +379,24 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
                 },
               },
             },
+            'platforms': <String, dynamic>{
+              'type': 'array',
+              'items': <String, dynamic>{
+                'type': 'string',
+                'enum': <String>[...platformWires(AppPlatform.values), 'all'],
+              },
+              'description':
+                  'Platforms the key ships to, e.g. ["ios", "angular"]. ["all"] '
+                      'ships it to every platform of the project (the default). '
+                      'Omit to leave it as it is.',
+            },
+            'max_length': <String, dynamic>{
+              'type': 'object',
+              'description':
+                  'Longest text per target in characters, e.g. {"ios": 40}; 0 '
+                      'removes a limit. Omit to leave them as they are.',
+              'additionalProperties': <String, dynamic>{'type': 'integer'},
+            },
             'apply': <String, dynamic>{
               'type': 'boolean',
               'description':
@@ -375,8 +417,11 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
       },
       <String, dynamic>{
         'name': 'edit_string',
-        'description':
-            "Edit one locale's value of an existing key. Preview by default; apply=true writes.",
+        'description': "Edit one locale's value of an existing key. With target, "
+            'writes that target\'s text instead of the full text (a short '
+            'version for iOS, a device): targets without one get the full '
+            'text; an empty value with a target removes it. platforms and '
+            'max_length change the key. Preview by default; apply=true writes.',
         'inputSchema': <String, dynamic>{
           'type': 'object',
           'properties': <String, dynamic>{
@@ -403,10 +448,34 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
                 },
               },
             },
+            'target': <String, dynamic>{
+              'type': 'string',
+              'enum': kTextTargets,
+              'description':
+                  'The target whose text value is, e.g. ios or ios/watch.',
+            },
+            'platforms': <String, dynamic>{
+              'type': 'array',
+              'items': <String, dynamic>{
+                'type': 'string',
+                'enum': <String>[...platformWires(AppPlatform.values), 'all'],
+              },
+              'description':
+                  'Platforms the key ships to, e.g. ["ios", "angular"]. ["all"] '
+                      'ships it to every platform of the project (the default). '
+                      'Omit to leave it as it is.',
+            },
+            'max_length': <String, dynamic>{
+              'type': 'object',
+              'description':
+                  'Longest text per target in characters, e.g. {"ios": 40}; 0 '
+                      'removes a limit. Omit to leave them as they are.',
+              'additionalProperties': <String, dynamic>{'type': 'integer'},
+            },
             'apply': <String, dynamic>{'type': 'boolean', 'default': false},
             ..._projectProps,
           },
-          'required': <String>['key', 'locale', 'value'],
+          'required': <String>['key', 'locale'],
         },
       },
       <String, dynamic>{
@@ -441,6 +510,14 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             'locales': <String, dynamic>{
               'type': 'array',
               'items': <String, dynamic>{'type': 'string'},
+            },
+            'target': <String, dynamic>{
+              'type': 'string',
+              'enum': kTextTargets,
+              'description':
+                  'Translate this target\'s text from the base language\'s '
+                      'instead of the full text: by default where it is missing or '
+                      'outdated.',
             },
             'apply': <String, dynamic>{'type': 'boolean', 'default': false},
             ..._projectProps,
@@ -538,6 +615,45 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
                   'Also redo every value whose base text changed after it was '
                       'translated. The old translation is overwritten, '
                       'reviewed or not.',
+            },
+            'target': <String, dynamic>{
+              'type': 'string',
+              'enum': kTextTargets,
+              'description':
+                  'Translate this target\'s texts instead: every one the base '
+                      'language has and a locale is missing, or that is outdated.',
+            },
+            'apply': <String, dynamic>{'type': 'boolean', 'default': false},
+            ..._projectProps,
+          },
+        },
+      },
+      <String, dynamic>{
+        'name': 'shorten',
+        'description': 'Write, from the full text, a text for one target that fits '
+            'its max length (a short version for iOS, say), for the keys named '
+            'or every key over the limit, in the base language and the locales '
+            'named. Preview by default; apply=true writes.',
+        'inputSchema': <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'target': <String, dynamic>{
+              'type': 'string',
+              'enum': kTextTargets,
+              'description':
+                  'The target to shorten for. Optional when the keys have a '
+                      'max length for one target only.',
+            },
+            'keys': <String, dynamic>{
+              'type': 'array',
+              'items': <String, dynamic>{'type': 'string'},
+              'description':
+                  'Keys to shorten; omit for every key over the limit.',
+            },
+            'locales': <String, dynamic>{
+              'type': 'array',
+              'items': <String, dynamic>{'type': 'string'},
+              'description': 'Other locales to shorten in besides the base.',
             },
             'apply': <String, dynamic>{'type': 'boolean', 'default': false},
             ..._projectProps,
@@ -1198,6 +1314,8 @@ Future<void> _callTool(
             placeholders: placeholders,
             isPlaceholdersEnabled: placeholders == null ? null : true,
             description: a['description'] as String?,
+            platforms: _platformsArg(a),
+            maxLength: _maxLengthArg(a),
             dryRun: !apply,
           );
         }
@@ -1207,13 +1325,19 @@ Future<void> _callTool(
               (a['placeholders'] as Map<String, dynamic>?)?.isEmpty ?? true
                   ? null
                   : a['placeholders'] as Map<String, dynamic>;
+          final String? target = _textArg(a, 'target');
+          final String? value = a['value'] as String?;
           r = await ops.edit(
             a['key'] as String,
             a['locale'] as String,
-            value: a['value'] as String?,
+            value: target != null && value == '' ? null : value,
+            target: target,
+            clear: target != null && value == '',
             placeholders: placeholders,
             isPlaceholdersEnabled: placeholders == null ? null : true,
             description: a['description'] as String?,
+            platforms: _platformsArg(a),
+            maxLength: _maxLengthArg(a),
             dryRun: !apply,
           );
         }
@@ -1246,6 +1370,15 @@ Future<void> _callTool(
           acceptUnchanged: (a['accept_unchanged'] ?? false) as bool,
           includeVariants: (a['include_variants'] ?? false) as bool,
           changed: (a['changed'] ?? false) as bool,
+          target: _textArg(a, 'target'),
+        );
+      case 'shorten':
+        r = await ops.shorten(
+          target: _textArg(a, 'target'),
+          keys: ((a['keys'] as List<dynamic>?) ?? const <dynamic>[])
+              .cast<String>(),
+          locales: (a['locales'] as List<dynamic>?)?.cast<String>(),
+          dryRun: !apply,
         );
       case 'list_languages':
         r = await ops.listLanguages();
@@ -1339,6 +1472,7 @@ Future<void> _callTool(
           a['key'] as String,
           all: (a['all'] ?? false) as bool,
           locales: (a['locales'] as List<dynamic>?)?.cast<String>(),
+          target: _textArg(a, 'target'),
           dryRun: !apply,
         );
       case 'import_arb':

@@ -23,6 +23,46 @@ import 'package:flutter_localisation_cli/src/version.dart';
 // Data models
 // --------------------------------------------------------------------------- //
 
+/// A row's text for one target (`ios`, `ios/watch`, `flutter`...) where it
+/// differs from the full text.
+class TextOverride {
+  TextOverride({
+    required this.target,
+    required this.value,
+    this.needsReview = false,
+    this.isOutdated = false,
+    this.isAiTranslated = false,
+    this.updatedAt,
+  });
+
+  final String target;
+  final String value;
+
+  /// The full text it shortens has changed since.
+  final bool needsReview;
+
+  /// The base language's text for the same target has changed since.
+  final bool isOutdated;
+  final bool isAiTranslated;
+  final String? updatedAt;
+
+  factory TextOverride.fromJson(final Map<String, dynamic> j) => TextOverride(
+        target: (j['target'] ?? '') as String,
+        value: (j['value'] ?? '') as String,
+        needsReview: (j['needs_review'] ?? false) as bool,
+        isOutdated: (j['is_outdated'] ?? false) as bool,
+        isAiTranslated: (j['is_ai_translated'] ?? false) as bool,
+        updatedAt: j['updated_at'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'target': target,
+        'value': value,
+        'needs_review': needsReview,
+        'is_outdated': isOutdated,
+      };
+}
+
 class TranslationEntry {
   TranslationEntry({
     required this.id,
@@ -34,6 +74,10 @@ class TranslationEntry {
     this.isOutdated = false,
     this.description = '',
     this.placeholders = const <String, dynamic>{},
+    this.overrides = const <TextOverride>[],
+    this.platforms = const <String>[],
+    this.maxLength = const <String, int>{},
+    this.knowsPlatformText = false,
   });
 
   final int id;
@@ -53,7 +97,38 @@ class TranslationEntry {
   /// Placeholder metadata (`@key.placeholders`): `{name: {type, format?}}`.
   final Map<String, dynamic> placeholders;
 
+  /// The texts of this row for some targets; the others get [value].
+  final List<TextOverride> overrides;
+
+  /// The platforms the key ships to; empty is every platform of the project.
+  final List<String> platforms;
+
+  /// The longest text each target takes, in characters.
+  final Map<String, int> maxLength;
+
+  /// The service sent `overrides`: it knows platform text. Older ones do not.
+  final bool knowsPlatformText;
+
   bool get isEmpty => value.trim().isEmpty && !isPluralEnabled;
+
+  bool shipsTo(final AppPlatform platform) =>
+      platforms.isEmpty || platforms.contains(platform.wire);
+
+  TextOverride? overrideFor(final String target) {
+    for (final TextOverride o in overrides) {
+      if (o.target == target) return o;
+    }
+    return null;
+  }
+
+  /// What [target] shows: its override, else the full text.
+  String textFor(final String target) => overrideFor(target)?.value ?? value;
+
+  /// The targets whose text is longer than their max length.
+  List<String> get overLimit => <String>[
+        for (final MapEntry<String, int> m in maxLength.entries)
+          if (m.value > 0 && textFor(m.key).runes.length > m.value) m.key,
+      ];
 
   factory TranslationEntry.fromJson(final Map<String, dynamic> j) =>
       TranslationEntry(
@@ -67,6 +142,24 @@ class TranslationEntry {
         description: (j['description'] ?? '') as String,
         placeholders: (j['placeholders'] ?? const <String, dynamic>{})
             as Map<String, dynamic>,
+        overrides: <TextOverride>[
+          for (final Object? o
+              in (j['overrides'] as List<dynamic>?) ?? const <dynamic>[])
+            if (o is Map<String, dynamic>) TextOverride.fromJson(o),
+        ],
+        platforms: <String>[
+          for (final Object? p
+              in (j['platforms'] as List<dynamic>?) ?? const <dynamic>[])
+            if (p is String) p,
+        ],
+        maxLength: <String, int>{
+          for (final MapEntry<String, dynamic> m
+              in ((j['max_length'] as Map<String, dynamic>?) ??
+                      const <String, dynamic>{})
+                  .entries)
+            if (m.value is int) m.key: m.value as int,
+        },
+        knowsPlatformText: j.containsKey('overrides'),
       );
 }
 
@@ -171,6 +264,7 @@ class ProjectData {
     this.repository,
     this.platforms = const <AppPlatform>[AppPlatform.flutter],
     this.xcstringsDir = '',
+    this.knowsPlatformText = false,
   });
 
   final int id;
@@ -186,22 +280,43 @@ class ProjectData {
   /// Folder of the catalogs inside the git mirror; empty means `<flavor>/`.
   final String xcstringsDir;
 
+  /// The service answers with platform texts and key platforms.
+  final bool knowsPlatformText;
+
+  /// Refuses [what] on a service that would ignore it and write the full
+  /// text instead.
+  void requirePlatformText(final String what) {
+    if (knowsPlatformText) return;
+    throw ManagementException(
+      'The service does not support platform text yet, so $what cannot be '
+      'used. Nothing was changed.',
+    );
+  }
+
   bool ships(final AppPlatform platform) => platforms.contains(platform);
   bool get shipsFlutter => ships(AppPlatform.flutter);
   bool get shipsIos => ships(AppPlatform.ios);
   bool get shipsAngular => ships(AppPlatform.angular);
   bool get shipsNgx => ships(AppPlatform.ngx);
 
-  factory ProjectData.fromJson(final Map<String, dynamic> j) => ProjectData(
-        id: j['id'] as int,
-        name: (j['name'] ?? '') as String,
-        repository: GitRepository.fromProjectJson(j),
-        platforms: platformsFromJson(j['platforms']),
-        xcstringsDir: (j['xcstrings_dir'] ?? '') as String,
-        flavors: ((j['flavors'] ?? const <dynamic>[]) as List)
+  factory ProjectData.fromJson(final Map<String, dynamic> j) {
+    final List<FlavorData> flavors =
+        ((j['flavors'] ?? const <dynamic>[]) as List)
             .map((final e) => FlavorData.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
+            .toList();
+    return ProjectData(
+      id: j['id'] as int,
+      name: (j['name'] ?? '') as String,
+      repository: GitRepository.fromProjectJson(j),
+      platforms: platformsFromJson(j['platforms']),
+      xcstringsDir: (j['xcstrings_dir'] ?? '') as String,
+      flavors: flavors,
+      knowsPlatformText: j.containsKey('keys_per_platform') ||
+          flavors.any((final FlavorData f) => f.languages.any(
+              (final LanguageData l) => l.translations
+                  .any((final TranslationEntry t) => t.knowsPlatformText))),
+    );
+  }
 
   /// Choose a flavor by [name]; if null and exactly one flavor exists, use it.
   FlavorData flavor(final String? name) {
@@ -577,6 +692,8 @@ class ManagementClient {
     final Map<String, dynamic>? placeholders,
     final bool? isPlaceholdersEnabled,
     final String? description,
+    final List<String>? platforms,
+    final Map<String, int>? maxLength,
   }) async {
     final Map<String, dynamic> body = <String, dynamic>{
       'key': key,
@@ -587,6 +704,8 @@ class ManagementClient {
         'is_placeholders_enabled': isPlaceholdersEnabled,
       if (description != null && description.isNotEmpty)
         'description': description,
+      if (platforms != null) 'platforms': platforms,
+      if (maxLength != null) 'max_length': maxLength,
     };
     await _send(
       'POST',
@@ -642,8 +761,10 @@ class ManagementClient {
     final String? description,
     final bool clearDescription = false,
     final bool? isChecked,
+    final String? target,
   }) async {
     final Map<String, dynamic> body = <String, dynamic>{
+      if (target != null) 'target': target,
       if (value != null) 'value': value,
       if (isPluralEnabled != null) 'is_plural_enabled': isPluralEnabled,
       if (zeroCase != null) 'zero_case': zeroCase,
@@ -742,15 +863,48 @@ class ManagementClient {
 
   /// AI-translate and persist a set of translations (uses the batch endpoint,
   /// which — unlike the single endpoint — saves).
-  Future<BatchTranslateResult> aiBatchTranslate(final List<int> ids) async {
+  ///
+  /// With [target], fills that target's texts from the base language's one.
+  Future<BatchTranslateResult> aiBatchTranslate(
+    final List<int> ids, {
+    final String? target,
+  }) async {
     final http.Response res = await _send(
       'POST',
       '/api/ai_batch_translate/',
-      body: <String, List<int>>{'translation_ids': ids},
+      body: <String, dynamic>{
+        'translation_ids': ids,
+        if (target != null) 'target': target,
+      },
       // 207 (partial) is an expected, non-fatal outcome.
       acceptStatuses: const <int>{200, 207},
     );
     return BatchTranslateResult.fromJson(_json(res));
+  }
+
+  /// Write, for [target], a text that fits its max length from the full
+  /// text of each of [keys], in the base language and [locales].
+  Future<Map<String, dynamic>> shorten(
+    final int projectId, {
+    required final List<String> keys,
+    required final String target,
+    final List<String>? locales,
+  }) async {
+    try {
+      return _json(await _send(
+        'POST',
+        '/api/projects/$projectId/shorten/',
+        body: <String, dynamic>{
+          'keys': keys,
+          'target': target,
+          if (locales != null && locales.isNotEmpty) 'locales': locales,
+        },
+      ));
+    } on ApiException catch (e) {
+      if (!e.isNotFound) rethrow;
+      throw ManagementException(
+          'The service has no shorten action yet. Nothing was changed.');
+    }
   }
 
   /// One String Catalog of a flavor, as the backend renders it.

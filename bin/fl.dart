@@ -84,6 +84,7 @@ Future<void> main(final List<String> args) async {
   runner.addCommand(LanguagesCommand());
   runner.addCommand(StatusCommand());
   runner.addCommand(RetranslateCommand());
+  runner.addCommand(ShortenCommand());
   runner.addCommand(RepoCommand());
   runner.addCommand(CloneCommand());
   runner.addCommand(PullCommand());
@@ -733,6 +734,7 @@ class AddCommand extends Command<int> with _ApiCommand {
       help: 'Placeholder as name:type[:format] (repeatable), '
           'e.g. --placeholder count:int:decimalPattern.',
     );
+    _addKeySettingOptions(argParser);
   }
 
   @override
@@ -744,13 +746,16 @@ class AddCommand extends Command<int> with _ApiCommand {
   @override
   String get invocation =>
       'fl add <key> --value "<text>" [--translate] [--description "..."] '
-      '[--placeholder name:type[:format]]';
+      '[--placeholder name:type[:format]] [--platforms ios,angular] '
+      '[--max-length ios=40]';
 
   @override
   Future<int> run() async {
     final String key = _requireKey(this);
     final Map<String, dynamic>? placeholders =
         parsePlaceholderSpecs(argResults!['placeholder'] as List<String>);
+    final ({List<String>? platforms, Map<String, int>? maxLength}) settings =
+        _keySettings(argResults!);
     final ({
       ManagementClient client,
       Operations ops,
@@ -764,6 +769,8 @@ class AddCommand extends Command<int> with _ApiCommand {
         placeholders: placeholders,
         isPlaceholdersEnabled: placeholders == null ? null : true,
         description: argResults!['description'] as String?,
+        platforms: settings.platforms,
+        maxLength: settings.maxLength,
         dryRun: dryRun,
       );
       return emit(r);
@@ -937,17 +944,30 @@ class EditCommand extends Command<int> with _ApiCommand {
         help: 'Plural "many" case (required by fr, es, it, pt, pl, cs …).');
     argParser.addOption('plural-param',
         help: 'Name of the count placeholder, e.g. count.');
+    argParser.addOption('target',
+        help: 'Write the text of one target instead of the full text: a '
+            'platform (flutter, ios, angular, ngx) or an Apple device '
+            '(ios/iphone, ios/ipad, ios/mac, ios/watch, ios/vision, ios/tv, '
+            'ios/other). Targets without one get the full text.');
+    argParser.addFlag('clear',
+        negatable: false,
+        help: 'With --target: remove that target\'s text, so it gets the '
+            'full text again.');
+    _addKeySettingOptions(argParser);
   }
 
   @override
   String get name => 'edit';
   @override
   String get description =>
-      'Edit a locale\'s value / flags of an existing key.';
+      'Edit a locale\'s value / flags of an existing key, the text of one '
+      'target (--target ios), or the key\'s platforms and max lengths.';
   @override
   String get invocation =>
       'fl edit <key> [--locale <code>] [--value "..."] [--singular-case "..." '
       '--plural-case "..."]\n'
+      '       fl edit <key> --target ios [--locale <code>] (--value "..." | --clear)\n'
+      '       fl edit <key> [--platforms ios,angular] [--max-length ios=40]\n'
       'A String Catalog key may be given by its stem: "done_body" finds '
       '"done_body %@ %lld". Placeholders are written {arg1}, {arg2} in the value.';
 
@@ -956,6 +976,8 @@ class EditCommand extends Command<int> with _ApiCommand {
     final String key = _requireKey(this);
     final Map<String, dynamic>? placeholders =
         parsePlaceholderSpecs(argResults!['placeholder'] as List<String>);
+    final ({List<String>? platforms, Map<String, int>? maxLength}) settings =
+        _keySettings(argResults!);
     final ({
       ManagementClient client,
       Operations ops,
@@ -981,6 +1003,10 @@ class EditCommand extends Command<int> with _ApiCommand {
         fewCase: argResults!['few-case'] as String?,
         manyCase: argResults!['many-case'] as String?,
         pluralParam: argResults!['plural-param'] as String?,
+        target: argResults!['target'] as String?,
+        clear: argResults!['clear'] as bool,
+        platforms: settings.platforms,
+        maxLength: settings.maxLength,
         dryRun: dryRun,
       );
       return emit(r);
@@ -1057,6 +1083,9 @@ class TranslateCommand extends Command<int> with _ApiCommand {
     );
     argParser.addMultiOption('locale',
         help: 'Specific locale(s) to translate.');
+    argParser.addOption('target',
+        help: 'Translate the text of one target (e.g. ios) from the base '
+            'language\'s: by default where it is missing or outdated.');
   }
 
   @override
@@ -1066,7 +1095,7 @@ class TranslateCommand extends Command<int> with _ApiCommand {
       'AI-translate a key\'s locales (default: only missing).';
   @override
   String get invocation =>
-      'fl translate <key> [--all | --locale fr --locale de]';
+      'fl translate <key> [--all | --locale fr --locale de] [--target ios]';
 
   @override
   Future<int> run() async {
@@ -1081,6 +1110,7 @@ class TranslateCommand extends Command<int> with _ApiCommand {
         key,
         all: argResults!['all'] as bool,
         locales: _locales(argResults!['locale'] as List<String>),
+        target: argResults!['target'] as String?,
         dryRun: dryRun,
       );
       if (jsonOut) return emit(r);
@@ -1120,6 +1150,10 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
         help: 'Also redo every value whose base text was changed after it was '
             'translated (`fl status` counts them). Off by default: the old '
             'translation is overwritten, reviewed or not.');
+    argParser.addOption('target',
+        help: 'Translate the texts of one target (e.g. ios) instead: every '
+            'one the base language has and a locale is missing, or that is '
+            'outdated.');
   }
 
   @override
@@ -1132,7 +1166,7 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
   @override
   String get invocation =>
       'fl retranslate [--changed] [--locale ar --locale ru] '
-      '[--accept-unchanged] [--include-variants]';
+      '[--accept-unchanged] [--include-variants] [--target ios]';
 
   @override
   Future<int> run() async {
@@ -1148,6 +1182,7 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
         acceptUnchanged: argResults!['accept-unchanged'] as bool,
         includeVariants: argResults!['include-variants'] as bool,
         changed: argResults!['changed'] as bool,
+        target: argResults!['target'] as String?,
       );
       if (jsonOut) return emit(r);
       stdout.writeln(r.message);
@@ -1245,11 +1280,52 @@ void _reportFailures(final OpResult r) {
   }
 }
 
+class ShortenCommand extends Command<int> with _ApiCommand {
+  ShortenCommand() {
+    argParser.addOption('target',
+        help: 'Target to write a shorter text for, e.g. ios (default: the one '
+            'target the keys have a max length for).');
+    argParser.addMultiOption('locale',
+        help: 'Also shorten in these locale(s); the base language always.');
+  }
+
+  @override
+  String get name => 'shorten';
+  @override
+  String get description =>
+      'Write, from the full text, a text that fits the max length of a target: '
+      'for the keys named, or every key over the limit.';
+  @override
+  String get invocation =>
+      'fl shorten [--target ios] [--locale fr] [<key> ...]';
+
+  @override
+  Future<int> run() async {
+    final ({
+      ManagementClient client,
+      Operations ops,
+      String projectName
+    }) built = await build(loadProject());
+    try {
+      return emit(await built.ops.shorten(
+        target: argResults!['target'] as String?,
+        keys: argResults!.rest,
+        locales: _locales(argResults!['locale'] as List<String>),
+        dryRun: dryRun,
+      ));
+    } finally {
+      built.client.close();
+    }
+  }
+}
+
 class StatusCommand extends Command<int> with _ApiCommand {
   @override
   String get name => 'status';
   @override
-  String get description => 'Show completion % per locale.';
+  String get description =>
+      'Show completion % per locale, platform texts to check and texts over '
+      'their max length.';
 
   @override
   Future<int> run() async {
@@ -1264,6 +1340,8 @@ class StatusCommand extends Command<int> with _ApiCommand {
       stdout.writeln(r.message);
       var totalUntranslated = 0;
       var totalOutdated = 0;
+      var totalToCheck = 0;
+      final Map<String, int> totalOver = <String, int>{};
       for (final row in (r.data['locales'] as List)) {
         final Map<String, dynamic> m = row as Map<String, dynamic>;
         final String tag = (m['base'] as bool)
@@ -1282,10 +1360,32 @@ class StatusCommand extends Command<int> with _ApiCommand {
         totalOutdated += outdated;
         final String old =
             outdated > 0 ? '  ⚠ $outdated translate an older base text' : '';
+        final int toCheck = (m['platform_text_to_check'] as int?) ?? 0;
+        totalToCheck += toCheck;
+        final String check =
+            toCheck > 0 ? '  ⚠ $toCheck platform text(s) to check' : '';
+        final Map<String, dynamic> over =
+            (m['over_limit'] as Map<String, dynamic>?) ?? <String, dynamic>{};
+        over.forEach((final String t, final dynamic n) =>
+            totalOver[t] = (totalOver[t] ?? 0) + (n as int));
+        final String long = over.isEmpty
+            ? ''
+            : '  ⚠ over the limit: ${over.entries.map((final MapEntry<String, dynamic> e) => '${e.value} on ${e.key}').join(', ')}';
         stdout.writeln(
           '  ${m['locale']}$tag: ${m['translated'] ?? m['filled']}/${m['total']} '
-          '(${m['translated_percent'] ?? m['percent']}%)$gap$old',
+          '(${m['translated_percent'] ?? m['percent']}%)$gap$old$check$long',
         );
+      }
+      if (totalToCheck > 0) {
+        stdout.writeln(
+            '\n$totalToCheck platform text(s) were written for a full text or '
+            'a base text that has changed since: `fl retranslate --target '
+            '<target>` redoes the outdated ones, `fl edit <key> --target '
+            '<target>` rewrites one.');
+      }
+      for (final MapEntry<String, int> e in totalOver.entries) {
+        stdout.writeln('\n${e.value} text(s) are longer than the ${e.key} '
+            'limit: `fl shorten --target ${e.key}` writes ones that fit.');
       }
       if (totalOutdated > 0) {
         stdout.writeln(
@@ -2596,6 +2696,27 @@ class NativeCommand extends Command<int> {
 
   String _relative(final String path, final Directory root) =>
       path.startsWith(root.path) ? path.substring(root.path.length + 1) : path;
+}
+
+/// `--platforms` and `--max-length`, the settings of a key.
+void _addKeySettingOptions(final ArgParser parser) {
+  parser.addOption('platforms',
+      help: 'Platforms the key ships to, e.g. ios,angular; "all" for every '
+          'platform of the project (the default).');
+  parser.addMultiOption('max-length',
+      help: 'Longest text of a target in characters, e.g. ios=40 '
+          '(repeatable; 0 removes the limit).');
+}
+
+({List<String>? platforms, Map<String, int>? maxLength}) _keySettings(
+    final ArgResults args) {
+  final List<String> limits = args['max-length'] as List<String>;
+  return (
+    platforms: args.wasParsed('platforms')
+        ? parsePlatformList(<String>[args['platforms'] as String])
+        : null,
+    maxLength: limits.isEmpty ? null : parseMaxLengths(limits),
+  );
 }
 
 String _requireKey(final Command<int> cmd) {

@@ -11,6 +11,7 @@ import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/ngx.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
+import 'package:flutter_localisation_cli/src/platform.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
 
 /// The outcome of comparing one file with one language of the service.
@@ -208,10 +209,18 @@ extension FileCompare on Operations {
             : match(inferred.code);
     final LanguageData lang =
         fl.languages.firstWhere((final LanguageData l) => l.code == code);
+    // What a Flutter app gets: its own text, and only the keys it ships.
+    final Set<String> notFlutter = <String>{
+      for (final LanguageData l in fl.languages)
+        for (final TranslationEntry t in l.translations)
+          if (!t.shipsTo(AppPlatform.flutter)) t.key,
+    };
     return compareMessages(
       arbMessages(parsed),
       <String, String>{
-        for (final TranslationEntry t in lang.translations) t.key: t.value,
+        for (final TranslationEntry t in lang.translations)
+          if (!notFlutter.contains(t.key))
+            t.key: t.textFor(AppPlatform.flutter.wire),
       },
       language: code,
       isBase: code == base,

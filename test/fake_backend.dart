@@ -188,6 +188,37 @@ class FakeBackend {
   /// Ids of every batch translation request, in order.
   final List<List<int>> translated = <List<int>>[];
 
+  /// The `target` of every batch translation request, null for none.
+  final List<String?> translatedTargets = <String?>[];
+
+  /// Answer as a service that knows platform text: `overrides`, `platforms`
+  /// and `max_length` on every row. Off answers as one from before.
+  bool platformText = false;
+
+  /// The one key's texts per target, by locale code.
+  Map<String, List<Map<String, dynamic>>> overrides =
+      <String, List<Map<String, dynamic>>>{};
+
+  /// `platforms` and `max_length` of the one key.
+  List<String> keyPlatforms = <String>[];
+  Map<String, int> keyMaxLength = <String, int>{};
+
+  /// Bodies of `update_translation` (with its `id`), `translation_keys` and
+  /// `shorten` requests, in order.
+  final List<Map<String, dynamic>> updates = <Map<String, dynamic>>[];
+  final List<Map<String, dynamic>> keyPosts = <Map<String, dynamic>>[];
+  final List<Map<String, dynamic>> shortens = <Map<String, dynamic>>[];
+
+  Map<String, dynamic> _textFields(final String? code) => !platformText
+      ? const <String, dynamic>{}
+      : <String, dynamic>{
+          'overrides': code == null
+              ? const <dynamic>[]
+              : overrides[code] ?? const <dynamic>[],
+          'platforms': code == null ? const <String>[] : keyPlatforms,
+          'max_length': code == null ? const <String, int>{} : keyMaxLength,
+        };
+
   final List<ReceivedImport> imports = <ReceivedImport>[];
 
   /// Keys deleted through `/translation_keys/delete/`, in order.
@@ -211,6 +242,7 @@ class FakeBackend {
         'name': 'Gush',
         'platforms': platforms,
         'xcstrings_dir': 'Resources',
+        if (platformText) 'keys_per_platform': false,
         if (repoUrl != null) ...<String, dynamic>{
           'is_${repoProvider}_linked': true,
           '${repoProvider}_repository_url': repoUrl,
@@ -232,6 +264,7 @@ class FakeBackend {
                           'id': 500 + i * 100 + languages.indexOf(code),
                           'key': 'running %lld',
                           ...targets[code]!,
+                          ..._textFields(code),
                         },
                     ],
                   },
@@ -250,12 +283,14 @@ class FakeBackend {
                           'spec': '%lld'
                         },
                       },
+                      ..._textFields(languages.first),
                     },
                     for (int k = 0; k < extraKeys.length; k++)
                       <String, dynamic>{
                         'id': 900 + i * 100 + k,
                         'key': extraKeys[k],
                         'value': extraKeys[k],
+                        ..._textFields(null),
                       },
                   ],
                 },
@@ -365,7 +400,39 @@ class FakeBackend {
         }));
       }
     } else if (path.startsWith('/api/update_translation/')) {
+      updates.add(<String, dynamic>{
+        'id': int.parse(path.split('/')[3]),
+        ...jsonDecode(await utf8.decoder.bind(req).join())
+            as Map<String, dynamic>,
+      });
       res.write('{}');
+    } else if (req.method == 'POST' &&
+        path == '/api/projects/7/translation_keys/') {
+      keyPosts.add(jsonDecode(await utf8.decoder.bind(req).join())
+          as Map<String, dynamic>);
+      res.statusCode = HttpStatus.created;
+      res.write('{"status": "success"}');
+    } else if (req.method == 'POST' &&
+        path == '/api/projects/7/shorten/' &&
+        platformText) {
+      final Map<String, dynamic> body =
+          jsonDecode(await utf8.decoder.bind(req).join())
+              as Map<String, dynamic>;
+      shortens.add(body);
+      if ((body['keys'] as List<dynamic>).contains('running %lld')) {
+        overrides[languages.first] = <Map<String, dynamic>>[
+          <String, dynamic>{
+            'target': body['target'],
+            'value': '{arg1} s',
+            'needs_review': false,
+            'is_outdated': false,
+            'is_ai_translated': true,
+          },
+        ];
+      }
+      res.write(jsonEncode(<String, dynamic>{
+        'shortened': (body['keys'] as List<dynamic>).length,
+      }));
     } else if (req.method == 'GET' && path == '/api/projects/7/glossary/') {
       res.write(jsonEncode(<String, dynamic>{'terms': <dynamic>[]}));
     } else if (req.method == 'POST' &&
@@ -381,13 +448,22 @@ class FakeBackend {
             'this key at https://app.flutterlocalisation.com/api-keys.',
       }));
     } else if (req.method == 'POST' && path == '/api/ai_batch_translate/') {
-      final List<int> ids = ((jsonDecode(await utf8.decoder.bind(req).join())
-              as Map<String, dynamic>)['translation_ids'] as List<dynamic>)
-          .cast<int>();
+      final Map<String, dynamic> body =
+          jsonDecode(await utf8.decoder.bind(req).join())
+              as Map<String, dynamic>;
+      final List<int> ids =
+          (body['translation_ids'] as List<dynamic>).cast<int>();
+      final String? target = body['target'] as String?;
       translated.add(ids);
+      translatedTargets.add(target);
       for (final String code in targets.keys) {
-        if (ids.contains(500 + languages.indexOf(code))) {
+        if (!ids.contains(500 + languages.indexOf(code))) continue;
+        if (target == null) {
           targets[code] = <String, dynamic>{'value': 'Translated ($code)'};
+        } else {
+          overrides[code] = <Map<String, dynamic>>[
+            <String, dynamic>{'target': target, 'value': 'Kurz ($code)'},
+          ];
         }
       }
       res.write(jsonEncode(<String, dynamic>{

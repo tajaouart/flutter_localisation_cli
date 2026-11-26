@@ -38,6 +38,52 @@ Map<String, dynamic>? parsePlaceholderSpecs(final List<String> raw) {
   return out;
 }
 
+/// `--platforms ios,angular`: the platforms a key ships to. `all` or nothing
+/// is every platform.
+List<String> parsePlatformList(final Iterable<String> raw) {
+  final List<String> out = <String>[
+    for (final String part in raw)
+      for (final String p in part.split(','))
+        if (p.trim().isNotEmpty && p.trim() != 'all') p.trim(),
+  ];
+  for (final String p in out) {
+    if (AppPlatform.fromWire(p) == null) {
+      throw ArgumentError('"$p" is not a platform. Platforms: '
+          '${platformWires(AppPlatform.values).join(', ')}.');
+    }
+  }
+  return out;
+}
+
+/// `--max-length ios=40`: the longest text of each target, in characters.
+/// 0 removes a target's limit.
+Map<String, int> parseMaxLengths(final Iterable<String> raw) {
+  final Map<String, int> out = <String, int>{};
+  for (final String part in raw) {
+    for (final String spec in part.split(',')) {
+      if (spec.trim().isEmpty) continue;
+      final int eq = spec.indexOf('=');
+      final int? n =
+          eq < 0 ? null : int.tryParse(spec.substring(eq + 1).trim());
+      if (n == null || n < 0) {
+        throw ArgumentError(
+            'A max length is target=characters, e.g. ios=40; got "$spec".');
+      }
+      final String target = spec.substring(0, eq).trim();
+      requireTextTarget(target);
+      out[target] = n;
+    }
+  }
+  return out;
+}
+
+void requireTextTarget(final String target) {
+  if (!isTextTarget(target)) {
+    throw ArgumentError(
+        '"$target" is not a target. Targets: ${kTextTargets.join(', ')}.');
+  }
+}
+
 class OpResult {
   OpResult(this.ok, this.message, [this.data = const <String, dynamic>{}]);
 
@@ -147,6 +193,7 @@ class Operations {
   Future<VerifyOutcome> _translateAndVerify(
     final List<int> ids, {
     final int chunkSize = _defaultChunkSize,
+    final String? target,
   }) async {
     final Map<int, String> backendErrors = <int, String>{};
     final List<String> unattributed = <String>[];
@@ -154,10 +201,13 @@ class Operations {
     // whole project, and that cost should not multiply with the row count.
     for (var i = 0; i < ids.length; i += chunkSize) {
       final int end = i + chunkSize > ids.length ? ids.length : i + chunkSize;
-      unattributed
-          .addAll(await _batchAdaptive(ids.sublist(i, end), backendErrors));
+      unattributed.addAll(await _batchAdaptive(
+          ids.sublist(i, end), backendErrors,
+          target: target));
     }
-    final VerifyOutcome out = await _verify(ids, backendErrors);
+    final VerifyOutcome out = target == null
+        ? await _verify(ids, backendErrors)
+        : await _verifyTarget(ids, target, backendErrors);
     return _withUnattributed(out, unattributed);
   }
 
@@ -175,10 +225,11 @@ class Operations {
   /// for. So the knob is gone and this does the work.
   Future<List<String>> _batchAdaptive(
     final List<int> ids,
-    final Map<int, String> into,
-  ) async {
+    final Map<int, String> into, {
+    final String? target,
+  }) async {
     try {
-      return await _batchInto(ids, into);
+      return await _batchInto(ids, into, target: target);
     } on ApiException catch (e) {
       final bool timedOut = e.statusCode == 504 ||
           e.statusCode == 502 ||
@@ -188,8 +239,8 @@ class Operations {
       if (!timedOut || ids.length <= _minChunk) rethrow;
       final int half = ids.length ~/ 2;
       return <String>[
-        ...await _batchAdaptive(ids.sublist(0, half), into),
-        ...await _batchAdaptive(ids.sublist(half), into),
+        ...await _batchAdaptive(ids.sublist(0, half), into, target: target),
+        ...await _batchAdaptive(ids.sublist(half), into, target: target),
       ];
     }
   }
@@ -205,11 +256,13 @@ class Operations {
   /// detail at all is re-thrown, because that is a genuine outage.
   Future<List<String>> _batchInto(
     final List<int> ids,
-    final Map<int, String> into,
-  ) async {
+    final Map<int, String> into, {
+    final String? target,
+  }) async {
     List<({int? id, String error})> rows;
     try {
-      final BatchTranslateResult r = await client.aiBatchTranslate(ids);
+      final BatchTranslateResult r =
+          await client.aiBatchTranslate(ids, target: target);
       rows = <({int? id, String error})>[
         for (final ({int id, String error}) f in r.failed)
           (id: f.id, error: f.error),
@@ -246,6 +299,38 @@ class Operations {
         for (final String reason in unattributed) (id: -1, reason: reason),
       ],
       unchanged: out.unchanged,
+    );
+  }
+
+  /// Re-fetches the project and checks that each of [ids] now has a current
+  /// [target] text.
+  Future<VerifyOutcome> _verifyTarget(
+    final List<int> ids,
+    final String target,
+    final Map<int, String> backendErrors,
+  ) async {
+    final ProjectData after = await client.getProject(projectId);
+    final Map<int, TranslationEntry> byId = <int, TranslationEntry>{
+      for (final LanguageData l in after.flavor(flavor).languages)
+        for (final TranslationEntry t in l.translations) t.id: t,
+    };
+    var translated = 0;
+    final List<({int id, String reason})> failed =
+        <({int id, String reason})>[];
+    for (final int id in ids) {
+      final TextOverride? o = byId[id]?.overrideFor(target);
+      if (backendErrors[id] case final String reason) {
+        failed.add((id: id, reason: reason));
+      } else if (o == null || o.isOutdated || o.value.trim().isEmpty) {
+        failed.add((id: id, reason: 'no $target text came back'));
+      } else {
+        translated++;
+      }
+    }
+    return (
+      translated: translated,
+      failed: failed,
+      unchanged: const <({int id, String key, String locale})>[],
     );
   }
 
@@ -367,12 +452,25 @@ class Operations {
     final Map<String, dynamic>? placeholders,
     final bool? isPlaceholdersEnabled,
     final String? description,
+    final List<String>? platforms,
+    final Map<String, int>? maxLength,
     final bool dryRun = false,
   }) async {
+    final Map<String, int>? limits = maxLength == null
+        ? null
+        : (<String, int>{...maxLength}
+          ..removeWhere((_, final int n) => n == 0));
+    if (platforms != null || limits != null) {
+      final ProjectData project = await client.getProject(projectId);
+      project.requirePlatformText("a key's platforms or max length");
+      final String? refused = _foreignPlatforms(project, platforms);
+      if (refused != null) return OpResult(false, refused);
+    }
     if (dryRun) {
       return OpResult(
           true,
           'DRY RUN: would add "$key" = "$baseValue"'
+          '${_keySettingsPhrase(platforms, limits)}'
           '${translate ? ' and AI-translate all other locales' : ''}.');
     }
     await client.addKey(
@@ -382,6 +480,8 @@ class Operations {
       placeholders: placeholders,
       isPlaceholdersEnabled: isPlaceholdersEnabled,
       description: description,
+      platforms: platforms,
+      maxLength: limits,
     );
 
     if (!translate) {
@@ -432,6 +532,55 @@ class Operations {
       },
     );
   }
+
+  /// The sentence refusing [platforms] the project does not ship, or null.
+  static String? _foreignPlatforms(
+    final ProjectData project,
+    final List<String>? platforms,
+  ) {
+    final List<String> foreign = <String>[
+      for (final String p in platforms ?? const <String>[])
+        if (!project.ships(AppPlatform.fromWire(p)!)) p,
+    ];
+    if (foreign.isEmpty) return null;
+    return '"${project.name}" does not ship to ${foreign.join(', ')} '
+        '(it ships to ${platformWires(project.platforms).join(', ')}). '
+        'Nothing was changed.';
+  }
+
+  static String _keySettingsPhrase(
+    final List<String>? platforms,
+    final Map<String, int>? maxLength,
+  ) =>
+      <String>[
+        if (platforms != null)
+          platforms.isEmpty
+              ? ' for every platform'
+              : ' for ${platforms.join(', ')} only',
+        if (maxLength != null && maxLength.isNotEmpty)
+          ' with a max length of ${_limitsPhrase(maxLength)}',
+      ].join();
+
+  static String _keySettingsSentence(
+    final String key,
+    final List<String>? platforms,
+    final Map<String, int>? limits,
+  ) =>
+      '"$key" ${<String>[
+        if (platforms != null)
+          platforms.isEmpty
+              ? 'ships to every platform'
+              : 'ships to ${platforms.join(', ')} only',
+        if (limits != null)
+          limits.isEmpty
+              ? 'has no max length'
+              : 'has a max length of ${_limitsPhrase(limits)}',
+      ].join(' and ')}.';
+
+  static String _limitsPhrase(final Map<String, int> maxLength) =>
+      maxLength.entries
+          .map((final MapEntry<String, int> e) => '${e.value} on ${e.key}')
+          .join(', ');
 
   /// Bulk-create keys by importing a whole ARB file in ONE request (instead of
   /// N per-key adds). Resolves the flavor id + the language the file represents
@@ -1257,9 +1406,57 @@ class Operations {
     final String? description,
     final bool clearDescription = false,
     final bool? isChecked,
+    final String? target,
+    final bool clear = false,
+    final List<String>? platforms,
+    final Map<String, int>? maxLength,
     final bool dryRun = false,
   }) async {
+    final bool otherFields = isPluralEnabled != null ||
+        zeroCase != null ||
+        singularCase != null ||
+        twoCase != null ||
+        fewCase != null ||
+        manyCase != null ||
+        pluralCase != null ||
+        pluralParam != null ||
+        isPlaceholdersEnabled != null ||
+        placeholders != null ||
+        (description != null && description.isNotEmpty) ||
+        clearDescription ||
+        isChecked != null;
+    final bool keySettings = platforms != null || maxLength != null;
+    if (clear && target == null) {
+      return OpResult(false,
+          'Clearing removes the text of one target: name it (--target ios).');
+    }
+    if (target != null) {
+      requireTextTarget(target);
+      if (clear == (value != null)) {
+        return OpResult(
+            false,
+            clear
+                ? 'Pass a $target text or clear it, not both.'
+                : 'Pass the $target text (--value "...") or clear it '
+                    '(--clear).');
+      }
+      if (otherFields) {
+        return OpResult(
+            false,
+            'A $target text is one string, plurals inside it as ICU: pass it '
+            'whole as the value. Plural cases, placeholders, descriptions and '
+            'the checked flag belong to the full text; edit them without '
+            'a target.');
+      }
+    }
+
     final ProjectData project = await client.getProject(projectId);
+    if (target != null) project.requirePlatformText('a platform text');
+    if (keySettings) {
+      project.requirePlatformText("a key's platforms or max length");
+      final String? refused = _foreignPlatforms(project, platforms);
+      if (refused != null) return OpResult(false, refused);
+    }
     final String? code = locale ?? project.baseLanguage(flavor)?.code;
     if (code == null) {
       return OpResult(false,
@@ -1268,6 +1465,25 @@ class Operations {
     final int id = project.resolveId(key, code, flavorName: flavor);
     final String full = project.canonicalKey(key, flavorName: flavor);
     final TranslationEntry? base = project.baseEntry(full, flavorName: flavor);
+    final TranslationEntry row = project
+        .flavor(flavor)
+        .languages
+        .expand((final LanguageData l) => l.translations)
+        .firstWhere((final TranslationEntry t) => t.id == id);
+    if (target != null || (keySettings && value == null && !otherFields)) {
+      return _editPlatformText(
+        project,
+        row,
+        base,
+        full,
+        code,
+        target: target,
+        value: value,
+        platforms: platforms,
+        maxLength: maxLength,
+        dryRun: dryRun,
+      );
+    }
     // Translations written for the base text this edit replaces. An unwritten
     // seed (still the old base text) is not one: the service gives it the new
     // text.
@@ -1310,7 +1526,10 @@ class Operations {
       }
     }
     if (dryRun) {
-      return OpResult(true, 'DRY RUN: would update "$full" [$code] (id $id).');
+      return OpResult(
+          true,
+          'DRY RUN: would update "$full" [$code] (id $id).'
+          '${keySettings ? ' ${_keySettingsSentence(full, platforms, maxLength)}' : ''}');
     }
     await client.updateTranslation(
       id,
@@ -1329,18 +1548,110 @@ class Operations {
       clearDescription: clearDescription,
       isChecked: isChecked,
     );
+    final OpResult? settings = !keySettings
+        ? null
+        : await _editPlatformText(project, row, base, full, code,
+            target: null,
+            value: null,
+            platforms: platforms,
+            maxLength: maxLength,
+            dryRun: false);
     return OpResult(
-      true,
+      settings?.ok ?? true,
       'Updated "$full" [$code].'
       '${outdated == 0 ? '' : ' $outdated translation(s) were written for the '
           'old text and are now marked for review: `fl retranslate --changed` '
-          'redoes them.'}',
+          'redoes them.'}'
+      '${settings == null ? '' : ' ${settings.message}'}',
       <String, dynamic>{
         'key': full,
         'locale': code,
         if (outdated > 0) 'outdated': outdated,
+        if (settings != null) ...settings.data,
       },
     );
+  }
+
+  /// A target's text of [row], and the key's platforms and max lengths.
+  ///
+  /// The key's settings go through the key create endpoint, which keeps an
+  /// existing key and its rows and changes only what is sent.
+  Future<OpResult> _editPlatformText(
+    final ProjectData project,
+    final TranslationEntry row,
+    final TranslationEntry? base,
+    final String full,
+    final String code, {
+    required final String? target,
+    required final String? value,
+    required final List<String>? platforms,
+    required final Map<String, int>? maxLength,
+    required final bool dryRun,
+  }) async {
+    if (value != null && target != null && base != null) {
+      final List<String> dropped = <String>[
+        for (final String name in base.placeholders.keys)
+          if (base.value.contains('{$name') && !value.contains('{$name'))
+            '{$name}',
+      ];
+      if (dropped.isNotEmpty) {
+        return OpResult(
+            false,
+            'The $target text of "$full" [$code] must keep '
+            '${dropped.join(', ')}, as the full text does: "${base.value}".');
+      }
+    }
+    final Map<String, int>? limits = maxLength == null
+        ? null
+        : (<String, int>{...row.maxLength, ...maxLength}
+          ..removeWhere((_, final int n) => n == 0));
+    final bool removing = target != null && value == null;
+    final TextOverride? existing =
+        target == null ? null : row.overrideFor(target);
+    if (removing && existing == null && limits == null && platforms == null) {
+      return OpResult(true, '"$full" [$code] has no $target text to remove.',
+          <String, dynamic>{'key': full, 'locale': code, 'target': target});
+    }
+    final int? limit =
+        target == null ? null : (limits ?? row.maxLength)[target];
+    final int length = value?.runes.length ?? 0;
+    final bool over = !removing && limit != null && limit > 0 && length > limit;
+    final List<String> done = <String>[
+      if (target != null)
+        removing
+            ? 'Removed the $target text of "$full" [$code]: $target gets the '
+                'full text.'
+            : 'Wrote the $target text of "$full" [$code].',
+      if (platforms != null || limits != null)
+        _keySettingsSentence(full, platforms, limits),
+      if (over)
+        'It is $length characters, over the $target limit of $limit: '
+            '`fl shorten --target $target $full` writes one that fits.',
+    ];
+    if (dryRun) {
+      return OpResult(true, 'DRY RUN: ${done.join(' ')}');
+    }
+    if (target != null && (!removing || existing != null)) {
+      await client.updateTranslation(row.id,
+          target: target, value: value ?? '');
+    }
+    if (platforms != null || limits != null) {
+      if (base == null || base.value.trim().isEmpty) {
+        return OpResult(false,
+            '"$full" has no base text, which the service needs to update the key.');
+      }
+      await client.addKey(projectId, full, base.value,
+          platforms: platforms, maxLength: limits);
+    }
+    return OpResult(true, done.join(' '), <String, dynamic>{
+      'key': full,
+      'locale': code,
+      if (target != null) 'target': target,
+      if (removing) 'cleared': true,
+      if (platforms != null) 'platforms': platforms,
+      if (limits != null) 'max_length': limits,
+      if (over) 'over_limit': <String, int>{'length': length, 'limit': limit},
+    });
   }
 
   /// Delete a key. Without [locale] the whole key is removed (all locales + the key
@@ -1392,9 +1703,16 @@ class Operations {
     final String key, {
     final List<String>? locales,
     final bool all = false,
+    final String? target,
     final bool dryRun = false,
   }) async {
+    if (target != null) requireTextTarget(target);
     final ProjectData project = await client.getProject(projectId);
+    if (target != null) {
+      project.requirePlatformText('--target');
+      return _translateTarget(project, key, target,
+          locales: locales, all: all, dryRun: dryRun);
+    }
     final String? baseCode = project.baseLanguage(flavor)?.code;
     final List<({String locale, int id, bool empty})> entries =
         project.entriesForKey(key, flavorName: flavor);
@@ -1461,6 +1779,67 @@ class Operations {
       'Translated ${result.translated}/${ids.length} locale(s) for "$key"'
       '${_outcomeSuffix(result)}.',
       <String, dynamic>{
+        'translated': result.translated,
+        'failed': _failedJson(result.failed),
+        'unchanged': _unchangedJson(result.unchanged),
+      },
+    );
+  }
+
+  /// A locale's [target] text to write from the base language's: missing,
+  /// or written for an older one.
+  static bool _targetNeedsWork(final TranslationEntry t, final String target) {
+    final TextOverride? o = t.overrideFor(target);
+    return o == null || o.isOutdated || o.value.trim().isEmpty;
+  }
+
+  Future<OpResult> _translateTarget(
+    final ProjectData project,
+    final String key,
+    final String target, {
+    required final List<String>? locales,
+    required final bool all,
+    required final bool dryRun,
+  }) async {
+    final String full = project.canonicalKey(key, flavorName: flavor);
+    final TranslationEntry? base = project.baseEntry(full, flavorName: flavor);
+    if (base?.overrideFor(target) == null) {
+      return OpResult(
+        false,
+        '"$full" has no $target text in the base language to translate from. '
+        'Write one with `fl edit $full --target $target --value "..."` or '
+        '`fl shorten --target $target $full`.',
+        <String, dynamic>{'key': full, 'target': target},
+      );
+    }
+    final bool named = locales != null && locales.isNotEmpty;
+    final List<int> ids = <int>[
+      for (final LanguageData l in project.flavor(flavor).languages)
+        if (!l.isBase && (!named || locales.contains(l.code)))
+          for (final TranslationEntry t in l.translations)
+            if (t.key == full &&
+                t.id != base!.id &&
+                (all || named || _targetNeedsWork(t, target)))
+              t.id,
+    ];
+    if (ids.isEmpty) {
+      return OpResult(
+          true,
+          'Nothing to translate for the $target text of "$full".',
+          <String, dynamic>{'key': full, 'target': target, 'translated': 0});
+    }
+    if (dryRun) {
+      return OpResult(true,
+          'DRY RUN: would translate the $target text of "$full" in ${ids.length} locale(s).');
+    }
+    final VerifyOutcome result = await _translateAndVerify(ids, target: target);
+    return OpResult(
+      result.failed.isEmpty,
+      'Translated the $target text of "$full" in ${result.translated}/'
+      '${ids.length} locale(s)${_outcomeSuffix(result)}.',
+      <String, dynamic>{
+        'key': full,
+        'target': target,
         'translated': result.translated,
         'failed': _failedJson(result.failed),
         'unchanged': _unchangedJson(result.unchanged),
@@ -1579,6 +1958,7 @@ class Operations {
     final bool acceptUnchanged = false,
     final bool includeVariants = false,
     final bool changed = false,
+    final String? target,
   }) async {
     // Narrowing a whole-project repair to one locale, over and over, is the
     // most expensive way to do the cheapest thing: omitting --locale covers
@@ -1590,7 +1970,9 @@ class Operations {
           '${acceptUnchanged ? ' --accept-unchanged' : ''}'
           '   # no --locale: every locale, one pass',
     );
+    if (target != null) requireTextTarget(target);
     final ProjectData project = await client.getProject(projectId);
+    if (target != null) project.requirePlatformText('--target');
     final FlavorData f = project.flavor(flavor);
     final String? baseCode = project.baseLanguage(flavor)?.code;
     if (baseCode == null) {
@@ -1599,7 +1981,8 @@ class Operations {
     final Map<String, String> baseByKey = <String, String>{
       for (final LanguageData l in f.languages)
         if (l.code == baseCode)
-          for (final TranslationEntry t in l.translations) t.key: t.value,
+          for (final TranslationEntry t in l.translations)
+            if (target == null || t.overrideFor(target) != null) t.key: t.value,
     };
 
     if (locales != null && locales.isNotEmpty) {
@@ -1637,6 +2020,13 @@ class Operations {
       for (final TranslationEntry t in l.translations) {
         final String? base = baseByKey[t.key];
         if (base == null || base.trim().isEmpty) continue;
+        if (target != null) {
+          if (_targetNeedsWork(t, target)) {
+            ids.add(t.id);
+            n++;
+          }
+          continue;
+        }
         final bool needsWork = t.value.trim().isEmpty ||
             (t.value.trim() == base.trim() &&
                 !t.isChecked &&
@@ -1661,9 +2051,12 @@ class Operations {
     if (ids.isEmpty) {
       return OpResult(
         true,
-        changed || outdated == 0
-            ? 'Nothing to translate — every locale differs from the base.'
-            : 'Nothing is missing.$outdatedHint',
+        target != null
+            ? 'Nothing to translate: every $target text of the base language '
+                'is in every locale.'
+            : changed || outdated == 0
+                ? 'Nothing to translate — every locale differs from the base.'
+                : 'Nothing is missing.$outdatedHint',
         outdatedData,
       );
     }
@@ -1685,11 +2078,15 @@ class Operations {
     for (var i = 0; i < ids.length; i += chunkSize) {
       final List<int> chunk = ids.sublist(
           i, i + chunkSize > ids.length ? ids.length : i + chunkSize);
-      unattributed.addAll(await _batchAdaptive(chunk, backendErrors));
+      unattributed
+          .addAll(await _batchAdaptive(chunk, backendErrors, target: target));
     }
 
-    final VerifyOutcome result =
-        _withUnattributed(await _verify(ids, backendErrors), unattributed);
+    final VerifyOutcome result = _withUnattributed(
+        target == null
+            ? await _verify(ids, backendErrors)
+            : await _verifyTarget(ids, target, backendErrors),
+        unattributed);
 
     var accepted = 0;
     final List<({int id, String reason})> acceptFailed =
@@ -1718,12 +2115,14 @@ class Operations {
 
     return OpResult(
       result.failed.isEmpty,
-      'Translated ${result.translated}/${ids.length} value(s) across '
+      'Translated ${result.translated}/${ids.length} '
+      '${target == null ? 'value(s)' : '$target text(s)'} across '
       '${perLocale.length} locale(s)${_outcomeSuffix(result)}'
       '${accepted > 0 ? ', $accepted accepted as checked' : ''}'
       '${acceptFailed.isNotEmpty ? ', ${acceptFailed.length} could not be accepted' : ''}.'
       '$outdatedHint',
       <String, dynamic>{
+        if (target != null) 'target': target,
         'translated': result.translated,
         'attempted': ids.length,
         'per_locale': perLocale,
@@ -2123,6 +2522,16 @@ class Operations {
       final int outdated = l.translations
           .where((final TranslationEntry t) => t.isOutdated && !t.isEmpty)
           .length;
+      final int toCheck = l.translations
+          .expand((final TranslationEntry t) => t.overrides)
+          .where((final TextOverride o) => o.needsReview || o.isOutdated)
+          .length;
+      final Map<String, int> overLimit = <String, int>{};
+      for (final TranslationEntry t in l.translations) {
+        for (final String target in t.overLimit) {
+          overLimit[target] = (overLimit[target] ?? 0) + 1;
+        }
+      }
       rows.add(<String, dynamic>{
         'locale': l.code,
         'base': l.isBase,
@@ -2135,6 +2544,8 @@ class Operations {
         'translated_percent':
             total == 0 ? 100 : ((translated / total) * 100).round(),
         if (identicalIsFine) 'variant_of': baseCode,
+        if (toCheck > 0) 'platform_text_to_check': toCheck,
+        if (overLimit.isNotEmpty) 'over_limit': overLimit,
       });
     }
     return OpResult(
@@ -2145,6 +2556,96 @@ class Operations {
         'flavor': f.name,
         'platforms': platformWires(project.platforms),
         'locales': rows,
+      },
+    );
+  }
+}
+
+/// `fl shorten`: platform texts that fit their max length.
+extension Shorten on Operations {
+  /// Ask the service for a [target] text that fits, for each of [keys], or
+  /// every key over the limit when none is named. Without [target], the one
+  /// target the keys have a max length for.
+  Future<OpResult> shorten({
+    final String? target,
+    final List<String> keys = const <String>[],
+    final List<String>? locales,
+    final bool dryRun = false,
+  }) async {
+    if (target != null) requireTextTarget(target);
+    final ProjectData project = await client.getProject(projectId);
+    project.requirePlatformText('shorten');
+    final FlavorData f = project.flavor(flavor);
+    final LanguageData? base = project.baseLanguage(flavor);
+    if (base == null) {
+      return OpResult(false, 'No base language on flavor "${f.name}".');
+    }
+    final List<String> named = <String>[
+      for (final String k in keys) project.canonicalKey(k, flavorName: flavor),
+    ];
+    final List<TranslationEntry> rows = <TranslationEntry>[
+      for (final TranslationEntry t in base.translations)
+        if (named.isEmpty || named.contains(t.key)) t,
+    ];
+    final String chosen;
+    if (target != null) {
+      chosen = target;
+    } else {
+      final Set<String> limited = <String>{
+        for (final TranslationEntry t in rows)
+          for (final MapEntry<String, int> m in t.maxLength.entries)
+            if (m.value > 0) m.key,
+      };
+      if (limited.length != 1) {
+        return OpResult(
+          false,
+          limited.isEmpty
+              ? 'No key${named.isEmpty ? '' : ' named'} has a max length: set '
+                  'one with `fl edit <key> --max-length ios=40`, or pass '
+                  '--target.'
+              : 'Keys have a max length for ${(limited.toList()..sort()).join(', ')}: '
+                  'pick one with --target.',
+        );
+      }
+      chosen = limited.single;
+    }
+    final List<String> selected = named.isNotEmpty
+        ? named
+        : <String>[
+            for (final TranslationEntry t in rows)
+              if (t.overLimit.contains(chosen)) t.key,
+          ];
+    if (selected.isEmpty) {
+      return OpResult(true, 'Nothing is over the $chosen limit.',
+          <String, dynamic>{'target': chosen, 'keys': <String>[]});
+    }
+    if (dryRun) {
+      return OpResult(
+        true,
+        'DRY RUN: would shorten ${selected.length} key(s) for $chosen: '
+        '${selected.take(20).join(', ')}'
+        '${selected.length > 20 ? ' … and ${selected.length - 20} more' : ''}.',
+        <String, dynamic>{'target': chosen, 'keys': selected},
+      );
+    }
+    final Map<String, dynamic> answer = await client.shorten(projectId,
+        keys: selected, target: chosen, locales: locales);
+    final LanguageData? after =
+        (await client.getProject(projectId)).baseLanguage(flavor);
+    final List<String> still = <String>[
+      for (final TranslationEntry t
+          in after?.translations ?? const <TranslationEntry>[])
+        if (selected.contains(t.key) && t.overLimit.contains(chosen)) t.key,
+    ];
+    return OpResult(
+      still.isEmpty,
+      'Shortened ${selected.length - still.length}/${selected.length} key(s) '
+      'for $chosen${still.isEmpty ? '' : '; still over the limit: ${still.join(', ')}'}.',
+      <String, dynamic>{
+        'target': chosen,
+        'keys': selected,
+        'still_over_limit': still,
+        'service': answer,
       },
     );
   }
@@ -2187,6 +2688,14 @@ extension ArbExport on Operations {
             if (t.placeholders.isNotEmpty) t.key: t.placeholders,
     };
 
+    final Set<String> notFlutter = <String>{
+      for (final LanguageData l in f.languages)
+        for (final TranslationEntry t in l.translations)
+          if (!t.shipsTo(AppPlatform.flutter)) t.key,
+    };
+    bool exported(final TranslationEntry t) =>
+        t.key.isNotEmpty && !notFlutter.contains(t.key);
+
     final List<Map<String, dynamic>> written = <Map<String, dynamic>>[];
     for (final LanguageData lang in f.languages) {
       // Underscores, in BOTH the file name and `@@locale`. gen_l10n compares
@@ -2198,8 +2707,8 @@ extension ArbExport on Operations {
       final String tag = lang.code.replaceAll('-', '_');
       final Map<String, dynamic> body = <String, dynamic>{};
       for (final TranslationEntry t in lang.translations) {
-        if (t.key.isEmpty) continue;
-        body[t.key] = t.value;
+        if (!exported(t)) continue;
+        body[t.key] = t.textFor(AppPlatform.flutter.wire);
         // Placeholders before description: the order the backend's writer
         // emits them in, and this file has to match it byte for byte.
         final Map<String, dynamic> placeholders = lang.isBase
@@ -2220,9 +2729,7 @@ extension ArbExport on Operations {
       written.add(<String, dynamic>{
         'file': file,
         'locale': lang.code,
-        'keys': lang.translations
-            .where((final TranslationEntry t) => t.key.isNotEmpty)
-            .length,
+        'keys': lang.translations.where(exported).length,
         'base': lang.isBase,
       });
       if (dryRun) continue;
