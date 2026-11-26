@@ -637,10 +637,13 @@ class Operations {
         dryRun: dryRun,
         chunkSize: chunkSize,
         fileName: fileName,
-        noteUntranslated: noteUntranslated);
+        noteUntranslated: noteUntranslated,
+        prune: prune && !dryRun);
     if (diff == null) return r;
     final FileDiff d = diff;
     if (dryRun) {
+      final ({List<String> delete, List<String> unship}) gone =
+          prune ? await _prunePlan(d) : (delete: d.gone, unship: <String>[]);
       final int changed = d.changed.length;
       final String lines = <String>[
         '  ${d.added.length} new key(s) would be added.',
@@ -649,16 +652,42 @@ class Operations {
               ? '  $changed would be overwritten with the file\'s text.'
               : '  $changed differ and would keep the service\'s text (--overwrite replaces it).',
         '  ${d.same} already the same.',
-        if (d.gone.isNotEmpty)
-          '  ${d.gone.length} on the service are not in the file'
+        if (gone.delete.isNotEmpty)
+          '  ${gone.delete.length} on the service are not in the file'
               '${prune ? ' and would be deleted' : d.isBase ? ' (--prune deletes them)' : ''}: '
-              '${d.gone.take(10).join(', ')}${d.gone.length > 10 ? ' …' : ''}',
+              '${gone.delete.take(10).join(', ')}${gone.delete.length > 10 ? ' …' : ''}',
+        if (gone.unship.isNotEmpty)
+          '  ${gone.unship.length} not in the file also ship to other '
+              'platforms and would no longer ship to ${_filePlatform(d)}: '
+              '${gone.unship.take(10).join(', ')}${gone.unship.length > 10 ? ' …' : ''}',
         '  `fl diff ${fileName ?? '<file>'}` shows each key.',
       ].join('\n');
       return OpResult(r.ok, '${r.message}\n$lines',
           <String, dynamic>{...r.data, 'diff': d.toJson()});
     }
-    if (!r.ok || d.gone.isEmpty) return r;
+    if (!r.ok) return r;
+    final Object? serverPruned = r.data['pruned'];
+    if (serverPruned is List<String>) {
+      final List<String> unshipped =
+          (r.data['unshipped'] as List<String>?) ?? const <String>[];
+      final String platform = _filePlatform(d);
+      return OpResult(
+        true,
+        <String>[
+          r.message,
+          if (serverPruned.isNotEmpty)
+            'Deleted ${serverPruned.length} key(s) the file no longer has: '
+                '${serverPruned.take(10).join(', ')}${serverPruned.length > 10 ? ' …' : ''}',
+          if (unshipped.isNotEmpty)
+            '${unshipped.length} key(s) the file no longer has also ship to '
+                'other platforms and no longer ship to $platform: '
+                '${unshipped.take(10).join(', ')}${unshipped.length > 10 ? ' …' : ''}',
+        ].join('\n'),
+        r.data,
+      );
+    }
+    // A service from before 1.25 ignores `prune`: delete them from here.
+    if (d.gone.isEmpty) return r;
     for (final String key in d.gone) {
       await client.deleteKey(projectId, key);
     }
@@ -670,6 +699,36 @@ class Operations {
     );
   }
 
+  static String _filePlatform(final FileDiff d) =>
+      d.format == 'arb' ? 'flutter' : d.format;
+
+  /// What the service's prune does with the keys [d] says the file dropped:
+  /// a key other platforms ship too only loses this one, and with keys per
+  /// platform a key every platform shares stays.
+  Future<({List<String> delete, List<String> unship})> _prunePlan(
+      final FileDiff d) async {
+    final ProjectData project = await client.getProject(projectId);
+    if (!project.knowsPlatformText) {
+      return (delete: d.gone, unship: <String>[]);
+    }
+    final String platform = _filePlatform(d);
+    final Map<String, List<String>> keyPlatforms = <String, List<String>>{
+      for (final LanguageData l in project.flavor(flavor).languages)
+        for (final TranslationEntry t in l.translations) t.key: t.platforms,
+    };
+    final bool shared = project.keysPerPlatform && project.platforms.length > 1;
+    final List<String> delete = <String>[], unship = <String>[];
+    for (final String key in d.gone) {
+      final List<String> on = keyPlatforms[key] ?? const <String>[];
+      if (on.isNotEmpty && !(on.length == 1 && on.first == platform)) {
+        unship.add(key);
+      } else if (on.isNotEmpty || !shared) {
+        delete.add(key);
+      }
+    }
+    return (delete: delete, unship: unship);
+  }
+
   Future<OpResult> _importResolved(
     final String arbContent, {
     final String? languageCode,
@@ -679,6 +738,7 @@ class Operations {
     final int chunkSize = _defaultChunkSize,
     final String? fileName,
     final bool noteUntranslated = true,
+    final bool prune = false,
   }) async {
     Future<OpResult> run(final String? code) => _importArb(
           arbContent,
@@ -689,6 +749,7 @@ class Operations {
           chunkSize: chunkSize,
           fileName: fileName,
           noteUntranslated: noteUntranslated,
+          prune: prune,
         );
     if (languageCode != null) return run(languageCode);
 
@@ -807,6 +868,7 @@ class Operations {
     final bool dryRun = false,
     final int chunkSize = _defaultChunkSize,
     final String? fileName,
+    final bool prune = false,
   }) async {
     int keyCount;
     bool catalog;
@@ -900,6 +962,7 @@ class Operations {
         // against a deployment that predates it.
         autoTranslate: translate,
         translateAsync: translate,
+        prune: prune,
         fileName: fileName);
 
     final ({String phrase, String hint, Map<String, dynamic> data}) outcome =
@@ -1342,6 +1405,7 @@ class Operations {
           in (summary['problems'] as List?) ?? const <Object?>[])
         '$p',
     ];
+    final Object? pruned = summary['pruned'];
     final Map<String, dynamic> data = <String, dynamic>{
       'written': written,
       'skipped': skipped,
@@ -1349,6 +1413,14 @@ class Operations {
       if (skippedKeys.isNotEmpty) 'skipped_keys': skippedKeys,
       if (locales.isNotEmpty) 'locales': locales,
       if (problems.isNotEmpty) 'problems': problems,
+      if (pruned is List)
+        'pruned': <String>[for (final Object? k in pruned) '$k'],
+      if (pruned is List)
+        'unshipped': <String>[
+          for (final Object? k
+              in (summary['unshipped'] as List?) ?? const <Object?>[])
+            '$k',
+        ],
     };
     final List<String> parts = <String>[
       '$written written',
@@ -2637,10 +2709,25 @@ extension Shorten on Operations {
           in after?.translations ?? const <TranslationEntry>[])
         if (selected.contains(t.key) && t.overLimit.contains(chosen)) t.key,
     ];
+    // The service leaves a named key alone when its text already fits.
+    final Object? results = answer['results'];
+    final int fitted = results is Map<String, dynamic>
+        ? ((results['skipped'] as List?) ?? const <Object?>[])
+            .where((final Object? s) =>
+                s is Map && '${s['reason']}'.endsWith(' text fits'))
+            .length
+        : 0;
+    final int written = results is Map<String, dynamic>
+        ? ((results['successful'] as List?) ?? const <Object?>[]).length
+        : selected.length - still.length;
     return OpResult(
       still.isEmpty,
-      'Shortened ${selected.length - still.length}/${selected.length} key(s) '
-      'for $chosen${still.isEmpty ? '' : '; still over the limit: ${still.join(', ')}'}.',
+      results is Map<String, dynamic>
+          ? 'Shortened $written $chosen text(s)'
+              '${fitted > 0 ? '; $fitted already fit and were left as they are' : ''}'
+              '${still.isEmpty ? '' : '; still over the limit: ${still.join(', ')}'}.'
+          : 'Shortened ${selected.length - still.length}/${selected.length} key(s) '
+              'for $chosen${still.isEmpty ? '' : '; still over the limit: ${still.join(', ')}'}.',
       <String, dynamic>{
         'target': chosen,
         'keys': selected,

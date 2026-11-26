@@ -50,6 +50,7 @@ class _Service {
 
   final List<Map<String, dynamic>> batches = <Map<String, dynamic>>[];
   final List<Map<String, dynamic>> shortens = <Map<String, dynamic>>[];
+  Map<String, dynamic>? shortenAnswer;
 
   Map<String, dynamic> _row(
     final int id,
@@ -135,7 +136,7 @@ class _Service {
           _ov('flutter', 'Go Pro'),
           _ov('ios', 'Go Pro now'),
         ];
-        body = <String, dynamic>{'shortened': 1};
+        body = shortenAnswer ?? <String, dynamic>{'shortened': 1};
       }
       return http.Response(jsonEncode(body), 200, headers: <String, String>{
         'content-type': 'application/json; charset=utf-8',
@@ -337,6 +338,29 @@ void main() {
         'target': 'ios',
       });
       expect(r.message, contains('Shortened 1/1'));
+    });
+
+    test('a named key whose text fits is not counted as shortened', () async {
+      final _Service s = _Service()
+        ..shortenAnswer = <String, dynamic>{
+          'status': 'success',
+          'target': 'ios',
+          'results': <String, dynamic>{
+            'successful': <dynamic>[],
+            'failed': <dynamic>[],
+            'skipped': <dynamic>[
+              <String, dynamic>{
+                'translation_id': 1,
+                'reason': 'its ios text fits'
+              },
+            ],
+          },
+          'translations': <dynamic>[],
+        };
+      final OpResult r =
+          await s.ops().shorten(target: 'ios', keys: <String>['paywall']);
+      expect(r.message,
+          'Shortened 0 ios text(s); 1 already fit and were left as they are.');
     });
 
     test('several limited targets need --target', () async {

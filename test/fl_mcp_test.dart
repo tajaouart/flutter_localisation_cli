@@ -573,7 +573,7 @@ void main() {
     final Map<String, dynamic> edit = tools.firstWhere(
             (final dynamic t) => t['name'] == 'edit_string')['inputSchema']
         as Map<String, dynamic>;
-    expect(edit['required'], <String>['key', 'locale']);
+    expect(edit['required'], <String>['key']);
   });
 
   test('edit_string with a target writes that text; an empty value removes it',
@@ -622,6 +622,16 @@ void main() {
       <String, dynamic>{'id': 1, 'target': 'ios', 'value': '{arg1} s'},
       <String, dynamic>{'id': 1, 'target': 'ios', 'value': ''},
     ]);
+
+    backend.keyPosts.clear();
+    final Map<String, dynamic> limited =
+        await mcp.call('edit_string', <String, dynamic>{
+      'key': 'running',
+      'max_length': <String, int>{'ios': 12},
+      'apply': true,
+    });
+    expect(limited['ok'], isTrue, reason: limited.toString());
+    expect(backend.keyPosts.single['max_length'], <String, int>{'ios': 12});
   });
 
   test('add_string sends platforms and max_length; shorten previews', () async {

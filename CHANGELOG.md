@@ -28,8 +28,17 @@
 - `fl export`, `fl pull` written from the API, and `fl diff` of a Flutter ARB use the
   `flutter` text of each key and leave out the keys that do not ship to Flutter, so a key's
   own Flutter text is no longer reported as a difference.
+- `fl import --prune` asks the service to prune: it deletes only the keys the file's
+  platform ships, and a key that also ships to another platform only stops shipping to this
+  one. The answer names both. A dry run says the same, and against a service from before
+  1.25 the keys are deleted from here as before.
+- `fl edit <key> --target ios "..."` takes the text as a second argument, like `--value`.
+- The MCP `edit_string` tool no longer requires `locale` (the base language when omitted),
+  so a change of `platforms` or `max_length` alone needs none.
 
 ### Fixed
+- `fl shorten` with keys named counted a key whose text already fit as shortened; it now
+  counts the texts the service wrote and says how many already fit.
 - `fl_mcp` read the service address from `$FL_BASE_URL` only; it now falls back to
   `base_url` in flutterlocalisation.json, as `fl` does.
 

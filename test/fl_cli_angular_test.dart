@@ -264,6 +264,52 @@ void main() {
         contains('Deleted 1 key(s) the file no longer has: home.greeting'));
   });
 
+  test('--prune lets a service that prunes do it and says what it did',
+      () async {
+    backend.serverPrune =
+        (pruned: <String>['home.greeting'], unshipped: <String>['home.shared']);
+    addTearDown(() => backend.serverPrune = null);
+    writeSource(jsonEncode(
+        <String, String>{'@@locale': 'en', 'home.title': 'Hello world'}));
+    final Run r =
+        await fl(<String>['import', 'src/locale/messages.arb', '--prune']);
+    expect(r.code, 0, reason: r.err);
+    expect(backend.imports.single.prune, isTrue);
+    expect(backend.deletedKeys, isEmpty,
+        reason: 'the service knows which keys the platform ships');
+    expect(r.out,
+        contains('Deleted 1 key(s) the file no longer has: home.greeting'));
+    expect(
+        r.out,
+        contains('1 key(s) the file no longer has also ship to other '
+            'platforms and no longer ship to angular: home.shared'));
+  });
+
+  test('a dry-run --prune names a key other platforms ship as losing angular',
+      () async {
+    backend
+      ..platformText = true
+      ..platforms = <String>['angular', 'ios']
+      ..extraKeys = <String>['home.greeting']
+      ..extraKeyPlatforms = <String, List<String>>{
+        'home.greeting': <String>['angular', 'ios'],
+      };
+    addTearDown(() => backend
+      ..platformText = false
+      ..extraKeys = <String>[]
+      ..extraKeyPlatforms = <String, List<String>>{});
+    writeSource(jsonEncode(
+        <String, String>{'@@locale': 'en', 'home.title': 'Hello world'}));
+    final Run r = await fl(
+        <String>['--dry-run', 'import', 'src/locale/messages.arb', '--prune']);
+    expect(r.code, 0, reason: r.err);
+    expect(
+        r.out,
+        contains('1 not in the file also ship to other platforms and would '
+            'no longer ship to angular: home.greeting'));
+    expect(r.out, isNot(contains('would be deleted')));
+  });
+
   test('--prune refuses a translated file', () async {
     inApp('src/locale/messages.fr.arb')
       ..createSync(recursive: true)

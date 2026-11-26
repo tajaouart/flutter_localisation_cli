@@ -966,7 +966,7 @@ class EditCommand extends Command<int> with _ApiCommand {
   String get invocation =>
       'fl edit <key> [--locale <code>] [--value "..."] [--singular-case "..." '
       '--plural-case "..."]\n'
-      '       fl edit <key> --target ios [--locale <code>] (--value "..." | --clear)\n'
+      '       fl edit <key> --target ios [--locale <code>] ("..." | --clear)\n'
       '       fl edit <key> [--platforms ios,angular] [--max-length ios=40]\n'
       'A String Catalog key may be given by its stem: "done_body" finds '
       '"done_body %@ %lld". Placeholders are written {arg1}, {arg2} in the value.';
@@ -984,10 +984,13 @@ class EditCommand extends Command<int> with _ApiCommand {
       String projectName
     }) built = await build(loadProject());
     try {
+      final List<String> rest = argResults!.rest;
       final OpResult r = await built.ops.edit(
         key,
         _locale(argResults!['locale'] as String?),
-        value: argResults!['value'] as String?,
+        // `fl edit <key> "text"`, as `fl edit <key> --value "text"`.
+        value: argResults!['value'] as String? ??
+            (rest.length > 1 ? rest[1] : null),
         isChecked: argResults!['checked'] as bool?,
         isPlaceholdersEnabled: placeholders == null ? null : true,
         placeholders: placeholders,

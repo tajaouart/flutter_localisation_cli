@@ -70,6 +70,7 @@ class ReceivedImport {
   bool get hasLanguage => body.contains('name="selected_language_code"');
   String? get language => _field('selected_language_code');
   bool get autoTranslate => _field('auto_translate') == 'true';
+  bool get prune => _field('prune') == 'true';
 
   String? _field(final String name) =>
       RegExp('name="$name"\\r?\\n\\r?\\n([^\\r\\n]*)')
@@ -172,6 +173,9 @@ class FakeBackend {
   /// More keys of the base language, beside the one every flavor holds.
   List<String> extraKeys = <String>[];
 
+  /// `platforms` of an extra key, by key.
+  Map<String, List<String>> extraKeyPlatforms = <String, List<String>>{};
+
   /// The `Localizable` catalog to serve in place of [kServedCatalog].
   String? servedCatalog;
 
@@ -220,6 +224,10 @@ class FakeBackend {
         };
 
   final List<ReceivedImport> imports = <ReceivedImport>[];
+
+  /// Answer a `prune` import with what the service deleted and took the
+  /// file's platform off; null answers as a service that ignores `prune`.
+  ({List<String> pruned, List<String> unshipped})? serverPrune;
 
   /// Keys deleted through `/translation_keys/delete/`, in order.
   final List<String> deletedKeys = <String>[];
@@ -291,6 +299,9 @@ class FakeBackend {
                         'key': extraKeys[k],
                         'value': extraKeys[k],
                         ..._textFields(null),
+                        if (platformText)
+                          'platforms':
+                              extraKeyPlatforms[extraKeys[k]] ?? <String>[],
                       },
                   ],
                 },
@@ -552,6 +563,10 @@ class FakeBackend {
           'skipped_keys': <String>[],
           'locales': <String>['en'],
           'problems': importProblems,
+          if (received.prune && serverPrune != null) ...<String, dynamic>{
+            'pruned': serverPrune!.pruned,
+            'unshipped': serverPrune!.unshipped,
+          },
         },
       }));
     } else {

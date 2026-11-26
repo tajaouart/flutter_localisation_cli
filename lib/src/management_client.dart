@@ -265,6 +265,7 @@ class ProjectData {
     this.platforms = const <AppPlatform>[AppPlatform.flutter],
     this.xcstringsDir = '',
     this.knowsPlatformText = false,
+    this.keysPerPlatform = false,
   });
 
   final int id;
@@ -282,6 +283,9 @@ class ProjectData {
 
   /// The service answers with platform texts and key platforms.
   final bool knowsPlatformText;
+
+  /// A key imported from one platform's file ships to that platform only.
+  final bool keysPerPlatform;
 
   /// Refuses [what] on a service that would ignore it and write the full
   /// text instead.
@@ -311,6 +315,7 @@ class ProjectData {
       platforms: platformsFromJson(j['platforms']),
       xcstringsDir: (j['xcstrings_dir'] ?? '') as String,
       flavors: flavors,
+      keysPerPlatform: j['keys_per_platform'] == true,
       knowsPlatformText: j.containsKey('keys_per_platform') ||
           flavors.any((final FlavorData f) => f.languages.any(
               (final LanguageData l) => l.translations
@@ -973,6 +978,7 @@ class ManagementClient {
     final bool applyToAllLanguages = true,
     final bool autoTranslate = false,
     final bool translateAsync = false,
+    final bool prune = false,
     final String? fileName,
   }) async {
     final Uri uri = _uri('/api/project/$projectId/import-arb/');
@@ -1006,6 +1012,10 @@ class ManagementClient {
         if (languageCode != null) {
           req.fields['selected_language_code'] = languageCode;
         }
+        // The service deletes only the keys this platform ships and takes
+        // the platform off a key other platforms ship too; one that predates
+        // keys per platform ignores the field and answers without `pruned`.
+        if (prune) req.fields['prune'] = 'true';
         res = await _exchange(req, 'POST $path');
       } on ManagementException {
         rethrow;

@@ -428,7 +428,8 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             'key': <String, dynamic>{'type': 'string'},
             'locale': <String, dynamic>{
               'type': 'string',
-              'description': 'e.g. fr'
+              'description': 'e.g. fr; the base language when omitted, as '
+                  'for a change of platforms or max_length only.'
             },
             'value': <String, dynamic>{'type': 'string'},
             'description': <String, dynamic>{
@@ -475,7 +476,7 @@ List<Map<String, dynamic>> _toolDefinitions() => <Map<String, dynamic>>[
             'apply': <String, dynamic>{'type': 'boolean', 'default': false},
             ..._projectProps,
           },
-          'required': <String>['key', 'locale'],
+          'required': <String>['key'],
         },
       },
       <String, dynamic>{
@@ -1329,7 +1330,7 @@ Future<void> _callTool(
           final String? value = a['value'] as String?;
           r = await ops.edit(
             a['key'] as String,
-            a['locale'] as String,
+            a['locale'] as String?,
             value: target != null && value == '' ? null : value,
             target: target,
             clear: target != null && value == '',

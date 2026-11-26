@@ -85,6 +85,17 @@ void main() {
     });
   });
 
+  test('edit --target takes the text as a second argument', () async {
+    final Run r =
+        await fl(<String>['edit', 'running', '--target', 'ios', '{arg1} s']);
+    expect(r.code, 0, reason: r.err);
+    expect(backend.updates.single, <String, dynamic>{
+      'id': 1,
+      'target': 'ios',
+      'value': '{arg1} s',
+    });
+  });
+
   test('edit --target --clear sends an empty value for that target', () async {
     backend.overrides = <String, List<Map<String, dynamic>>>{
       'en': <Map<String, dynamic>>[
