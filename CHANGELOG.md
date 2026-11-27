@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.26.2] - 2026-11-27
+### Fixed
+- `fl import --dry-run` no longer asks for `--overwrite` for a target that still holds the
+  source text and that nobody checked: it says the import replaces it, as the server does.
+- One `fl` command reads the project once instead of up to three times.
+
 ## [1.26.1] - 2026-11-26
 ### Changed
 - Device targets take the names Xcode writes (`ios/iphone`, `ios/ipad`, `ios/ipod`,

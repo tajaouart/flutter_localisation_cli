@@ -276,8 +276,8 @@ mixin _ApiCommand on Command<int> {
       tokenFile: cfg.tokenFile,
     );
     _tokenSource = creds.source;
-    final ManagementClient client =
-        ManagementClient(baseUrl: cfg.baseUrl, token: creds.token);
+    final ManagementClient client = ManagementClient(
+        baseUrl: cfg.baseUrl, token: creds.token, reuseProjectReads: true);
     narrowToRepo(client, cfg, stderr.writeln);
     return client;
   }

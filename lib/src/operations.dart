@@ -644,9 +644,12 @@ class Operations {
     if (dryRun) {
       final ({List<String> delete, List<String> unship}) gone =
           prune ? await _prunePlan(d) : (delete: d.gone, unship: <String>[]);
-      final int changed = d.changed.length;
+      final int replaced = overwrite ? 0 : d.standIns.length;
+      final int changed = d.changed.length - replaced;
       final String lines = <String>[
         '  ${d.added.length} new key(s) would be added.',
+        if (replaced > 0)
+          '  $replaced still hold the source text and would get the file\'s text.',
         if (changed > 0)
           overwrite
               ? '  $changed would be overwritten with the file\'s text.'

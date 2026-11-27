@@ -24,6 +24,7 @@ class FileDiff {
     required this.changed,
     required this.same,
     required this.gone,
+    this.standIns = const <String>[],
   });
 
   final String language;
@@ -44,6 +45,10 @@ class FileDiff {
   /// On the service, not in the file.
   final List<String> gone;
 
+  /// Keys of [changed] whose service row is an unchecked copy of the source
+  /// text: the import replaces it without --overwrite.
+  final List<String> standIns;
+
   bool get isEmpty => added.isEmpty && changed.isEmpty && gone.isEmpty;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -61,6 +66,7 @@ class FileDiff {
         },
         'same': same,
         'gone': gone,
+        'stand_ins': standIns,
       };
 }
 
@@ -215,7 +221,7 @@ extension FileCompare on Operations {
         for (final TranslationEntry t in l.translations)
           if (!t.shipsTo(AppPlatform.flutter)) t.key,
     };
-    return compareMessages(
+    final FileDiff d = compareMessages(
       arbMessages(parsed),
       <String, String>{
         for (final TranslationEntry t in lang.translations)
@@ -225,6 +231,34 @@ extension FileCompare on Operations {
       language: code,
       isBase: code == base,
       format: 'arb',
+    );
+    if (d.isBase || d.changed.isEmpty) return d;
+    final Map<String, String> source = <String, String>{
+      for (final TranslationEntry t
+          in project.baseLanguage(flavor)?.translations ?? <TranslationEntry>[])
+        t.key: t.value,
+    };
+    final Map<String, TranslationEntry> rows = <String, TranslationEntry>{
+      for (final TranslationEntry t in lang.translations) t.key: t,
+    };
+    // The service's rule (process_arb_data): the row is not checked and holds
+    // the source text, so the import replaces it.
+    return FileDiff(
+      language: d.language,
+      isBase: d.isBase,
+      format: d.format,
+      added: d.added,
+      changed: d.changed,
+      same: d.same,
+      gone: d.gone,
+      standIns: <String>[
+        for (final MapEntry<String, ({String local, String remote})> e
+            in d.changed.entries)
+          if (rows[e.key]?.isChecked == false &&
+              e.value.remote.trim().isNotEmpty &&
+              e.value.remote.trim() == source[e.key]?.trim())
+            e.key,
+      ],
     );
   }
 }

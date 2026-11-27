@@ -617,6 +617,7 @@ class ManagementClient {
     this.maxRetries = 3,
     this.clientName = 'fl',
     final Duration? requestTimeout,
+    this.reuseProjectReads = false,
   })  : _http = httpClient ?? _defaultHttpClient(),
         requestTimeout = requestTimeout ?? _timeoutFromEnvironment();
 
@@ -676,6 +677,7 @@ class ManagementClient {
     final String label,
   ) async {
     req.headers.addAll(_identity);
+    if (req.method != 'GET') _lastProject = null;
     try {
       final http.Response res = await _http
           .send(req)
@@ -715,9 +717,28 @@ class ManagementClient {
         .toList();
   }
 
+  /// One command reads the project several times (resolve, diff, import),
+  /// and on a large project each read is tens of kilobytes. With this on, a
+  /// read is reused for a few seconds and forgotten on any write. Off for a
+  /// long-lived client (the MCP server): its next call must see the service
+  /// as it is now.
+  final bool reuseProjectReads;
+  static const Duration projectReuse = Duration(seconds: 5);
+  ({int id, DateTime at, http.Response res})? _lastProject;
+
   /// GET the full project (structure + translation ids).
   Future<ProjectData> getProject(final int projectId) async {
-    final http.Response res = await _send('GET', '/api/projects/$projectId/');
+    final ({int id, DateTime at, http.Response res})? last = _lastProject;
+    final http.Response res;
+    if (reuseProjectReads &&
+        last != null &&
+        last.id == projectId &&
+        DateTime.now().difference(last.at) < projectReuse) {
+      res = last.res;
+    } else {
+      res = await _send('GET', '/api/projects/$projectId/');
+      _lastProject = (id: projectId, at: DateTime.now(), res: res);
+    }
     final ProjectData project = ProjectData.fromJson(_json(res));
     final narrow = repoPlatforms;
     if (narrow != null) {

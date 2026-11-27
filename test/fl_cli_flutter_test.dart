@@ -734,6 +734,68 @@ void main() {
       expect(r.out, contains('fl languages add it'));
       expect(r.out, contains('--language de'));
     });
+
+    group('a target still holding the source text', () {
+      setUp(() {
+        writeConfig(<String, Object>{'project_id': 7, 'arb_dir': 'lib/l10n'});
+        arb('app_en.arb', <String, String>{
+          '@@locale': 'en',
+          'running %lld': '{arg1} s left',
+        });
+        addTearDown(() => backend.targets = <String, Map<String, dynamic>>{});
+      });
+
+      test('the dry run says the import replaces it, without --overwrite',
+          () async {
+        backend.targets = <String, Map<String, dynamic>>{
+          'en': <String, dynamic>{
+            'value': 'Cleaning… {arg1} s left',
+            'is_checked': false,
+          },
+        };
+        final Run r = await fl(
+            <String>['import', 'lib/l10n/app_en.arb', '--dry-run', '--json']);
+        expect(r.code, 0, reason: r.err);
+        expect(
+            r.out,
+            contains(
+                "1 still hold the source text and would get the file's text"));
+        expect(r.out, isNot(contains('--overwrite replaces it')));
+        expect((r.json['diff'] as Map<String, dynamic>)['stand_ins'],
+            <String>['running %lld']);
+      });
+
+      test('a checked copy is a deliberate match the import keeps', () async {
+        backend.targets = <String, Map<String, dynamic>>{
+          'en': <String, dynamic>{
+            'value': 'Cleaning… {arg1} s left',
+            'is_checked': true,
+          },
+        };
+        final Run r =
+            await fl(<String>['import', 'lib/l10n/app_en.arb', '--dry-run']);
+        expect(r.code, 0, reason: r.err);
+        expect(
+            r.out,
+            contains(
+                "1 differ and would keep the service's text (--overwrite replaces it)"));
+        expect(r.out, isNot(contains('still hold the source text')));
+      });
+    });
+
+    test('one import reads the project once', () async {
+      writeConfig(<String, Object>{'project': 'Gush', 'arb_dir': 'lib/l10n'});
+      backend.requests.clear();
+      final Run r =
+          await fl(<String>['import', 'lib/l10n/app_en.arb', '--dry-run']);
+      expect(r.code, 0, reason: r.err);
+      expect(
+          backend.requests
+              .where((final String q) => q == 'GET /api/projects/7/')
+              .length,
+          1,
+          reason: backend.requests.join('\n'));
+    });
   });
 
   test("arb_dir inside the app's own repo is written from the API", () async {
