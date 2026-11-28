@@ -230,10 +230,10 @@ void main() {
     haveFrench();
     final Run r = await fl(<String>['retranslate']);
     expect(r.code, 0, reason: r.err);
-    expect(
-        r.out,
-        contains('  fr  running %lld: "Cleaning… {arg1} s left" -> '
-            '"Translated (fr)"'));
+    // The source holds an ellipsis, which a Windows console does not print
+    // as UTF-8.
+    expect(r.out, contains('  fr  running %lld: "Cleaning'));
+    expect(r.out, contains(' s left" -> "Translated (fr)"'));
     final Run json =
         await fl(<String>['retranslate', '--locale', 'de', '--json']);
     expect(json.json['written'], <dynamic>[
