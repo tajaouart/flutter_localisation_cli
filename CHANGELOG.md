@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.27.0] - 2026-11-28
+### Added
+- **`locales` in `flutterlocalisation.json`**: the languages a repository ships, when the
+  project's apps do not ship the same ones. `fl pull`, `fl export`, `fl status` and a
+  `fl retranslate` with no `--locale` keep to them. Without it, a repository of a project
+  with several platforms that already has translated files keeps to the languages it has a
+  file for and says which it left out: a website in French no longer gets seven files of
+  untranslated text because the iPhone app of the same project ships nine languages, and no
+  longer pays to translate them. `fl languages add` lists the new language there, and
+  `fl languages list` marks the ones the repository does not ship.
+- `fl retranslate` prints each value it wrote beside its source (`written` in `--json`), so
+  a run can be read without exporting the files.
+### Changed
+- `fl import --prune` names every key it deleted instead of the first ten, and says which
+  keys the service kept because they were added in the last 24 hours: a checkout that has
+  not received another one's new keys yet no longer deletes them.
+### Fixed
+- `fl edit` takes a placeholder written the way Angular's files write it, `{$INTERPOLATION}`:
+  a value copied out of `messages.fr.arb` was refused for not keeping `{INTERPOLATION}`.
+
 ## [1.26.2] - 2026-11-27
 ### Fixed
 - `fl import --dry-run` no longer asks for `--overwrite` for a target that still holds the

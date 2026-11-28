@@ -253,7 +253,8 @@ void main() {
     expect(
         r.out,
         contains(
-            '1 on the service are not in the file and would be deleted: home.greeting'));
+            '1 on the service are not in the file and would be deleted, but '
+            'for any added in the last 24 hours: home.greeting'));
     expect(backend.deletedKeys, isEmpty);
 
     r = await fl(<String>['import', 'src/locale/messages.arb', '--prune']);

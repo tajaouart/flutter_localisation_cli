@@ -16,6 +16,7 @@ import 'package:flutter_localisation_cli/src/config.dart';
 import 'package:flutter_localisation_cli/src/management_client.dart';
 import 'package:flutter_localisation_cli/src/ngx.dart';
 import 'package:flutter_localisation_cli/src/platform.dart';
+import 'package:flutter_localisation_cli/src/repo_locales.dart';
 
 /// Folders skipped while looking for Xcode files: build output and
 /// dependencies carry projects that are not the app's.
@@ -184,6 +185,15 @@ void narrowToRepo(final ManagementClient client, final ProjectConfig cfg,
       if (_told.add(line)) say(line);
     }
     return (platforms: r.platforms, problem: r.problem);
+  };
+  client.repoLocales = (final ProjectData project, final FlavorData flavor) {
+    if (project.repoProblem != null) return null;
+    final RepoLocales r = resolveRepoLocales(cfg, project, flavor);
+    if (r.left.isNotEmpty) {
+      final String line = leftOutNotice(r, project);
+      if (_told.add(line)) say(line);
+    }
+    return r.held;
   };
 }
 

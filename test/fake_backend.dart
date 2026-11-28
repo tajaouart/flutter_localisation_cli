@@ -235,6 +235,9 @@ class FakeBackend {
   /// file's platform off; null answers as a service that ignores `prune`.
   ({List<String> pruned, List<String> unshipped})? serverPrune;
 
+  /// Keys a pruning service says it kept for being under a day old.
+  List<String> keptRecent = <String>[];
+
   /// Keys deleted through `/translation_keys/delete/`, in order.
   final List<String> deletedKeys = <String>[];
   final List<String> requests = <String>[];
@@ -430,6 +433,26 @@ class FakeBackend {
           ],
         }));
       }
+    } else if (req.method == 'POST' && path == '/api/add-language/') {
+      languages = <String>[
+        ...languages,
+        (jsonDecode(await utf8.decoder.bind(req).join())
+            as Map<String, dynamic>)['languageCode'] as String,
+      ];
+      res.write('{}');
+    } else if (req.method == 'POST' && path == '/api/add-languages/') {
+      final List<String> codes =
+          ((jsonDecode(await utf8.decoder.bind(req).join())
+                  as Map<String, dynamic>)['languageCodes'] as List<dynamic>)
+              .cast<String>();
+      languages = <String>[...languages, ...codes];
+      res.write(jsonEncode(<String, dynamic>{
+        'added': codes.length,
+        'results': <Map<String, String>>[
+          for (final String code in codes)
+            <String, String>{'code': code, 'status': 'added'},
+        ],
+      }));
     } else if (path.startsWith('/api/update_translation/')) {
       updates.add(<String, dynamic>{
         'id': int.parse(path.split('/')[3]),
@@ -586,6 +609,7 @@ class FakeBackend {
           if (received.prune && serverPrune != null) ...<String, dynamic>{
             'pruned': serverPrune!.pruned,
             'unshipped': serverPrune!.unshipped,
+            'kept_recent': keptRecent,
           },
         },
       }));

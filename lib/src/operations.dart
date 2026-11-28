@@ -410,6 +410,35 @@ class Operations {
     return (translated: translated, failed: failed, unchanged: unchanged);
   }
 
+  /// What a run wrote, row by row, with the source beside it: a count alone
+  /// cannot be reviewed.
+  Future<List<Map<String, String>>> _written(
+      final List<int> ids, final VerifyOutcome result) async {
+    final ProjectData after = await client.getProject(projectId);
+    final FlavorData fl = after.flavor(flavor);
+    final Map<String, String> baseByKey = <String, String>{
+      for (final LanguageData l in fl.languages)
+        if (l.isBase)
+          for (final TranslationEntry t in l.translations) t.key: t.value,
+    };
+    final Set<int> wanted = ids.toSet()
+      ..removeAll(
+          result.failed.map((final ({int id, String reason}) e) => e.id))
+      ..removeAll(result.unchanged
+          .map((final ({int id, String key, String locale}) e) => e.id));
+    return <Map<String, String>>[
+      for (final LanguageData l in fl.languages)
+        for (final TranslationEntry t in l.translations)
+          if (wanted.contains(t.id))
+            <String, String>{
+              'locale': l.code,
+              'key': t.key,
+              'source': baseByKey[t.key] ?? '',
+              'value': t.value,
+            },
+    ];
+  }
+
   /// Whether a per-row backend error is the "came back the same" class.
   ///
   /// Matched on text because that is all the batch endpoint gives — there is
@@ -657,8 +686,8 @@ class Operations {
         '  ${d.same} already the same.',
         if (gone.delete.isNotEmpty)
           '  ${gone.delete.length} on the service are not in the file'
-              '${prune ? ' and would be deleted' : d.isBase ? ' (--prune deletes them)' : ''}: '
-              '${gone.delete.take(10).join(', ')}${gone.delete.length > 10 ? ' …' : ''}',
+              '${prune ? ' and would be deleted, but for any added in the last 24 hours' : d.isBase ? ' (--prune deletes them)' : ''}: '
+              '${prune ? gone.delete.join(', ') : '${gone.delete.take(10).join(', ')}${gone.delete.length > 10 ? ' …' : ''}'}',
         if (gone.unship.isNotEmpty)
           '  ${gone.unship.length} not in the file also ship to other '
               'platforms and would no longer ship to ${_filePlatform(d)}: '
@@ -673,6 +702,8 @@ class Operations {
     if (serverPruned is List<String>) {
       final List<String> unshipped =
           (r.data['unshipped'] as List<String>?) ?? const <String>[];
+      final List<String> keptRecent =
+          (r.data['kept_recent'] as List<String>?) ?? const <String>[];
       final String platform = _filePlatform(d);
       return OpResult(
         true,
@@ -680,11 +711,16 @@ class Operations {
           r.message,
           if (serverPruned.isNotEmpty)
             'Deleted ${serverPruned.length} key(s) the file no longer has: '
-                '${serverPruned.take(10).join(', ')}${serverPruned.length > 10 ? ' …' : ''}',
+                '${serverPruned.join(', ')}',
           if (unshipped.isNotEmpty)
             '${unshipped.length} key(s) the file no longer has also ship to '
                 'other platforms and no longer ship to $platform: '
-                '${unshipped.take(10).join(', ')}${unshipped.length > 10 ? ' …' : ''}',
+                '${unshipped.join(', ')}',
+          if (keptRecent.isNotEmpty)
+            'Kept ${keptRecent.length} key(s) the file does not have, added '
+                'in the last 24 hours (another checkout may not have '
+                'committed them yet): ${keptRecent.join(', ')}. A later '
+                '--prune deletes them; `fl delete <key>` does it now.',
         ].join('\n'),
         r.data,
       );
@@ -697,7 +733,7 @@ class Operations {
     return OpResult(
       true,
       '${r.message}\nDeleted ${d.gone.length} key(s) the file no longer has: '
-      '${d.gone.take(10).join(', ')}${d.gone.length > 10 ? ' …' : ''}',
+      '${d.gone.join(', ')}',
       <String, dynamic>{...r.data, 'pruned': d.gone},
     );
   }
@@ -1424,6 +1460,12 @@ class Operations {
               in (summary['unshipped'] as List?) ?? const <Object?>[])
             '$k',
         ],
+      if (pruned is List)
+        'kept_recent': <String>[
+          for (final Object? k
+              in (summary['kept_recent'] as List?) ?? const <Object?>[])
+            '$k',
+        ],
     };
     final List<String> parts = <String>[
       '$written written',
@@ -1467,7 +1509,7 @@ class Operations {
   Future<OpResult> edit(
     final String key,
     final String? locale, {
-    final String? value,
+    String? value,
     final bool? isPluralEnabled,
     final String? zeroCase,
     final String? singularCase,
@@ -1545,6 +1587,14 @@ class Operations {
         .languages
         .expand((final LanguageData l) => l.translations)
         .firstWhere((final TranslationEntry t) => t.id == id);
+    if (value != null && base != null) {
+      // Angular's files write a placeholder {$NAME}; a value copied out of
+      // one names the same placeholder.
+      value = value.replaceAllMapped(
+          RegExp(r'\{\$([A-Za-z_][A-Za-z0-9_]*)\}'),
+          (final Match m) =>
+              base.placeholders.containsKey(m[1]) ? '{${m[1]}}' : m[0]!);
+    }
     if (target != null || (keySettings && value == null && !otherFields)) {
       return _editPlatformText(
         project,
@@ -1972,7 +2022,9 @@ class Operations {
     }
     final bool named = locales != null && locales.isNotEmpty;
     final List<int> ids = <int>[
-      for (final LanguageData l in project.flavor(flavor).languages)
+      for (final LanguageData l in named
+          ? project.flavor(flavor).languages
+          : project.shipped(project.flavor(flavor)))
         if (!l.isBase && (!named || locales.contains(l.code)))
           for (final TranslationEntry t in l.translations)
             if (t.key == full &&
@@ -2072,7 +2124,9 @@ class Operations {
             if (t.value.trim().isNotEmpty && matches(t.value)) t.key,
     };
     final List<int> ids = <int>[
-      for (final LanguageData l in f.languages)
+      for (final LanguageData l in locales == null || locales.isEmpty
+          ? project.shipped(f)
+          : f.languages)
         if (l.code != baseCode &&
             (locales == null || locales.isEmpty || locales.contains(l.code)))
           for (final TranslationEntry t in l.translations)
@@ -2167,7 +2221,11 @@ class Operations {
     // only when asked for: a corrected typo in the base does not make thirty
     // reviewed translations wrong.
     var outdated = 0;
-    for (final LanguageData l in f.languages) {
+    // A locale named explicitly is worked on wherever it ships; without one,
+    // only the languages this repository ships.
+    for (final LanguageData l in locales != null && locales.isNotEmpty
+        ? f.languages
+        : project.shipped(f)) {
       if (l.code == baseCode) continue;
       if (locales != null && locales.isNotEmpty && !locales.contains(l.code)) {
         continue;
@@ -2249,6 +2307,10 @@ class Operations {
             : await _verifyTarget(ids, target, backendErrors),
         unattributed);
 
+    final List<Map<String, String>> written = target == null
+        ? await _written(ids, result)
+        : const <Map<String, String>>[];
+
     var accepted = 0;
     final List<({int id, String reason})> acceptFailed =
         <({int id, String reason})>[];
@@ -2288,6 +2350,7 @@ class Operations {
         'attempted': ids.length,
         'per_locale': perLocale,
         ...outdatedData,
+        if (target == null) 'written': written,
         'failed': _failedJson(result.failed),
         'unchanged': _unchangedJson(result.unchanged),
         if (acceptUnchanged) 'accepted': accepted,
@@ -2300,6 +2363,9 @@ class Operations {
   Future<OpResult> listLanguages() async {
     final ProjectData project = await client.getProject(projectId);
     final FlavorData f = project.flavor(flavor);
+    final Set<String> here = <String>{
+      for (final LanguageData l in project.shipped(f)) l.code,
+    };
     return OpResult(
       true,
       'Languages on "${project.name}" / flavor "${f.name}".',
@@ -2310,6 +2376,7 @@ class Operations {
             <String, dynamic>{
               'locale': l.code,
               'base': l.isBase,
+              'here': here.contains(l.code),
               'keys': l.translations.length,
               'filled': l.translations
                   .where((final TranslationEntry t) => !t.isEmpty)
@@ -2659,7 +2726,7 @@ class Operations {
     };
     final Set<String> elsewhere = project.keysElsewhere(f);
     final List<Map<String, dynamic>> rows = <Map<String, dynamic>>[];
-    for (final LanguageData raw in f.languages) {
+    for (final LanguageData raw in project.shipped(f)) {
       final LanguageData l = elsewhere.isEmpty
           ? raw
           : LanguageData(
@@ -2889,7 +2956,7 @@ extension ArbExport on Operations {
         t.key.isNotEmpty && !notFlutter.contains(t.key);
 
     final List<Map<String, dynamic>> written = <Map<String, dynamic>>[];
-    for (final LanguageData lang in f.languages) {
+    for (final LanguageData lang in project.shipped(f)) {
       // Underscores, in BOTH the file name and `@@locale`. gen_l10n compares
       // the two and aborts the whole build if they disagree ("the locale
       // specified in @@locale and the arb filename do not match"), so a
@@ -3060,7 +3127,7 @@ extension ArbExport on Operations {
     final LanguageData? base = project.baseLanguage(flavor);
     final List<Map<String, dynamic>> written = <Map<String, dynamic>>[];
     final List<String> codes = <String>[
-      for (final LanguageData l in f.languages)
+      for (final LanguageData l in project.shipped(f))
         if (l.code != base?.code) l.code,
     ];
     // The files follow the developer's messages.arb, so an export adds lines
@@ -3132,7 +3199,7 @@ extension ArbExport on Operations {
     final ProjectData project = fetched ?? await client.getProject(projectId);
     final FlavorData f = project.flavor(flavor);
     final List<Map<String, dynamic>> written = <Map<String, dynamic>>[];
-    for (final LanguageData l in f.languages) {
+    for (final LanguageData l in project.shipped(f)) {
       final String file = '$dir/${ngxFileName(l.code)}';
       final bool nested = isNestedNgxFile(File(file));
       final String body;

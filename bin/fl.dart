@@ -39,6 +39,7 @@ import 'package:flutter_localisation_cli/src/platform.dart';
 import 'package:flutter_localisation_cli/src/native_sync.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:flutter_localisation_cli/src/project_resolver.dart';
+import 'package:flutter_localisation_cli/src/repo_locales.dart';
 import 'package:flutter_localisation_cli/src/repo_platforms.dart';
 import 'package:flutter_localisation_cli/src/repo_url.dart';
 import 'package:flutter_localisation_cli/src/version.dart';
@@ -1334,6 +1335,7 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
           stdout.writeln('  ${e.key}: ${e.value} value(s)');
         }
       }
+      _reportWritten(r);
       _reportUnchanged(r);
       _reportFailures(r);
       _reportAcceptFailures(r);
@@ -1341,6 +1343,29 @@ class RetranslateCommand extends Command<int> with _ApiCommand {
     } finally {
       built.client.close();
     }
+  }
+}
+
+/// Print what was written, each beside its source, so a run can be read
+/// without exporting the files.
+void _reportWritten(final OpResult r) {
+  final List<dynamic> rows =
+      (r.data['written'] as List<dynamic>?) ?? const <dynamic>[];
+  if (rows.isEmpty) return;
+  String short(final Object? text) {
+    final String line = '$text'.replaceAll(RegExp(r'\s+'), ' ');
+    return line.length > 80 ? '${line.substring(0, 79)}…' : line;
+  }
+
+  const int limit = 60;
+  stdout.writeln('');
+  for (final dynamic row in rows.take(limit)) {
+    final Map<String, dynamic> m = row as Map<String, dynamic>;
+    stdout.writeln('  ${m['locale']}  ${m['key']}: "${short(m['source'])}" '
+        '-> "${short(m['value'])}"');
+  }
+  if (rows.length > limit) {
+    stdout.writeln('  … and ${rows.length - limit} more (use --json for all).');
   }
 }
 
@@ -1651,7 +1676,8 @@ class LanguagesListCommand extends Command<int> with _ApiCommand {
         final Map<String, dynamic> m = row as Map<String, dynamic>;
         final String tag = (m['base'] as bool) ? ' (base)' : '';
         stdout.writeln(
-            '  ${m['locale']}$tag: ${m['filled']}/${m['keys']} filled');
+            '  ${m['locale']}$tag: ${m['filled']}/${m['keys']} filled'
+            '${m['here'] == false ? '  (not shipped by this repository)' : ''}');
       }
       return 0;
     } finally {
@@ -1690,17 +1716,47 @@ class LanguagesAddCommand extends Command<int> with _ApiCommand {
       throw UsageException(
           'Missing <code> argument, e.g. `fl languages add id ja ko`.', usage);
     }
+    final ProjectConfig cfg = loadProject();
     final ({
       ManagementClient client,
       Operations ops,
       String projectName
-    }) built = await build(loadProject());
+    }) built = await build(cfg);
     try {
+      // A repository keeping to some of the project's languages takes the
+      // ones added from it.
+      final ProjectData before =
+          await built.client.getProject(built.ops.projectId);
+      final Set<String>? held = before.repoProblem != null
+          ? null
+          : resolveRepoLocales(cfg, before, before.flavor(built.ops.flavor))
+              .held;
       final OpResult r = await built.ops.addLanguages(
         _locales(splitLocaleArgs(rest)),
         autoTranslate: argResults!['auto-translate'] as bool,
         dryRun: dryRun,
       );
+      if (held != null && !dryRun && cfg.root != null) {
+        final List<String> added = <String>[
+          for (final dynamic row
+              in (r.data['results'] as List<dynamic>?) ?? const <dynamic>[])
+            if ((row as Map<String, dynamic>)['ok'] == true &&
+                !held.contains(row['locale']))
+              row['locale'] as String,
+        ];
+        final File file = File(globalResults?['config'] as String? ??
+            path.join(cfg.root!, kProjectConfigName));
+        if (added.isNotEmpty && file.existsSync()) {
+          final Map<String, dynamic> doc =
+              jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+          doc['locales'] = <String>[...held, ...added];
+          file.writeAsStringSync(
+              '${const JsonEncoder.withIndent('  ').convert(doc)}\n');
+          stderr.writeln('Listed ${added.join(', ')} under "locales" in '
+              '${path.basename(file.path)}: this repository ships '
+              '${added.length == 1 ? 'it' : 'them'}.');
+        }
+      }
       if (jsonOut) return emit(r);
       // A real run already printed each locale as it landed.
       if (dryRun) {

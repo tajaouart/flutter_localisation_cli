@@ -21,6 +21,7 @@ import 'package:path/path.dart' as p;
 
 import 'package:flutter_localisation_cli/src/exceptions.dart';
 import 'package:flutter_localisation_cli/src/angular.dart';
+import 'package:flutter_localisation_cli/src/locales.dart';
 import 'package:flutter_localisation_cli/src/ngx.dart';
 import 'package:flutter_localisation_cli/src/platform.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
@@ -43,6 +44,7 @@ class ProjectConfig {
     this.root,
     this.tokenFile,
     this.platforms,
+    this.locales,
   });
 
   /// `platforms`: the platforms of the project this repository holds
@@ -50,6 +52,11 @@ class ProjectConfig {
   /// a website). Commands that read or write files touch only these. Absent,
   /// they are inferred from the repository when the project has several.
   final List<AppPlatform>? platforms;
+
+  /// `locales`: the languages of the project this repository ships, beside
+  /// the base. Null takes every language, or what the files show when the
+  /// project has several platforms.
+  final List<String>? locales;
 
   /// `token_file`: a file holding this project's token, `~` allowed. The
   /// token itself never goes in the config, which is committed.
@@ -242,8 +249,23 @@ class ProjectConfig {
       platforms = platformsFromJson(rawPlatforms);
     }
 
+    List<String>? locales;
+    final Object? rawLocales = json['locales'];
+    if (rawLocales != null) {
+      if (rawLocales is! List ||
+          rawLocales.any((final Object? v) => v is! String || v.isEmpty)) {
+        throw ConfigException(
+            '${file.path}: "locales" must list the languages this repository '
+            'ships beside the base language, for example ["fr", "de"].');
+      }
+      locales = <String>[
+        for (final Object? v in rawLocales) canonicalizeOrKeep(v as String),
+      ];
+    }
+
     return ProjectConfig(
       platforms: platforms,
+      locales: locales,
       baseUrl: text('base_url')?.trimRight() ?? kDefaultBaseUrl,
       projectId: pid is int ? pid : null,
       project: rawProject is int ? null : text('project'),

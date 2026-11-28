@@ -79,6 +79,24 @@ that pins them. A repository that shows none of them gets no file at all until `
 set. `fl init` on such a project asks (`-y` takes what the repository shows, `--platforms ios`
 answers) and writes `platforms` with the folder settings of those platforms only.
 
+The apps of one project need not ship the same languages: the iPhone app may be in nine, the
+website in two. `locales` names the languages a repository ships beside the base:
+
+```json
+{ "project_id": 138, "platforms": ["angular"], "angular_dir": "src/locale", "locales": ["fr"] }
+```
+
+`fl pull` and `fl export` then write those files only, `fl status` counts them only, and
+`fl retranslate` or `fl translate --all` with no `--locale` translate them only, so the
+website never pays for seven languages it does not ship. A locale named on the command
+(`fl retranslate --locale de`) is worked on wherever it ships. Without `locales`, a project
+with one platform takes every language; with several, a repository that already has
+translated files (`messages.fr.arb`, `fr.json`, `app_fr.arb`) keeps to the languages it has a
+file for and says once which ones it left out and the line that pins them. A repository with
+no translated file yet takes them all. `fl languages add de` run in a repository that keeps
+to some languages lists the new one under `locales`, and `fl languages list` marks the ones
+the repository does not ship.
+
 ## CLI
 
 ```bash

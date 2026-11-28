@@ -308,6 +308,22 @@ class ProjectData {
   /// The platforms whose files this repository holds.
   List<AppPlatform> get localPlatforms => repoPlatforms ?? platforms;
 
+  /// The language codes of a flavor this repository ships, when the client
+  /// was told (see [ManagementClient.repoLocales]); null is all of them.
+  Set<String>? Function(FlavorData flavor)? repoLocales;
+
+  /// The languages of [f] this repository ships, the base always among them.
+  /// Another repository of the project may ship more: an iPhone app in nine
+  /// languages beside a website in two.
+  List<LanguageData> shipped(final FlavorData f) {
+    final Set<String>? held = repoLocales?.call(f);
+    if (held == null) return f.languages;
+    return <LanguageData>[
+      for (final LanguageData l in f.languages)
+        if (l.isBase || held.contains(l.code)) l,
+    ];
+  }
+
   /// Whether this repository holds [platform]'s files. A key's own platforms
   /// are checked against [platforms], the whole project.
   bool ships(final AppPlatform platform) => localPlatforms.contains(platform);
@@ -633,6 +649,9 @@ class ManagementClient {
   ({List<AppPlatform> platforms, String? problem}) Function(
       List<AppPlatform> projectPlatforms)? repoPlatforms;
 
+  /// Narrows every fetched project to the languages this repository ships.
+  Set<String>? Function(ProjectData project, FlavorData flavor)? repoLocales;
+
   /// Sent on every request so the service knows which version runs where and
   /// can answer with the one to update to.
   Map<String, String> get _identity {
@@ -747,6 +766,10 @@ class ManagementClient {
       project
         ..repoPlatforms = r.platforms
         ..repoProblem = r.problem;
+    }
+    final locales = repoLocales;
+    if (locales != null) {
+      project.repoLocales = (final FlavorData f) => locales(project, f);
     }
     return project;
   }
