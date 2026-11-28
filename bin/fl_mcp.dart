@@ -41,6 +41,7 @@ import 'package:flutter_localisation_cli/src/native_sync.dart';
 import 'package:flutter_localisation_cli/src/xcstrings.dart';
 import 'package:flutter_localisation_cli/src/operations.dart';
 import 'package:flutter_localisation_cli/src/project_resolver.dart';
+import 'package:flutter_localisation_cli/src/repo_locales.dart';
 import 'package:flutter_localisation_cli/src/repo_platforms.dart';
 import 'package:flutter_localisation_cli/src/version.dart';
 
@@ -98,6 +99,7 @@ const int _kAddStringLoopLimit = 5;
 int _appliedAddStrings = 0;
 
 late final ManagementClient _client;
+ProjectConfig? _config;
 late final ProjectResolver _resolver;
 
 Future<void> main(final List<String> args) async {
@@ -126,6 +128,7 @@ void _bootstrap() {
   ProjectConfig? cfg;
   try {
     cfg = ProjectConfig.load();
+    _config = cfg;
   } on Object {
     cfg = null;
   }
@@ -154,7 +157,10 @@ void _bootstrap() {
     clientName: 'fl_mcp',
   );
   narrowToRepo(_client, cfg ?? ProjectConfig(baseUrl: baseUrl),
-      (final String line) => stderr.writeln('fl_mcp: $line'));
+      (final String line) {
+    stderr.writeln('fl_mcp: $line');
+    _repoNotices.add(line);
+  });
   _resolver = ProjectResolver(
     _client,
     // Accept either FL_PROJECT (name or id) or the legacy FL_PROJECT_ID.
@@ -1408,11 +1414,29 @@ Future<void> _callTool(
           throw ArgumentError('add_language needs `codes` (an array of locale '
               'codes). Pass every locale you want in one call.');
         }
-        r = await ops.addLanguages(
+        final ProjectConfig? cfg = _config;
+        final ProjectData before = await _client.getProject(target.projectId);
+        final Set<String>? held = cfg == null || before.repoProblem != null
+            ? null
+            : resolveRepoLocales(cfg, before, before.flavor(target.flavor))
+                .held;
+        final OpResult added = await ops.addLanguages(
           codes,
           autoTranslate: (a['auto_translate'] ?? false) as bool,
           dryRun: !apply,
         );
+        final List<String> pinned = apply && cfg != null
+            ? pinAddedLocales(
+                cfg, held, added.data['results'] as List<dynamic>?)
+            : const <String>[];
+        r = pinned.isEmpty
+            ? added
+            : OpResult(
+                added.ok,
+                '${added.message} Listed ${pinned.join(', ')} under "locales" '
+                'in $kProjectConfigName: this repository ships '
+                '${pinned.length == 1 ? 'it' : 'them'}.',
+                <String, dynamic>{...added.data, 'locales_pinned': pinned});
       case 'retranslate':
         r = await ops.retranslate(
           locales: (a['locales'] as List<dynamic>?)?.cast<String>(),
@@ -1621,6 +1645,10 @@ Future<void> _callTool(
 /// Whether this session has already been told about a newer version.
 bool _updateAnnounced = false;
 
+/// What was settled about this repository (its platforms, its languages)
+/// and not yet said in a result: stderr is not something the agent reads.
+final List<String> _repoNotices = <String>[];
+
 void _toolResult(
   final Object? id,
   final Map<String, dynamic> data, {
@@ -1633,12 +1661,16 @@ void _toolResult(
       !_updateAnnounced &&
       !Platform.environment.containsKey(kNoUpdateNoticeEnvVar);
   if (announce) _updateAnnounced = true;
+  final List<String> repoNotices = _repoNotices.toList();
+  _repoNotices.clear();
   _reply(id, <String, dynamic>{
     'content': <Map<String, dynamic>>[
       <String, dynamic>{
         'type': 'text',
         'text': const JsonEncoder.withIndent('  ').convert(<String, dynamic>{
           ...data,
+          if (repoNotices.isNotEmpty)
+            'repository_notice': repoNotices.join('\n'),
           if (announce)
             'update_notice': '${notice.describe('fl_mcp')}\n'
                 'Tell the user; this tool call was not affected.',

@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'fake_backend.dart';
+import 'fl_mcp_test.dart' show McpProcess;
 
 class Run {
   Run(this.code, this.out, this.err);
@@ -287,5 +288,77 @@ void main() {
         contains('Kept 1 key(s) the file does not have, added in the last 24 '
             'hours (another checkout may not have committed them yet): '
             'new.fromAnotherCheckout.'));
+  });
+
+  group('the MCP server', () {
+    late McpProcess mcp;
+
+    Future<Map<String, dynamic>> call(
+        final String tool, final Map<String, dynamic> args) async {
+      final Map<String, dynamic> data = await mcp.call(tool, args);
+      return (data['data'] ?? data) as Map<String, dynamic>;
+    }
+
+    setUp(() async {
+      haveFrench();
+      mcp = await McpProcess.start(
+          baseUrl: backend.url, workingDirectory: web.path);
+    });
+    tearDown(() => mcp.stop());
+
+    test('pull_arbs writes the languages the repository ships', () async {
+      final Map<String, dynamic> first =
+          await mcp.call('pull_arbs', <String, dynamic>{'apply': true});
+      expect(arbs(), <String>['messages.fr.arb']);
+      expect(first['repository_notice'],
+          contains('de, ja have no file here and are left to iOS'));
+      final Map<String, dynamic> second =
+          await mcp.call('list_status', <String, dynamic>{});
+      expect(second.containsKey('repository_notice'), isFalse);
+    });
+
+    test(
+        'list_status and retranslate keep to them, and retranslate says '
+        'what it wrote', () async {
+      final Map<String, dynamic> status =
+          await call('list_status', <String, dynamic>{});
+      expect(
+          <String>[
+            for (final dynamic l in status['locales'] as List<dynamic>)
+              (l as Map<String, dynamic>)['locale'] as String,
+          ]..sort(),
+          <String>['en', 'fr']);
+
+      final Map<String, dynamic> done =
+          await call('retranslate', <String, dynamic>{'apply': true});
+      expect(done['per_locale'], <String, dynamic>{'fr': 1});
+      final Map<String, dynamic> row =
+          (done['written'] as List<dynamic>).single as Map<String, dynamic>;
+      expect(row['locale'], 'fr');
+      expect(row['value'], 'Translated (fr)');
+    });
+
+    test('add_language lists the new language in the config', () async {
+      final Map<String, dynamic> added =
+          await call('add_language', <String, dynamic>{
+        'codes': <String>['es'],
+        'apply': true
+      });
+      expect(added['locales_pinned'], <String>['es']);
+      final Map<String, dynamic> cfg =
+          jsonDecode(at('flutterlocalisation.json').readAsStringSync())
+              as Map<String, dynamic>;
+      expect(cfg['locales'], <String>['fr', 'es']);
+    });
+
+    test(r'edit_string takes {$NAME}', () async {
+      await call('edit_string', <String, dynamic>{
+        'key': 'running %lld',
+        'locale': 'fr',
+        'value': r'Nettoyage, {$arg1} s',
+        'apply': true,
+      });
+      expect(backend.updates.single['value'], 'Nettoyage, {arg1} s');
+    });
   });
 }

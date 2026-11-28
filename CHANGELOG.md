@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.27.1] - 2026-11-28
+### Fixed
+- The MCP tool `add_language`, run in a repository that keeps to some of the project's
+  languages, lists the new language under `locales` as `fl languages add` does. In 1.27.0 only
+  the command did, so a language added through the MCP server got no file on the next pull.
+- The MCP server says in a tool's result, once, which platforms and languages it took this
+  repository to hold (`repository_notice`). It only wrote that to stderr, which an agent
+  does not read.
+
 ## [1.27.0] - 2026-11-28
 ### Added
 - **`locales` in `flutterlocalisation.json`**: the languages a repository ships, when the

@@ -1736,24 +1736,13 @@ class LanguagesAddCommand extends Command<int> with _ApiCommand {
         autoTranslate: argResults!['auto-translate'] as bool,
         dryRun: dryRun,
       );
-      if (held != null && !dryRun && cfg.root != null) {
-        final List<String> added = <String>[
-          for (final dynamic row
-              in (r.data['results'] as List<dynamic>?) ?? const <dynamic>[])
-            if ((row as Map<String, dynamic>)['ok'] == true &&
-                !held.contains(row['locale']))
-              row['locale'] as String,
-        ];
-        final File file = File(globalResults?['config'] as String? ??
-            path.join(cfg.root!, kProjectConfigName));
-        if (added.isNotEmpty && file.existsSync()) {
-          final Map<String, dynamic> doc =
-              jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
-          doc['locales'] = <String>[...held, ...added];
-          file.writeAsStringSync(
-              '${const JsonEncoder.withIndent('  ').convert(doc)}\n');
+      if (!dryRun) {
+        final List<String> added = pinAddedLocales(
+            cfg, held, r.data['results'] as List<dynamic>?,
+            configPath: globalResults?['config'] as String?);
+        if (added.isNotEmpty) {
           stderr.writeln('Listed ${added.join(', ')} under "locales" in '
-              '${path.basename(file.path)}: this repository ships '
+              '$kProjectConfigName: this repository ships '
               '${added.length == 1 ? 'it' : 'them'}.');
         }
       }

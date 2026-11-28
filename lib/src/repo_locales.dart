@@ -8,6 +8,7 @@
 /// retranslation never pays for them.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -114,4 +115,31 @@ String leftOutNotice(final RepoLocales r, final ProjectData project,
       '${others.isEmpty ? 'the project\'s other apps' : platformLabels(others, separator: ', ')}. '
       'Pin it with "locales": [${held.map((final String c) => '"$c"').join(', ')}] '
       'in $configName, adding any language this repository should ship too.';
+}
+
+/// Lists the languages a run just added under `locales` of the config at
+/// [configPath] (default: the one [cfg] was read from), when the repository
+/// kept to [held] before: it takes the languages added from it. Returns the
+/// codes it listed.
+List<String> pinAddedLocales(
+  final ProjectConfig cfg,
+  final Set<String>? held,
+  final List<dynamic>? results, {
+  final String? configPath,
+}) {
+  if (held == null || cfg.root == null) return const <String>[];
+  final List<String> added = <String>[
+    for (final dynamic row in results ?? const <dynamic>[])
+      if ((row as Map<String, dynamic>)['ok'] == true &&
+          !held.contains(row['locale']))
+        row['locale'] as String,
+  ];
+  final File file = File(configPath ?? p.join(cfg.root!, kProjectConfigName));
+  if (added.isEmpty || !file.existsSync()) return const <String>[];
+  final Map<String, dynamic> doc =
+      jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+  doc['locales'] = <String>[...held, ...added];
+  file.writeAsStringSync(
+      '${const JsonEncoder.withIndent('  ').convert(doc)}\n');
+  return added;
 }
