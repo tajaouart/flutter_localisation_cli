@@ -99,6 +99,44 @@ void main() {
     expect(read('src/assets/i18n/en.json').containsKey('home.title'), isTrue);
   });
 
+  test('a new language follows the nested base file', () async {
+    inApp('src/assets/i18n/en.json')
+      ..createSync(recursive: true)
+      ..writeAsStringSync('{"home": {"title": "x", "greeting": "y"}}');
+    final Run r = await fl(<String>['pull']);
+    expect(r.code, 0, reason: r.err);
+    expect(read('src/assets/i18n/fr.json'), <String, dynamic>{
+      'home': <String, dynamic>{
+        'title': 'Hello (fr)',
+        'greeting': 'Hi {{name}} (fr)'
+      },
+    });
+  });
+
+  test('what the service refuses stays in the file and never stops the pull',
+      () async {
+    final Map<String, dynamic> mine = <String, dynamic>{
+      r'$schema': './schema.json',
+      'home.title': 'old',
+      'path': 'Signed in as {{ user.name }}',
+      'days': <String>['Mon', 'Tue'],
+      'brace': 'Use {curly}',
+    };
+    final File en = inApp('src/assets/i18n/en.json')
+      ..createSync(recursive: true)
+      ..writeAsStringSync(jsonEncode(mine));
+    final Run r = await fl(<String>['pull']);
+    expect(r.code, 0, reason: r.err + r.out);
+    expect(backend.imports, isEmpty);
+    expect(read('src/assets/i18n/en.json'), <String, dynamic>{
+      ...mine,
+      'home.title': 'Hello (en)',
+      'home.greeting': 'Hi {{name}} (en)',
+    });
+    expect(en.readAsStringSync(), startsWith('{\n  "\$schema"'));
+    expect(read('src/assets/i18n/fr.json').containsKey('path'), isFalse);
+  });
+
   test('a key only the base file holds stops the pull; --adopt imports it',
       () async {
     final File en = inApp('src/assets/i18n/en.json')
@@ -121,9 +159,15 @@ void main() {
     expect(backend.imports.single.language, 'en');
     expect(backend.imports.single.fileName, 'en.json');
     expect(backend.imports.single.body, contains('Brand new'));
+    // The fake service did not take it: it is kept, not deleted.
+    expect(read('src/assets/i18n/en.json')['home'],
+        containsPair('new', 'Brand new'));
+    expect(read('src/assets/i18n/en.json')[r'$schema'], './schema.json');
 
-    final Run export = await fl(<String>['export']);
+    final Run export = await fl(<String>['export', '--discard-local']);
     expect(export.code, 0, reason: export.err);
+    expect(read('src/assets/i18n/en.json')['home'],
+        isNot(containsPair('new', 'Brand new')));
   });
 
   test('export refuses to overwrite a local-only key', () async {

@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.27.2] - 2026-11-28
+### Fixed
+- **ngx-translate: `fl pull` no longer deletes what the service cannot hold.** A string the
+  import refuses (`{{ user.name }}`, a literal brace), an array or a number, and `$schema`
+  stay in `<locale>.json` exactly as they were. They used to stop the pull as "keys the
+  service does not have yet", and `fl pull --adopt` then rewrote the file without them, so
+  the app showed the key. After `--adopt`, a string the service did not take is kept too.
+- **ngx-translate: a new language file takes the shape of the base file.** Beside a nested
+  `en.json`, `fr.json` was written flat. A file that mixes `"a.b": ".."` with objects keeps
+  each key where it was, instead of nesting them all.
+- A JSON with an array or a number is read as an ngx-translate file, and the import names
+  each value it left out. It was sent as an ARB and failed with a database error.
+- `fl import` says "Imported 19 of 22 key(s)" when the service left some out, not
+  "Imported 22".
+- Angular: `fl pull` no longer asks, on every run, to import a message whose id is Angular's
+  hash (the plural inside a sentence), which the service never takes.
+- `ng add @flutterlocalisation/angular` adds `@angular/localize` to `devDependencies`, where
+  Angular's own `ng add` puts it, and keeps the comments of `tsconfig.app.json`.
+
 ## [1.27.1] - 2026-11-28
 ### Fixed
 - The MCP tool `add_language`, run in a repository that keeps to some of the project's

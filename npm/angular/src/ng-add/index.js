@@ -20,7 +20,7 @@ function writeJson(tree, file, value) {
   if (tree.read(file).toString('utf8') !== text) tree.overwrite(file, text);
 }
 
-// tsconfig files are JSON with comments; the comments go, the content stays.
+// tsconfig files are JSON with comments; this reads one.
 function stripJsonComments(text) {
   let out = '';
   let inString = false;
@@ -66,12 +66,34 @@ function addPolyfill(options) {
   return true;
 }
 
+// Added in place, so the comments Angular writes in a tsconfig stay.
 function addTypes(tree, file) {
   if (!file || !tree.exists(file)) return false;
   const config = readJson(tree, file);
   config.compilerOptions = config.compilerOptions || {};
   const types = config.compilerOptions.types || [];
   if (types.includes(LOCALIZE_TYPES)) return false;
+  const text = tree.read(file).toString('utf8');
+  const entry = JSON.stringify(LOCALIZE_TYPES);
+  let edited = text;
+  if (config.compilerOptions.types) {
+    edited = text.replace(/("types"\s*:\s*\[)([^\]]*)\]/, (_, open, body) => {
+      const kept = body.replace(/[\s,]+$/, '');
+      return `${open}${kept}${kept.trim() ? ', ' : ''}${entry}]`;
+    });
+  } else {
+    const more = Object.keys(config.compilerOptions).length ? ',' : '';
+    edited = text.replace(/("compilerOptions"\s*:\s*\{)/, `$1\n    "types": [${entry}]${more}`);
+  }
+  try {
+    const result = JSON.parse(stripJsonComments(edited));
+    if (((result.compilerOptions || {}).types || []).includes(LOCALIZE_TYPES)) {
+      tree.overwrite(file, edited);
+      return true;
+    }
+  } catch (_) {
+    // An unusual layout: written from the parsed content below.
+  }
   config.compilerOptions.types = [...types, LOCALIZE_TYPES];
   writeJson(tree, file, config);
   return true;
@@ -122,7 +144,8 @@ function ngAdd(options) {
     const angular = pkg.dependencies['@angular/core'];
     if (!pkg.dependencies['@angular/localize'] && !pkg.devDependencies['@angular/localize']) {
       if (!angular) throw new SchematicsException('package.json has no @angular/core to match @angular/localize to.');
-      pkg.dependencies['@angular/localize'] = angular;
+      // A build-time package, where Angular's own `ng add` puts it.
+      pkg.devDependencies['@angular/localize'] = angular;
       done.push(`@angular/localize ${angular}`);
     }
     if (!pkg.devDependencies['@flutterlocalisation/cli']) {

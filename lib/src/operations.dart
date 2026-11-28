@@ -1473,9 +1473,13 @@ class Operations {
       if (unchanged > 0) '$unchanged already identical',
       if (locales.isNotEmpty) 'locales: ${locales.join(', ')}',
     ];
+    // The file may hold more than the service took (see `problems`).
+    final int taken = written + skipped + unchanged;
+    final String count =
+        taken > 0 && taken < keyCount ? '$taken of $keyCount' : '$keyCount';
     final String phrase = written == 0 && skipped > 0
         ? 'Nothing written: $skipped of $keyCount key(s) skipped'
-        : 'Imported $keyCount key(s) (${parts.join(', ')})';
+        : 'Imported $count key(s) (${parts.join(', ')})';
     String hint = '';
     if (skipped > 0) {
       final String sample = skippedKeys.take(5).join(', ');
@@ -3189,47 +3193,67 @@ extension ArbExport on Operations {
   }
 
   /// Every language of the flavor, the base included, as ngx-translate's
-  /// `<dir>/<code>.json`. A file already on disk with keys in objects is
-  /// written nested again, so a pull does not reshape the developer's file.
+  /// `<dir>/<code>.json`. A file already on disk keeps its shape, its order
+  /// and what the service cannot hold (see [composeNgx]); a new one takes the
+  /// shape of the base language's file.
   Future<OpResult> exportNgx(
     final String dir, {
     final bool dryRun = false,
     final ProjectData? fetched,
+    final bool keepLocalOnly = false,
   }) async {
     final ProjectData project = fetched ?? await client.getProject(projectId);
     final FlavorData f = project.flavor(flavor);
     final List<Map<String, dynamic>> written = <Map<String, dynamic>>[];
-    for (final LanguageData l in project.shipped(f)) {
-      final String file = '$dir/${ngxFileName(l.code)}';
-      final bool nested = isNestedNgxFile(File(file));
-      final String body;
-      try {
-        body =
-            await client.downloadNgx(projectId, f.id, l.code, nested: nested);
-      } on ApiException catch (e) {
-        if (e.statusCode != 422) rethrow;
-        final List<String> details = <String>[
-          for (final Object? d
-              in (e.body?['details'] as List?) ?? const <Object?>[])
-            '$d',
-        ];
-        return OpResult(
-          false,
-          '${e.message}\n${details.map((final String d) => '  $d').join('\n')}',
-          <String, dynamic>{'details': details},
-        );
+    final List<LanguageData> languages = <LanguageData>[
+      ...project.shipped(f).where((final LanguageData l) => l.isBase),
+      ...project.shipped(f).where((final LanguageData l) => !l.isBase),
+    ];
+    // Read before the loop rewrites it: the other languages follow the shape
+    // the developer gave the base file.
+    final Directory shapes = Directory.systemTemp.createTempSync('fl_ngx');
+    File? shapeOf;
+    for (final LanguageData l in languages.where((final l) => l.isBase)) {
+      final File base = File('$dir/${ngxFileName(l.code)}');
+      if (base.existsSync()) {
+        shapeOf = base.copySync('${shapes.path}/${ngxFileName(l.code)}');
       }
-      final Object? doc = jsonDecode(body);
-      final int keys = doc is Map<String, dynamic> ? flattenNgx(doc).length : 0;
-      written.add(<String, dynamic>{
-        'file': _shown(file),
-        'keys': keys,
-        if (nested) 'layout': 'nested',
-      });
-      if (dryRun) continue;
-      final File out = File(file);
-      out.parent.createSync(recursive: true);
-      out.writeAsStringSync(orderNgxLike(body, out));
+    }
+    try {
+      for (final LanguageData l in languages) {
+        final String file = '$dir/${ngxFileName(l.code)}';
+        final String body;
+        try {
+          body = await client.downloadNgx(projectId, f.id, l.code);
+        } on ApiException catch (e) {
+          if (e.statusCode != 422) rethrow;
+          final List<String> details = <String>[
+            for (final Object? d
+                in (e.body?['details'] as List?) ?? const <Object?>[])
+              '$d',
+          ];
+          return OpResult(
+            false,
+            '${e.message}\n${details.map((final String d) => '  $d').join('\n')}',
+            <String, dynamic>{'details': details},
+          );
+        }
+        final File out = File(file);
+        final String text = composeNgx(body, out,
+            shapeOf: shapeOf, keepLocalOnly: keepLocalOnly);
+        final Map<String, dynamic> doc =
+            jsonDecode(text) as Map<String, dynamic>;
+        written.add(<String, dynamic>{
+          'file': _shown(file),
+          'keys': flattenNgx(doc).length,
+          if (doc.values.any((final Object? v) => v is Map)) 'layout': 'nested',
+        });
+        if (dryRun) continue;
+        out.parent.createSync(recursive: true);
+        out.writeAsStringSync(text);
+      }
+    } finally {
+      shapes.deleteSync(recursive: true);
     }
     return OpResult(
       true,

@@ -50,7 +50,9 @@ test('sets up localize, ARB extraction, the CLI and the scripts', async () => {
   assert.deepEqual(read(tree, 'tsconfig.app.json').compilerOptions.types, ['@angular/localize']);
   assert.deepEqual(read(tree, 'tsconfig.spec.json').compilerOptions.types, ['jasmine', '@angular/localize']);
   const pkg = read(tree, 'package.json');
-  assert.equal(pkg.dependencies['@angular/localize'], '^17.3.0');
+  assert.equal(pkg.devDependencies['@angular/localize'], '^17.3.0');
+  assert.equal(pkg.dependencies['@angular/localize'], undefined);
+  assert.match(tree.readContent('tsconfig.app.json'), /^\/\* To learn more \*\/\n/);
   assert.match(pkg.devDependencies['@flutterlocalisation/cli'], /^\^/);
   assert.equal(pkg.scripts['i18n:pull'], 'fl pull');
   assert.equal(pkg.scripts['i18n:push'], 'ng extract-i18n && fl import src/locale/messages.arb --translate');

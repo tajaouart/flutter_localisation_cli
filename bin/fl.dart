@@ -2160,8 +2160,10 @@ Future<int> _pullArbs(
           problem.split(':').first,
       };
       final List<String> fresh = <String>[
+        // An id that is all digits is Angular's hash of the text: the service
+        // never takes one, whatever the message.
         for (final String k in localOnlyKeys(angularSource, serviceKeys))
-          if (!refused.contains(k)) k,
+          if (!refused.contains(k) && !RegExp(r'^\d+$').hasMatch(k)) k,
       ];
       if (fresh.isNotEmpty && adopt && !cmd.dryRun) {
         say.writeln('Importing ${fresh.length} new string(s) from '
@@ -2268,7 +2270,8 @@ Future<int> _pullArbs(
           }
         }
         if (project.shipsNgx) {
-          final OpResult ngxFiles = await built.ops.exportNgx(ngxDir);
+          final OpResult ngxFiles = await built.ops
+              .exportNgx(ngxDir, keepLocalOnly: ngxOrphans.isNotEmpty && adopt);
           if (!ngxFiles.ok) {
             stderr.writeln(ngxFiles.message);
             return 1;
@@ -2317,6 +2320,8 @@ Future<int> _pullArbs(
       appRoot: cfg.root ?? Directory.current.path,
       targets: targets,
       stale: (staged.isNotEmpty || project.shipsAngular) && adopt,
+      // The import above took what it could; the rest it refused.
+      ngxKeepLocalOnly: ngxOrphans.isNotEmpty && adopt,
     );
     if (cmd.jsonOut) {
       return cmd.emit(
@@ -2394,6 +2399,7 @@ Future<OpResult> _exportFromApi(
   final List<CatalogTarget>? targets,
   final bool dryRun = false,
   final bool stale = false,
+  final bool ngxKeepLocalOnly = false,
 }) async {
   // [project] is what the caller just fetched; asking again downloaded every
   // translation a second time. [stale] says an import ran since.
@@ -2408,8 +2414,8 @@ Future<OpResult> _exportFromApi(
             dryRun: dryRun, fetched: fetched, targets: targets),
         AppPlatform.angular => await ops.exportAngular(angularDir,
             dryRun: dryRun, fetched: fetched, appRoot: appRoot),
-        AppPlatform.ngx =>
-          await ops.exportNgx(ngxDir, dryRun: dryRun, fetched: fetched),
+        AppPlatform.ngx => await ops.exportNgx(ngxDir,
+            dryRun: dryRun, fetched: fetched, keepLocalOnly: ngxKeepLocalOnly),
       },
   ];
   final OpResult? failed = results
