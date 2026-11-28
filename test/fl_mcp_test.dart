@@ -109,7 +109,11 @@ void main() {
   tearDownAll(() async {
     await mcp.stop();
     await backend.close();
-    tmp.deleteSync(recursive: true);
+    try {
+      tmp.deleteSync(recursive: true);
+    } on FileSystemException {
+      // Windows can still hold the folder of a server that just stopped.
+    }
   });
 
   setUp(() {
